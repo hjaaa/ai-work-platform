@@ -1,0 +1,27 @@
+# ========== 开发环境 ==========
+
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/ai_work_platform?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: root
+    password: root
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+ai:
+  orchestrator:
+    claude-cli-path: /usr/local/bin/claude
+    workspace-base-path: /tmp/workspace/projects
+    max-concurrent: 3
+    timeout-minutes: 5
+  deploy:
+    docker-registry: localhost:5000
+    health-check-timeout-seconds: 30
+    health-check-interval-seconds: 3
+    servers:
+      - name: local-docker
+        host: localhost
+        username: root
+        deploy-path: /opt/deploy

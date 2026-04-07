@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- 开发环境：控制台彩色 + DEBUG + 不写文件（快速反馈） -->
+<included>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN_COLOR}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <logger name="com.aiworkplatform" level="DEBUG"/>
+    <logger name="org.springframework" level="INFO"/>
+    <logger name="org.apache.ibatis" level="DEBUG"/>
+    <logger name="com.baomidou" level="INFO"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+</included>

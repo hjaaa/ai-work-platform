@@ -1,21 +1,22 @@
 package com.aiworkplatform.web.config;
 
+import com.aiworkplatform.web.config.logging.WebSocketTraceInterceptor;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
-/**
- * WebSocket + STOMP 配置
- * - /ws: WebSocket 连接端点
- * - /topic: 广播消息（如进度推送）
- * - /queue: 点对点消息（如对话回复）
- * - /app: 客户端发送消息的前缀
- */
 @Configuration
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+
+    private final WebSocketTraceInterceptor webSocketTraceInterceptor;
+
+    public WebSocketConfig(WebSocketTraceInterceptor webSocketTraceInterceptor) {
+        this.webSocketTraceInterceptor = webSocketTraceInterceptor;
+    }
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
@@ -29,5 +30,10 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         registry.addEndpoint("/ws")
                 .setAllowedOriginPatterns("*")
                 .withSockJS();
+    }
+
+    @Override
+    public void configureClientInboundChannel(ChannelRegistration registration) {
+        registration.interceptors(webSocketTraceInterceptor);
     }
 }

@@ -1,0 +1,10 @@
+id: logging-infra
+title: 日志基础设施完善（logback + traceId + 脱敏）
+status: in_progress
+current_phase: done
+
+created: 2026-04-07
+updated: 2026-04-07
+tags:
+  - infrastructure
+  - logging

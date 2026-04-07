@@ -22,6 +22,8 @@
 | 代码审查, Controller, Mapper, 分层 | experience/代码审查模式/common-errors.md | 实施前 | 低 | Controller 禁止直接注入 Mapper；进程执行提取工具类 |
 | 代码审查, 自检, 实施完成 | experience/代码审查模式/self-check.md | 实施前 | 低 | 实施完成后自检：重复逻辑/死代码/递归限制/重复查询 |
 | highlight.js, WebSocket, 前端单例 | experience/代码审查模式/common-errors.md | 实施前 | 低 | 前端库初始化提取单例；WebSocket 切换时先断开旧连接 |
+| 日志, logback, traceId, 脱敏, 多环境, profile | experience/日志基础设施/common-errors.md | 实施前 | 低 | 新项目 Phase 1 就要配 logback + traceId + 脱敏 + 多环境拆分 |
+| 日志, Spring Boot, 初始化, 配置, application.yml | experience/日志基础设施/self-check.md | 实施前 | 低 | 日志自检：logback/traceId/脱敏/文件输出/ERROR独立/多环境拆分/密码占位 |
 
 <!-- 
 示例条目：
