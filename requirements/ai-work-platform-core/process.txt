@@ -1,0 +1,73 @@
+# AI Work Platform - 进度追踪
+
+## Current State
+- status: in_progress
+- phase: implementation（Phase 1-5 + 端到端联调 全部完成）
+
+## What Worked
+- 2026-04-07: 完成需求对齐，明确了技术选型和功能范围
+- 2026-04-07: 完成方案设计，确定多模块架构 + Claude Code CLI 编排方案
+- 2026-04-07: 新增 PRD 生成功能，放在 document/ 模块下与文档解析对称，Phase 3 统一实施
+
+## What Did NOT Work
+（暂无）
+
+## Phase 1 进展
+- [x] 1.1 Maven 多模块项目 (JDK21 + Spring Boot 3.5.13 + MyBatis-Plus 3.5.15)
+- [x] 1.2 数据库建表 SQL + Entity/Mapper/枚举
+- [x] 1.3 WebSocket STOMP 通道
+- [x] 1.4 Claude Code Orchestrator (ProcessBuilder + 流式输出 + 并发限制 + 超时) + 单元测试
+- [x] 1.5 Chat UI (Vue 3 + Element Plus + WebSocket 对话工作台)
+- [ ] 1.6 端到端联调
+
+## Phase 2 进展
+- [x] 2.1 TestRunnerService（mvn test / npm test 执行 + Surefire 报告解析）+ 4 个测试
+- [x] 2.2 AutoFixService（失败→修复→重测，最多 3 轮）+ 3 个测试
+- [x] 2.3 CodePreview 组件（文件树 + highlight.js 语法高亮，支持 Java/JS/Vue/XML/SQL/YAML/JSON）
+- [x] 2.4 TestReport 组件 + 项目详情页（生成历史 + 部署历史）+ Generation/Deployment API
+
+## Phase 3 进展
+- [x] 3.1 PRD prompt 模板（初始生成/追问细化/最终确认 三套模板）
+- [x] 3.2 PrdGenerateService（调用 Orchestrator + 解析 [PRD]/[QUESTIONS] 标记 + 异步生成）+ 4 个测试
+- [x] 3.3 PrdExportService（Apache POI 渲染 Markdown→Word，A4 排版）+ 2 个测试
+- [x] 3.4 PrdController（生成/细化/确认/导出 四个端点）
+- [x] 3.5 前端 ModeSelector（直接开发/生成PRD/上传PRD）+ PrdPreview（Markdown 渲染+下载+流转）
+- [x] 3.6 DocParseService（Word 解析 + 在线文档 Jsoup 抓取）+ 3 个测试
+- [x] 3.7 DocController（上传解析 + 链接抓取 端点）
+
+## Phase 4 进展
+- [x] 4.1 DeployConfig（服务器配置 + Docker registry + 健康检查参数）
+- [x] 4.2 DeployService（mvn package → npm build → docker build → docker push → SSH 远程部署）
+- [x] 4.3 HealthCheckService（轮询 /actuator/health + 超时控制）+ 2 个测试
+- [x] 4.4 回滚机制（健康检查失败 → 查找上一成功版本 → SSH 重新部署）
+- [x] 4.5 DeployController（部署触发 + 服务器列表接口）
+- [x] 4.6 DeployPanel 前端组件（服务器选择 + 6 步进度条 + 结果展示 + WebSocket 联动）
+
+## Phase 5 进展
+- [x] 5.1 ContextWindowManager（对话上下文压缩：最近6轮+早期摘要+单条截断+进度过滤）+ 5 个测试
+- [x] 5.2 项目管理增强（删除接口+卡片快捷操作+详情入口）
+- [x] 5.3 AI 回复 Markdown 渲染（markdown-it + highlight.js 代码高亮）+ 进度消息独立样式
+- [x] 5.4 WebSocket 断线重连（心跳+自动重连）+ 文件上传 10MB 限制
+
+## 端到端联调结果
+- [x] MySQL 建库建表成功（4 张表）
+- [x] Spring Boot 启动成功（localhost:8080）
+- [x] 项目创建 API 正常，数据持久化到 MySQL
+- [x] 对话消息持久化 → Orchestrator 调用 → 失败记录写入（Claude CLI 路径需要配置为实际路径）
+- [x] Vue 前端启动成功（localhost:3000）
+- [x] Vite 代理 → 后端 API 代理正常
+
+## Exact Next Step
+- 配置 Claude Code CLI 的实际路径（which claude）
+- 准备脚手架模板仓库
+- 生产环境部署
+
+## Files State
+- meta.yaml: created
+- process.txt: created
+- spec.md: created (Draft)
+- plan.md: created (Draft)
+- notes.md: created
+- 后端: pom.xml + 4 个子模块 + Entity/Mapper/Service/Controller/WebSocket/Config
+- 前端: Vue 3 + Vite + Element Plus + Router + WebSocket 客户端
+- SQL: db/init.sql

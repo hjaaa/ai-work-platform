@@ -1,0 +1,53 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ai-work-platform
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+  datasource:
+    url: jdbc:mysql://localhost:3306/ai_work_platform?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# AI 编排配置
+ai:
+  orchestrator:
+    claude-cli-path: /usr/local/bin/claude
+    workspace-base-path: /tmp/workspace/projects
+    max-concurrent: 3
+    timeout-minutes: 5
+  deploy:
+    docker-registry: localhost:5000
+    health-check-timeout-seconds: 60
+    health-check-interval-seconds: 5
+    servers:
+      - name: test-server
+        host: 10.0.1.5
+        username: root
+        private-key-path: ~/.ssh/id_rsa
+        deploy-path: /opt/deploy
+
+logging:
+  level:
+    com.aiworkplatform: DEBUG

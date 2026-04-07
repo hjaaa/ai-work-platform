@@ -1,0 +1,11 @@
+id: ai-work-platform-core
+title: AI 工作平台 — 产品经理自然语言开发平台
+status: in_progress
+current_phase: implementation
+created: 2026-04-07
+updated: 2026-04-07
+tags:
+  - ai
+  - platform
+  - low-code
+  - claude-code
