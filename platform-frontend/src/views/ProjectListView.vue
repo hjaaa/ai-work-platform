@@ -1,63 +1,160 @@
 <template>
   <div class="project-list-page">
+    <!-- 顶部操作栏：只保留新建项目按钮 -->
     <div class="page-header">
-      <h2>我的项目</h2>
-      <el-button type="primary" @click="showCreateDialog = true">
-        <el-icon><Plus /></el-icon>
+      <button class="btn-create" @click="openCreateDialog">
+        <svg class="btn-create-icon" width="20" height="20" viewBox="0 0 1024 1024">
+          <path d="M115.2 512a396.8 396.8 0 1 1 793.6 0 396.8 396.8 0 0 1-793.6 0zM512 698.88a33.28 33.28 0 0 0 33.28-33.28v-120.32H665.6a33.28 33.28 0 0 0 0-66.56h-120.32V358.4a33.28 33.28 0 0 0-66.56 0v120.32H358.4a33.28 33.28 0 0 0 0 66.56h120.32V665.6c0 18.3808 14.8992 33.28 33.28 33.28z" fill="#fff"/>
+        </svg>
         新建项目
-      </el-button>
+      </button>
     </div>
 
-    <el-row :gutter="16" v-if="projects.length > 0">
-      <el-col :span="8" v-for="project in projects" :key="project.projectId">
-        <el-card class="project-card" shadow="hover">
-          <template #header>
-            <div class="card-header" @click="enterProject(project.projectId)">
-              <span class="project-name">{{ project.name }}</span>
-              <el-tag :type="statusTagType(project.status)" size="small">{{ project.status }}</el-tag>
-            </div>
-          </template>
-          <p class="project-desc" @click="enterProject(project.projectId)">{{ project.description || '暂无描述' }}</p>
-          <div class="project-footer">
-            <span class="project-meta">{{ formatTime(project.updatedAt || project.createdAt) }}</span>
-            <div class="project-actions" @click.stop>
-              <el-button text size="small" @click="enterProject(project.projectId)">
-                <el-icon><ChatDotRound /></el-icon> 对话
-              </el-button>
-              <el-button text size="small" @click="$router.push(`/project/${project.projectId}/detail`)">
-                <el-icon><View /></el-icon> 详情
-              </el-button>
-              <el-popconfirm title="确认删除此项目？" @confirm="handleDelete(project.projectId)">
-                <template #reference>
-                  <el-button text size="small" type="danger">
-                    <el-icon><Delete /></el-icon>
-                  </el-button>
-                </template>
-              </el-popconfirm>
+    <!-- 项目卡片网格 -->
+    <div class="project-grid">
+      <div
+        v-for="project in projects"
+        :key="project.projectId"
+        class="project-card"
+        @click="openEditDialog(project)"
+      >
+        <div class="card-cover" :style="{ backgroundColor: getCoverColor(project.projectId) }">
+          <!-- clone 中：显示加载动画 -->
+          <div v-if="project.status === 'creating'" class="clone-loading">
+            <svg class="clone-spinner" width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
+              <path d="M12 2a10 10 0 0 1 10 10" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <span class="clone-text">代码拉取中...</span>
+          </div>
+          <!-- clone 失败：显示错误标记 -->
+          <div v-else-if="project.status === 'failed'" class="clone-failed">
+            <span class="failed-icon">!</span>
+            <span class="clone-text">拉取失败</span>
+          </div>
+          <!-- 正常状态 -->
+          <span v-else class="cover-initial">{{ project.name?.charAt(0) || 'P' }}</span>
+        </div>
+        <div class="card-info">
+          <span class="card-name">{{ project.name }}</span>
+          <span v-if="project.status === 'failed'" class="card-error" :title="project.cloneErrorMessage">
+            {{ project.cloneErrorMessage?.substring(0, 30) }}...
+          </span>
+        </div>
+        <!-- 悬浮操作按钮 -->
+        <div class="card-actions" @click.stop>
+          <!-- 重试拉取：仅失败项目显示 -->
+          <span
+            v-if="project.status === 'failed'"
+            class="action-btn action-retry"
+            title="重试拉取代码"
+            @click="handleRetryClone(project.projectId)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+          </span>
+          <el-popconfirm title="确认删除此项目？" @confirm="handleDelete(project.projectId)">
+            <template #reference>
+              <span class="action-btn action-delete" title="删除">
+                <el-icon :size="14"><Delete /></el-icon>
+              </span>
+            </template>
+          </el-popconfirm>
+        </div>
+      </div>
+
+      <!-- 创建项目占位卡片 -->
+      <div class="project-card create-card" @click="openCreateDialog">
+        <div class="create-card-body">
+          <span class="create-icon">+</span>
+          <span class="create-text">创建项目</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新建项目对话框 - Teambition 风格 -->
+    <Teleport to="body">
+      <div v-if="showDialog" class="tb-overlay" @click.self="showDialog = false">
+        <div class="tb-dialog">
+          <!-- Header -->
+          <div class="tb-dialog-header">
+            <span class="tb-dialog-title">{{ dialogMode === 'create' ? '新建项目' : '编辑项目' }}</span>
+            <button class="tb-dialog-close" @click="showDialog = false">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+          <!-- Body -->
+          <div class="tb-dialog-body">
+            <div class="tb-form">
+              <!-- 项目名称（必填） -->
+              <div class="tb-form-item">
+                <label class="tb-label">项目名称 <span class="tb-required">*</span></label>
+                <div class="tb-input-wrap" :class="{ focused: focusedField === 'name' }">
+                  <input
+                    v-model="formData.name"
+                    class="tb-input"
+                    placeholder="例如：员工管理系统"
+                    @focus="focusedField = 'name'"
+                    @blur="focusedField = ''"
+                  />
+                </div>
+              </div>
+              <!-- Git 仓库地址（必填） -->
+              <div class="tb-form-item">
+                <label class="tb-label">Git 仓库地址 <span class="tb-required">*</span></label>
+                <div class="tb-input-wrap" :class="{ focused: focusedField === 'gitUrl' }">
+                  <input
+                    v-model="formData.gitUrl"
+                    class="tb-input"
+                    placeholder="https://github.com/user/repo.git"
+                    @focus="focusedField = 'gitUrl'"
+                    @blur="focusedField = ''"
+                  />
+                </div>
+              </div>
+              <!-- 默认分支（选填） -->
+              <div class="tb-form-item">
+                <label class="tb-label">默认分支</label>
+                <div class="tb-input-wrap" :class="{ focused: focusedField === 'branch' }">
+                  <input
+                    v-model="formData.defaultBranch"
+                    class="tb-input"
+                    placeholder="main"
+                    @focus="focusedField = 'branch'"
+                    @blur="focusedField = ''"
+                  />
+                </div>
+              </div>
+              <!-- 项目描述（选填） -->
+              <div class="tb-form-item">
+                <label class="tb-label">项目描述</label>
+                <div class="tb-textarea-wrap" :class="{ focused: focusedField === 'desc' }">
+                  <textarea
+                    v-model="formData.description"
+                    class="tb-textarea"
+                    placeholder="简单描述项目用途，帮助 AI 更好地理解代码上下文"
+                    rows="3"
+                    @focus="focusedField = 'desc'"
+                    @blur="focusedField = ''"
+                  ></textarea>
+                </div>
+              </div>
             </div>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <el-empty v-else description="还没有项目，点击右上角新建一个吧" />
-
-    <!-- 新建项目对话框 -->
-    <el-dialog v-model="showCreateDialog" title="新建项目" width="500">
-      <el-form :model="createForm" label-width="80px">
-        <el-form-item label="项目名称">
-          <el-input v-model="createForm.name" placeholder="例如：员工管理系统" />
-        </el-form-item>
-        <el-form-item label="项目描述">
-          <el-input v-model="createForm.description" type="textarea" :rows="3"
-                    placeholder="简单描述项目用途（可选）" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleCreate" :loading="creating">创建</el-button>
-      </template>
-    </el-dialog>
+          <!-- Footer -->
+          <div class="tb-dialog-footer">
+            <button class="tb-btn tb-btn-cancel" @click="showDialog = false">取消</button>
+            <button class="tb-btn tb-btn-primary" @click="handleSubmit" :disabled="submitting">
+              {{ submitting ? '提交中...' : '确定' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- 模式选择 -->
     <ModeSelector v-model="showModeSelector" @select="handleModeSelect" />
@@ -65,23 +162,72 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import ModeSelector from '../components/ModeSelector.vue'
-import { listProjects, createProject, deleteProject } from '../api/project'
+import { listProjects, createProject, updateProject, deleteProject, retryClone } from '../api/project'
+import { connectWebSocket, disconnectWebSocket } from '../api/websocket'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const projects = ref([])
-const showCreateDialog = ref(false)
+const showDialog = ref(false)
+const dialogMode = ref('create') // 'create' | 'edit'
+const editingProjectId = ref('')
 const showModeSelector = ref(false)
 const newProjectId = ref('')
-const creating = ref(false)
-const createForm = ref({ name: '', description: '' })
+const submitting = ref(false)
+const formData = ref({ name: '', gitUrl: '', defaultBranch: '', description: '' })
+const focusedField = ref('')
+
+// 根据项目 ID 生成封面背景色
+const coverColors = [
+  '#4A90D9', '#7B68EE', '#E8725C', '#50C878',
+  '#F5A623', '#8B5CF6', '#06B6D4', '#EC4899',
+]
+function getCoverColor(projectId) {
+  if (!projectId) return coverColors[0]
+  let hash = 0
+  for (let i = 0; i < projectId.length; i++) {
+    hash = projectId.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return coverColors[Math.abs(hash) % coverColors.length]
+}
+
+// 正在监听 clone 进度的项目 ID 集合
+const watchingProjects = ref(new Set())
 
 onMounted(async () => {
   await loadProjects()
+  // 对所有 creating 状态的项目启动 WebSocket 监听
+  projects.value
+    .filter(p => p.status === 'creating')
+    .forEach(p => watchCloneProgress(p.projectId))
 })
+
+onUnmounted(() => {
+  disconnectWebSocket()
+})
+
+function watchCloneProgress(projectId) {
+  if (watchingProjects.value.has(projectId)) return
+  watchingProjects.value.add(projectId)
+
+  connectWebSocket(projectId, async (msg) => {
+    // 收到消息后刷新项目列表
+    await loadProjects()
+    // 如果 clone 完成或失败，停止监听
+    const project = projects.value.find(p => p.projectId === projectId)
+    if (project && project.status !== 'creating') {
+      watchingProjects.value.delete(projectId)
+      if (project.status === 'active') {
+        ElMessage.success(`项目 "${project.name}" 代码拉取完成`)
+      } else if (project.status === 'failed') {
+        ElMessage.error(`项目 "${project.name}" 代码拉取失败`)
+      }
+    }
+  })
+}
 
 async function loadProjects() {
   try {
@@ -92,23 +238,63 @@ async function loadProjects() {
   }
 }
 
-async function handleCreate() {
-  if (!createForm.value.name.trim()) {
+function openCreateDialog() {
+  dialogMode.value = 'create'
+  editingProjectId.value = ''
+  formData.value = { name: '', gitUrl: '', defaultBranch: '', description: '' }
+  showDialog.value = true
+}
+
+function openEditDialog(project) {
+  dialogMode.value = 'edit'
+  editingProjectId.value = project.projectId
+  formData.value = {
+    name: project.name || '',
+    gitUrl: project.gitUrl || '',
+    defaultBranch: project.defaultBranch || '',
+    description: project.description || '',
+  }
+  showDialog.value = true
+}
+
+async function handleSubmit() {
+  if (!formData.value.name.trim()) {
     ElMessage.warning('请输入项目名称')
     return
   }
-  creating.value = true
+  if (!formData.value.gitUrl.trim()) {
+    ElMessage.warning('请输入 Git 仓库地址')
+    return
+  }
+  submitting.value = true
   try {
-    const res = await createProject(createForm.value.name, createForm.value.description)
-    ElMessage.success('项目创建成功')
-    showCreateDialog.value = false
-    newProjectId.value = res.data.projectId
-    createForm.value = { name: '', description: '' }
-    showModeSelector.value = true
+    if (dialogMode.value === 'create') {
+      const res = await createProject(formData.value)
+      ElMessage.success('项目创建成功，正在拉取代码...')
+      newProjectId.value = res.data.projectId
+      await loadProjects()
+      watchCloneProgress(res.data.projectId)
+    } else {
+      await updateProject(editingProjectId.value, formData.value)
+      ElMessage.success('项目更新成功')
+      await loadProjects()
+    }
+    showDialog.value = false
   } catch (e) {
-    ElMessage.error('创建失败: ' + e.message)
+    ElMessage.error((dialogMode.value === 'create' ? '创建' : '更新') + '失败: ' + e.message)
   } finally {
-    creating.value = false
+    submitting.value = false
+  }
+}
+
+async function handleRetryClone(projectId) {
+  try {
+    await retryClone(projectId)
+    ElMessage.success('正在重新拉取代码...')
+    await loadProjects()
+    watchCloneProgress(projectId)
+  } catch (e) {
+    ElMessage.error('重试失败: ' + e.message)
   }
 }
 
@@ -126,10 +312,6 @@ function handleModeSelect(mode) {
   router.push(`/project/${newProjectId.value}?mode=${mode}`)
 }
 
-function enterProject(projectId) {
-  router.push(`/project/${projectId}`)
-}
-
 function statusTagType(status) {
   const map = { creating: 'info', active: '', deploying: 'warning', deployed: 'success', failed: 'danger' }
   return map[status] || 'info'
@@ -144,44 +326,439 @@ function formatTime(time) {
 <style scoped>
 .project-list-page {
   padding: 24px;
-  max-width: 1200px;
-  margin: 0 auto;
+  min-height: 100%;
+  background: transparent;
+  font-family: -apple-system, system-ui, "Segoe UI", Roboto, "Helvetica Neue",
+               "PingFang SC", "Noto Sans", "Noto Sans CJK SC",
+               "Microsoft YaHei", sans-serif;
 }
+
+/* 顶部操作栏 */
 .page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-.project-card {
   margin-bottom: 16px;
 }
-.card-header {
-  display: flex;
-  justify-content: space-between;
+
+.btn-create {
+  display: inline-flex;
   align-items: center;
-  cursor: pointer;
-}
-.project-name {
-  font-weight: bold;
-}
-.project-desc {
-  color: #606266;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  background: #0091FF;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 8px;
   font-size: 14px;
-  margin: 0 0 12px 0;
+  font-weight: 400;
   cursor: pointer;
+  transition: background 0.2s;
 }
-.project-footer {
+.btn-create:hover {
+  background: #0082E5;
+}
+.btn-create:active {
+  background: #0074CC;
+}
+.btn-create-icon {
+  flex-shrink: 0;
+}
+
+/* 卡片网格 */
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 200px));
+  gap: 16px;
+}
+
+/* 项目卡片 */
+.project-card {
+  position: relative;
+  border-radius: 12px;
+  background: #FFFFFF;
+  box-shadow: rgba(38, 38, 38, 0.1) 0px 1px 5px 0px;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s;
+  overflow: hidden;
+}
+.project-card:hover {
+  box-shadow: rgba(38, 38, 38, 0.15) 0px 2px 8px 0px;
+  transform: translateY(-2px);
+}
+
+/* 封面区域 */
+.card-cover {
+  height: 100px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
-.project-meta {
-  color: #909399;
+.cover-initial {
+  font-size: 36px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  text-transform: uppercase;
+  user-select: none;
+}
+
+/* 卡片信息 */
+.card-info {
+  padding: 12px;
+}
+.card-name {
+  font-size: 14px;
+  color: #262626;
+  font-weight: 400;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-error {
   font-size: 12px;
+  color: #F56C6C;
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.project-actions {
+
+/* Clone 加载状态 */
+.clone-loading,
+.clone-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.clone-text {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+}
+.clone-spinner {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.failed-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* 悬浮操作 */
+.card-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: none;
+}
+.project-card:hover .card-actions {
   display: flex;
   gap: 4px;
+}
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #262626;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.action-btn:hover {
+  background: #FFFFFF;
+}
+.action-retry:hover {
+  color: #0091FF;
+}
+.action-delete:hover {
+  color: #F56C6C;
+}
+
+/* 创建项目占位卡片 */
+.create-card {
+  box-shadow: none;
+  border: 1px dashed rgba(38, 38, 38, 0.15);
+  background: #FFFFFF;
+}
+.create-card:hover {
+  box-shadow: none;
+  border-color: rgba(38, 38, 38, 0.25);
+  transform: none;
+}
+.create-card-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 140px; /* 与项目卡片总高度一致：100px 封面 + 40px 信息区 */
+  gap: 8px;
+}
+.create-icon {
+  font-size: 28px;
+  color: rgba(38, 38, 38, 0.36);
+  line-height: 1;
+}
+.create-text {
+  font-size: 14px;
+  color: rgba(38, 38, 38, 0.36);
+}
+</style>
+
+<!-- Teambition 弹窗样式（Teleport 到 body，不能 scoped） -->
+<style>
+/* 遮罩层 */
+.tb-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 弹窗容器 - 固定高度，footer 沉底 */
+.tb-dialog {
+  width: 560px;
+  height: 789px;
+  max-height: 90vh;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow:
+    rgba(31, 34, 37, 0.08) 0px 0px 0px 1px,
+    rgba(0, 0, 0, 0.04) 0px 8px 16px -2px,
+    rgba(0, 0, 0, 0.04) 0px 2px 8px 0px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: -apple-system, system-ui, "Segoe UI", Roboto, "Helvetica Neue",
+               "PingFang SC", "Noto Sans", "Noto Sans CJK SC",
+               "Microsoft YaHei", sans-serif;
+}
+
+/* Header */
+.tb-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 20px 12px;
+  flex-shrink: 0;
+}
+
+.tb-dialog-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: #262626;
+}
+
+.tb-dialog-close {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: rgba(38, 38, 38, 0.36);
+  border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+}
+.tb-dialog-close:hover {
+  color: #262626;
+  background: rgba(38, 38, 38, 0.06);
+}
+
+/* Body */
+.tb-dialog-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 20px 0;
+}
+
+/* Form */
+.tb-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tb-form-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tb-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #262626;
+  line-height: 20px;
+}
+
+.tb-required {
+  color: #F5222D;
+  margin-left: 2px;
+}
+
+/* 输入框 */
+.tb-input-wrap {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  border: 1px solid rgba(38, 38, 38, 0.22);
+  border-radius: 8px;
+  background: transparent;
+  transition: border-color 0.2s;
+  padding: 0 8px;
+}
+.tb-input-wrap:hover {
+  border-color: rgba(38, 38, 38, 0.36);
+}
+.tb-input-wrap.focused {
+  border-color: #0091FF;
+}
+
+.tb-input {
+  flex: 1;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  color: #262626;
+  font-family: inherit;
+}
+.tb-input::placeholder {
+  color: rgba(38, 38, 38, 0.36);
+}
+
+.tb-input-suffix {
+  flex-shrink: 0;
+  color: rgba(38, 38, 38, 0.36);
+  margin-left: 4px;
+}
+
+/* 多行文本框 */
+.tb-textarea-wrap {
+  border: 1px solid rgba(38, 38, 38, 0.22);
+  border-radius: 8px;
+  background: transparent;
+  transition: border-color 0.2s;
+  padding: 8px;
+}
+.tb-textarea-wrap:hover {
+  border-color: rgba(38, 38, 38, 0.36);
+}
+.tb-textarea-wrap.focused {
+  border-color: #0091FF;
+}
+
+.tb-textarea {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  color: #262626;
+  font-family: inherit;
+  resize: vertical;
+  line-height: 1.5;
+}
+.tb-textarea::placeholder {
+  color: rgba(38, 38, 38, 0.36);
+}
+
+/* 日期范围选择器 */
+.tb-date-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tb-date-picker {
+  height: 32px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+.tb-date-picker:hover {
+  background: rgba(38, 38, 38, 0.06);
+}
+
+.tb-date-placeholder {
+  font-size: 14px;
+  color: rgba(38, 38, 38, 0.6);
+  white-space: nowrap;
+}
+
+.tb-date-sep {
+  color: rgba(38, 38, 38, 0.36);
+  font-size: 14px;
+}
+
+/* Footer */
+.tb-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 20px 16px;
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+.tb-btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  font-family: inherit;
+}
+
+.tb-btn-cancel {
+  background: transparent;
+  color: #262626;
+  border: 1px solid rgba(0, 145, 255, 0.16);
+}
+.tb-btn-cancel:hover {
+  border-color: rgba(0, 145, 255, 0.36);
+  background: rgba(0, 145, 255, 0.04);
+}
+
+.tb-btn-primary {
+  background: #0091FF;
+  color: #fff;
+  border: 1px solid transparent;
+}
+.tb-btn-primary:hover {
+  background: #0082E5;
+}
+.tb-btn-primary:active {
+  background: #0074CC;
+}
+.tb-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>

@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 @TableName("deployment")
 public class Deployment {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     private String projectId;

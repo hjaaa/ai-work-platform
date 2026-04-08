@@ -11,6 +11,7 @@ import lombok.Data;
 public class ChatMessage {
 
     private String projectId;
+    private String threadId;
     private String role;
     private String content;
     private String messageType;

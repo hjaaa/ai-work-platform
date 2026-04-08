@@ -1,0 +1,5 @@
+id: chat-thread-refactor
+title: 对话模块重构 - 引入线程概念，对话绑定项目
+status: in_progress
+current_phase: analysis
+created_at: 2026-04-08

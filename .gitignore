@@ -27,3 +27,9 @@ dist/
 
 # Docker
 docker-compose.override.yml
+
+# Build artifacts
+BOOT-INF/
+
+# Sensitive config
+.mcp.json

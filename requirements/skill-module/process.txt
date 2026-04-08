@@ -1,0 +1,23 @@
+# 进度日志（存档/读档）
+# 用途：跨会话恢复时 Agent 读取本文件，快速重建工作上下文
+# 格式参考 ECC save-session 结构，确保恢复时信息完整
+
+## Current State
+# status: not_started | in_progress | blocked | completed
+# phase: analysis | design | implementation | review | done
+# blocked_by: (如果 blocked，写明原因)
+
+## What Worked
+# 已验证有效的方案和决策（需有验证证据）
+
+## What Did NOT Work
+# 尝试过但失败的路（最重要：防止 AI 下次重试同样的路）
+# 格式：- 尝试 [方案] → 失败，因为 [原因]（不要再试）
+
+## Exact Next Step
+# 精确到文件+方法级别的下一步操作
+# 格式：[文件路径] → [具体要做什么]
+
+## Files State
+# 每个涉及的文件状态
+# 格式：[文件路径] → Complete | In Progress | Not Started

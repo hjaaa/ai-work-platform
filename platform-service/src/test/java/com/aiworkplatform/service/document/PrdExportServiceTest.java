@@ -1,5 +1,6 @@
 package com.aiworkplatform.service.document;
 
+import com.aiworkplatform.service.document.impl.PrdExportServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -7,11 +8,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PrdExportServiceTest {
 
-    private PrdExportService prdExportService;
+    private PrdExportServiceImpl prdExportService;
 
     @BeforeEach
     void setUp() {
-        prdExportService = new PrdExportService();
+        prdExportService = new PrdExportServiceImpl();
     }
 
     @Test

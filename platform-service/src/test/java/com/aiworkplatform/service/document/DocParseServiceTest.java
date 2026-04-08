@@ -1,6 +1,7 @@
 package com.aiworkplatform.service.document;
 
 import com.aiworkplatform.common.exception.BusinessException;
+import com.aiworkplatform.service.document.impl.DocParseServiceImpl;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,11 +15,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DocParseServiceTest {
 
-    private DocParseService docParseService;
+    private DocParseServiceImpl docParseService;
 
     @BeforeEach
     void setUp() {
-        docParseService = new DocParseService();
+        docParseService = new DocParseServiceImpl();
     }
 
     @Test

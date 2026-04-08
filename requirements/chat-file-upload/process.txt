@@ -1,0 +1,27 @@
+# 进度日志（存档/读档）
+
+## Current State
+status: completed
+phase: done
+
+## What Worked
+- 不加表字段，workspacePath + "/file" 直接拼接
+- TDD 流程：先写 9 个测试 → Red → 写实现 → Green
+- Path.of(originalName).getFileName() 天然防止路径穿越
+- 同名文件用时间戳后缀避免覆盖
+- 文件上传和消息发送分两步，前端先上传获取路径再附带发送
+
+## What Did NOT Work
+（暂无）
+
+## Files State
+- platform-service/.../project/FileService.java → Complete（新增 uploadFile 接口）
+- platform-service/.../project/impl/FileServiceImpl.java → Complete（uploadFile 实现）
+- platform-service/.../chat/FilePromptBuilder.java → Complete（文件路径拼入 prompt）
+- platform-service/.../chat/impl/ChatServiceImpl.java → Complete（集成 FilePromptBuilder）
+- platform-service/.../chat/ChatService.java → Complete（新增带 filePaths 的重载方法）
+- platform-web/.../controller/ChatThreadController.java → Complete（新增 upload 接口 + chat 接口支持 filePaths）
+- platform-frontend/src/api/thread.js → Complete（新增 uploadThreadFile）
+- platform-frontend/src/views/ChatView.vue → Complete（上传按钮 + 文件预览 + 发送集成）
+- platform-service/src/test/.../FileUploadTest.java → Complete（6 tests）
+- platform-service/src/test/.../FilePromptBuilderTest.java → Complete（3 tests）

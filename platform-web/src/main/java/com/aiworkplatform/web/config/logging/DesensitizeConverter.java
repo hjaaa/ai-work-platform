@@ -7,7 +7,8 @@ import java.util.regex.Pattern;
 
 /**
  * Logback 日志脱敏转换器
- * 在 logback-spring.xml 中通过 %desensitize(%msg) 使用
+ * 在 logback-spring.xml 中通过 %desensitize 使用
+ * 自动对日志消息中的手机号、身份证、银行卡进行脱敏
  *
  * 脱敏规则（参考 context/team/logging-standards.md）：
  * - 手机号: 138****1234

@@ -14,6 +14,9 @@ public class OrchestratorConfig {
 
     private String claudeCliPath = "/usr/local/bin/claude";
     private String workspaceBasePath = "/workspace/projects";
-    private int maxConcurrent = 3;
+    private int maxConcurrent = 5;
     private int timeoutMinutes = 5;
+
+    /** 跳过 CLI 权限审批，程序化调用场景下避免卡在审批提示 */
+    private boolean skipPermissions = true;
 }

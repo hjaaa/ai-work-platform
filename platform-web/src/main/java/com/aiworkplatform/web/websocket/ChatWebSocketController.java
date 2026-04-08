@@ -25,11 +25,28 @@ public class ChatWebSocketController {
         this.chatService = chatService;
     }
 
+    /**
+     * @deprecated 请使用 /app/chat/thread/{threadId}
+     */
+    @Deprecated
     @MessageMapping("/chat/{projectId}")
     public void handleChatMessage(@DestinationVariable String projectId,
                                   @Payload ChatMessage message) {
-        log.info("收到对话消息: projectId={}, contentLength={}", projectId,
+        log.info("收到对话消息（旧接口）: projectId={}, contentLength={}", projectId,
                 message.getContent() != null ? message.getContent().length() : 0);
         chatService.handleUserMessage(projectId, message.getContent());
+    }
+
+    /**
+     * 按线程发送消息
+     * 客户端发送到 /app/chat/thread/{threadId}
+     * 服务端推送到 /topic/thread/{threadId}
+     */
+    @MessageMapping("/chat/thread/{threadId}")
+    public void handleThreadMessage(@DestinationVariable String threadId,
+                                    @Payload ChatMessage message) {
+        log.info("收到对话消息: threadId={}, contentLength={}", threadId,
+                message.getContent() != null ? message.getContent().length() : 0);
+        chatService.handleThreadMessage(threadId, message.getContent());
     }
 }

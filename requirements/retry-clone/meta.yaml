@@ -1,0 +1,12 @@
+id: retry-clone
+title: 失败项目手动重试 Git Clone
+status: completed
+current_phase: done
+created: 2026-04-08
+updated: 2026-04-08
+tags:
+  - git
+  - clone
+  - retry
+  - frontend
+  - backend

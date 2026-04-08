@@ -17,6 +17,10 @@
 
 两者构成闭环：`/req-dev` 从 experience/ 读取经验 → `/optimize-flow` 向 experience/ 写入经验。
 
+## 前端设计规范（强制）
+
+修改任何 `*.vue` 文件的样式前，**必须先读取 `platform-frontend/DESIGN.md`**。该文件定义了从 Teambition 提取的完整设计系统（颜色、字体、间距、圆角、阴影等），所有前端样式必须严格遵守。违规由 lint-rules L009~L013 自动检查。
+
 ## 上下文自动加载（每次会话必执行）
 
 每次新会话开始时，**在执行任何任务之前**：

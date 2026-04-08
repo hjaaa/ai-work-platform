@@ -25,3 +25,38 @@
 - **原因**：初始实现只考虑了单项目场景，没有考虑切换项目的边界
 - **正确做法**：connectWebSocket 开头先调用 disconnectWebSocket() 断开旧连接
 - **适用场景**：所有使用模块级单例管理连接/资源的前端代码
+
+## 2026-04-08 Controller 直接依赖 Service 实现类而非接口
+
+- **现象**：所有 Controller 直接注入具体的 Service 类（如 `ProjectService` 是一个 `@Service` 标注的 class），没有接口层
+- **原因**：AI 初始生成代码时图省事，直接写了 class 而非 interface + impl 的标准分层
+- **正确做法**：Service 必须拆为接口 + 实现类。接口保持在原包路径（如 `service.project.ProjectService`），实现类放 `impl` 子包（如 `service.project.impl.ProjectServiceImpl`）。Controller 和其他 Service 依赖接口类型，Spring 按接口注入实现
+- **适用场景**：新建任何 Service 类时，必须先建接口再建实现类
+
+## 2026-04-08 实现业务逻辑后遗漏单元测试（第三次：2026-04-08 claude-session-reuse 重构）
+
+- **现象**：AI 在执行 6 个 task 的完整重构（ProcessExecutor、ClaudeCodeOrchestrator、ChatServiceImpl 等）时，全程先写实现代码，最后才修复旧测试适配新签名。没有为任何新增逻辑（stream-json 解析、session 复用、cancel 机制）编写 TDD 驱动的测试
+- **原因**：AI 将测试视为"事后验证"而非"设计工具"，尤其在多 task 连续实施时更容易跳过测试直接推进实现
+- **正确做法**：采用 TDD 模式——先写测试（定义预期行为），再写实现（让测试通过）。具体流程：(1) 定义接口/方法签名 (2) 编写单元测试（正常+边界+异常） (3) 运行测试确认红灯 (4) 编写实现 (5) 运行测试确认绿灯。**每个 task 都必须独立执行此流程，不能攒到最后统一补测试**
+- **适用场景**：所有 Service 层代码变更，必须无例外执行。多 task 实施时尤其要注意，每个 task 完成时必须有对应测试
+
+## 2026-04-08 Service 拆接口后旧测试编译失败
+
+- **现象**：将 Service 从 class 拆为 interface + impl 后，旧测试中 `new DeployService(...)` 编译失败（接口无法实例化）
+- **原因**：重构时只关注了主代码，没有同步检查测试代码
+- **正确做法**：拆接口时必须同步修改测试：(1) `new XxxService()` → `new XxxServiceImpl()` (2) 包私有成员的测试移到 impl 包下
+- **适用场景**：任何涉及 class → interface 的重构
+
+## 2026-04-08 @Async 方法在同 bean 内调用不走代理
+
+- **现象**：原计划在 ProjectServiceImpl.createProject 末尾调用 GitService.cloneRepository，但如果 GitService 反过来依赖 ProjectService 会造成循环依赖
+- **原因**：Spring `@Async` 依赖 AOP 代理，同 bean 内调用不经过代理，异步不生效；且相互依赖会导致循环注入
+- **正确做法**：`@Async` 方法放在独立 Service 中，由 Controller 层编排调用顺序（先 createProject 再 cloneRepository），避免 Service 间循环依赖
+- **适用场景**：涉及 `@Async`/`@Transactional` 等需要 AOP 代理的场景
+
+## 2026-04-08 @Async 同 bean 内自调用仍不走代理（第二次验证）
+
+- **现象**：GitServiceImpl.retryClone() 内部调用 this.cloneRepository()，虽然 cloneRepository 有 @Async 注解，但实际同步执行，WebSocket 进度推送不工作
+- **原因**：即使 @Async 方法在独立 bean 中，**同一 bean 内的 this 调用仍绕过 Spring AOP 代理**。这是 Spring 代理机制的根本限制，不仅限于跨 bean 场景
+- **正确做法**：需要在同一 bean 内调用 @Async 方法时，注入自身代理：`@Lazy GitService self`，然后通过 `self.cloneRepository()` 调用。@Lazy 避免循环依赖
+- **适用场景**：任何 bean 中一个普通方法需要调用同 bean 的 @Async/@Transactional 方法时

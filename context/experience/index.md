@@ -16,14 +16,19 @@
 | 关键词 | 经验文件 | 加载时机 | 置信度 | 简述 |
 |--------|----------|----------|--------|------|
 | 方案设计, 技术选型, 版本号 | experience/方案设计流程/common-errors.md | 方案设计时 | 低 | 方案设计前必须先读 constitution.md 对齐技术栈版本 |
-| MyBatis-Plus, 分页, Pagination | experience/MyBatisPlus/common-errors.md | 实施前 | 低 | MP 3.5.x 分页需额外引入 mybatis-plus-jsqlparser |
+| MyBatis-Plus, 分页, Pagination, 雪花算法, ASSIGN_ID, IdType, ID策略 | experience/MyBatisPlus/common-errors.md | 实施前 | 低 | MP 3.5.x 分页需额外引入 mybatis-plus-jsqlparser；雪花算法迁移需同步四处（配置/注解/DDL/Jackson） |
 | Apache POI, Word, docx, 文档解析 | experience/ApachePOI/common-errors.md | 实施前 | 低 | POI 异常不全是 IOException，需 catch Exception |
 | Maven, 多模块, spring-boot:run, 启动 | experience/Maven多模块/common-errors.md | 实施前 | 低 | 多模块项目 run 前必须先 install |
-| 代码审查, Controller, Mapper, 分层 | experience/代码审查模式/common-errors.md | 实施前 | 低 | Controller 禁止直接注入 Mapper；进程执行提取工具类 |
-| 代码审查, 自检, 实施完成 | experience/代码审查模式/self-check.md | 实施前 | 低 | 实施完成后自检：重复逻辑/死代码/递归限制/重复查询 |
+| 代码审查, Controller, Mapper, Service, 分层, 接口, 单元测试, TDD, @Async, @Lazy, 自调用, 代理 | experience/代码审查模式/common-errors.md | 实施前 | 高 | Controller 禁止注入 Mapper；Service 拆接口+实现类；TDD 先写测试再写实现（第三次验证）；@Async 放独立 bean 且同 bean 自调用需 @Lazy self 注入代理 |
+| 代码审查, 自检, 实施完成, 测试, TDD | experience/代码审查模式/self-check.md | 实施前 | 高 | TDD 强制/单测覆盖/重复逻辑/死代码/接口拆分同步测试/@Async 独立 bean |
 | highlight.js, WebSocket, 前端单例 | experience/代码审查模式/common-errors.md | 实施前 | 低 | 前端库初始化提取单例；WebSocket 切换时先断开旧连接 |
 | 日志, logback, traceId, 脱敏, 多环境, profile | experience/日志基础设施/common-errors.md | 实施前 | 低 | 新项目 Phase 1 就要配 logback + traceId + 脱敏 + 多环境拆分 |
 | 日志, Spring Boot, 初始化, 配置, application.yml | experience/日志基础设施/self-check.md | 实施前 | 低 | 日志自检：logback/traceId/脱敏/文件输出/ERROR独立/多环境拆分/密码占位 |
+| Flyway, 数据库迁移, migration, baseline, 版本管理 | experience/Flyway数据库迁移/common-errors.md | 实施前 | 低 | Flyway 10.x 需 flyway-mysql 模块；已有库需 baseline；社区版无 undo |
+| UI还原, 模仿页面, 前端布局, el-aside, sidebar | experience/前端UI还原/self-check.md | 实施前 | 低 | screenshot+snapshot 配合分析；el-aside+collapse 侧边栏；改布局同步检查 router |
+| Docker, docker-compose, 部署, Dockerfile, Nginx | experience/DockerCompose部署/self-check.md | 实施前 | 低 | Maven 多阶段缓存层；Nginx try_files history 模式；服务间用服务名通信 |
+| logback, logback-test.xml, conversionRule, 脱敏 | experience/DockerCompose部署/common-errors.md | 实施前 | 低 | logback-test.xml 是保留名不能用；ClassicConverter 不支持括号语法 |
+| JDK, Maven, 版本不匹配, 编译失败, devsoft, 本地开发 | experience/本地开发环境/self-check.md | 实施前 | 低 | 版本不匹配时先查 ~/devsoft 目录，已有 JDK 11/21、Maven 3.9.11 |
 
 <!-- 
 示例条目：

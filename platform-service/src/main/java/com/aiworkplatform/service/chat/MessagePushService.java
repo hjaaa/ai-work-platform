@@ -57,4 +57,43 @@ public class MessagePushService {
         pushToProject(projectId, message);
     }
 
+    /**
+     * 向指定线程的订阅者推送消息
+     */
+    public void pushToThread(String threadId, ChatMessage message) {
+        String destination = "/topic/thread/" + threadId;
+        log.debug("推送消息到 {}: type={}", destination, message.getMessageType());
+        messagingTemplate.convertAndSend(destination, message);
+    }
+
+    /**
+     * 按线程推送 AI 回复
+     */
+    public void pushAssistantMessageToThread(String threadId, String projectId, String content) {
+        ChatMessage message = ChatMessage.builder()
+                .projectId(projectId)
+                .threadId(threadId)
+                .role("assistant")
+                .content(content)
+                .messageType("text")
+                .timestamp(System.currentTimeMillis())
+                .build();
+        pushToThread(threadId, message);
+    }
+
+    /**
+     * 按线程推送进度信息
+     */
+    public void pushProgressToThread(String threadId, String projectId, String content) {
+        ChatMessage message = ChatMessage.builder()
+                .projectId(projectId)
+                .threadId(threadId)
+                .role("system")
+                .content(content)
+                .messageType("progress")
+                .timestamp(System.currentTimeMillis())
+                .build();
+        pushToThread(threadId, message);
+    }
+
 }

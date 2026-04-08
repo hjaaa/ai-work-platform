@@ -1,0 +1,18 @@
+# Delete Project Cleanup 进度跟踪
+
+## Current State
+- status: completed
+- phase: done
+
+## What Worked
+- ProjectServiceImpl.deleteProject() 中在逻辑删除前递归删除 workspacePath 目录
+- 文件删除失败降级为 warn 日志，不阻塞逻辑删除
+
+## What Did NOT Work
+- Maven 增量编译未检测到源码变化，导致 JAR 没有更新 → 必须 `mvn clean package`
+
+## Exact Next Step
+- 已完成
+
+## Files State
+- ProjectServiceImpl.java — 已修改

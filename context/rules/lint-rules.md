@@ -26,6 +26,12 @@
 | L006 | Controller 禁止直接访问 Mapper/Repository | WARN | `@Controller\|@RestController` + 同类中 `@Autowired.*Mapper\|@Autowired.*Repository\|private.*Mapper\|private.*Repository` | `*Controller.java` | Controller 不应直接依赖 Mapper/Repository。将数据访问逻辑移到 Service 层，Controller 只调用 Service。参考 context/team/coding-standards.md §分层职责 | Constitution I |
 | L007 | Entity 禁止出现在 Controller 返回值 | WARN | `@GetMapping\|@PostMapping\|@PutMapping\|@DeleteMapping` 所在方法返回类型包含 entity/do/model 包的类 | `*Controller.java` | Controller 返回值应使用 VO/DTO，不要直接返回 Entity。创建对应的 VO 类，通过 MapStruct 或手动转换。参考 context/team/coding-standards.md §对象分离 | Constitution I |
 | L008 | 方法体超过 60 行 | WARN | 方法体行数 > 60（需脚本计算） | `*.java` | 将方法拆分为多个语义清晰的私有方法。每个方法只做一件事，方法名要能表达意图（read like prose）。 | Constitution VI |
+| L009 | 禁止硬编码颜色值 | ERROR | `color:\s*#(?!fff\|FFF\|000\|262626\|0091FF)[0-9a-fA-F]{3,8}\|background:\s*#(?!fff\|FFF\|F9F9F9)[0-9a-fA-F]{3,8}` | `*.vue` `*.css` `*.scss` | 禁止在样式中硬编码颜色。必须使用 DESIGN.md 中定义的设计 token：主色 `#0091FF`，背景 `#F9F9F9`，文字 `#262626`，文字透明度用 `rgba(38,38,38, 0.76/0.36/0.06)`。修改前先读取 `platform-frontend/DESIGN.md` §2 Color Palette。 | DESIGN.md |
+| L010 | 禁止非规范字体 | ERROR | `font-family:.*(?:Arial\|Inter\|Roboto)(?!.*PingFang)` | `*.vue` `*.css` `*.scss` | 禁止使用 Arial/Inter/Roboto 作为主字体。必须使用系统字体栈：`-apple-system, system-ui, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Noto Sans", "Noto Sans CJK SC", "Microsoft YaHei", 微软雅黑, sans-serif`。参考 `platform-frontend/DESIGN.md` §3 Typography。 | DESIGN.md |
+| L011 | 禁止非规范圆角 | WARN | `border-radius:\s*(\d+)px` 且值不在 `[0, 4, 6, 8, 12, 50%]` 范围内 | `*.vue` `*.css` `*.scss` | 圆角值必须使用设计规范中的标准值：4px（小元素）、6px（Logo）、8px（按钮/导航项）、12px（卡片）、50%（圆形）。参考 `platform-frontend/DESIGN.md` §4 Component Styling。 | DESIGN.md |
+| L012 | 禁止非规范阴影 | WARN | `box-shadow:` 且不包含 `rgba(38, 38, 38` | `*.vue` `*.css` `*.scss` | 阴影必须使用设计规范定义的值：卡片默认 `rgba(38, 38, 38, 0.1) 0px 1px 5px 0px`，hover `rgba(38, 38, 38, 0.15) 0px 2px 8px 0px`。禁止使用 `rgba(0,0,0,...)` 等非规范阴影。参考 `platform-frontend/DESIGN.md` §7 Shadow System。 | DESIGN.md |
+| L013 | 前端修改前必须读取 DESIGN.md | WARN | 编辑 `*.vue` 文件时，检查当前会话是否已读取 `platform-frontend/DESIGN.md` | `*.vue` | 修改任何 Vue 组件的样式前，必须先读取 `platform-frontend/DESIGN.md`，确保颜色、字体、间距、圆角、阴影等符合设计规范。这是强制要求，不可跳过。 | DESIGN.md |
+| L014 | Service 变更必须有对应测试变更 | ERROR | `git diff --name-only` 中包含 `*ServiceImpl.java` 但不包含对应的 `*Test.java` | `*ServiceImpl.java` | 检测到 ServiceImpl 代码变更但没有对应测试变更。必须执行 TDD 流程：(1) 先定义接口/方法签名 (2) 编写单元测试（正常+边界+异常）(3) 运行确认红灯 (4) 编写实现 (5) 运行确认绿灯。**每个 task 独立执行此流程，禁止攒到最后统一补测试。** | experience/代码审查模式（第三次验证，置信度高） |
 
 ## 检查级别说明
 

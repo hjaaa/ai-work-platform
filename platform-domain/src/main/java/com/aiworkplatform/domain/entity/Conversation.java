@@ -9,10 +9,11 @@ import java.time.LocalDateTime;
 @TableName("conversation")
 public class Conversation {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     private String projectId;
+    private String threadId;
     private String role;
     private String content;
     private String messageType;

@@ -1,4 +1,4 @@
-package com.aiworkplatform.service.document;
+package com.aiworkplatform.service.document.impl;
 
 import com.aiworkplatform.domain.mapper.GenerationMapper;
 import com.aiworkplatform.service.chat.MessagePushService;
@@ -10,13 +10,13 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 
-class PrdGenerateServiceTest {
+class PrdGenerateServiceImplTest {
 
-    private PrdGenerateService prdGenerateService;
+    private PrdGenerateServiceImpl prdGenerateService;
 
     @BeforeEach
     void setUp() {
-        prdGenerateService = new PrdGenerateService(
+        prdGenerateService = new PrdGenerateServiceImpl(
                 mock(ClaudeCodeOrchestrator.class),
                 new OrchestratorConfig(),
                 mock(GenerationMapper.class),
@@ -36,7 +36,7 @@ class PrdGenerateServiceTest {
                 一些后置文字
                 """;
 
-        PrdGenerateService.PrdParseResult result = prdGenerateService.parseOutput(output);
+        PrdGenerateServiceImpl.PrdParseResult result = prdGenerateService.parseOutput(output);
 
         assertNotNull(result.prdContent());
         assertTrue(result.prdContent().contains("员工管理系统"));
@@ -55,7 +55,7 @@ class PrdGenerateServiceTest {
                 [/PRD]
                 """;
 
-        PrdGenerateService.PrdParseResult result = prdGenerateService.parseOutput(output);
+        PrdGenerateServiceImpl.PrdParseResult result = prdGenerateService.parseOutput(output);
 
         assertNotNull(result.questions());
         assertEquals(2, result.questions().size());
@@ -70,7 +70,7 @@ class PrdGenerateServiceTest {
                 [/PRD]
                 """;
 
-        PrdGenerateService.PrdParseResult result = prdGenerateService.parseOutput(output);
+        PrdGenerateServiceImpl.PrdParseResult result = prdGenerateService.parseOutput(output);
 
         assertNotNull(result.prdContent());
         assertTrue(result.questions().isEmpty());
@@ -80,7 +80,7 @@ class PrdGenerateServiceTest {
     void should_returnNullPrd_when_noPrdBlock() {
         String output = "这是一段没有PRD标记的普通文本";
 
-        PrdGenerateService.PrdParseResult result = prdGenerateService.parseOutput(output);
+        PrdGenerateServiceImpl.PrdParseResult result = prdGenerateService.parseOutput(output);
 
         assertNull(result.prdContent());
     }

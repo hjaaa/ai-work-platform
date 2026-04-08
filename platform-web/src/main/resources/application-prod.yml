@@ -4,6 +4,9 @@ server:
   port: 8080
 
 spring:
+  flyway:
+    clean-disabled: true
+    out-of-order: false
   datasource:
     url: jdbc:mysql://prod-db:3306/ai_work_platform?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ai_platform

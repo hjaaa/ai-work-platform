@@ -8,6 +8,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -31,13 +32,30 @@ public final class ProcessExecutor {
      */
     public static String execute(Path workDir, int timeoutMinutes,
                                  Consumer<String> lineConsumer, String... command) {
+        return execute(workDir, timeoutMinutes, lineConsumer, null, command);
+    }
+
+    /**
+     * 流式执行，支持通过 processRef 暴露进程句柄供外部取消
+     *
+     * @param processRef 非空时，进程启动后会 set 进去，外部可通过 processRef.get().destroyForcibly() 取消
+     */
+    public static String execute(Path workDir, int timeoutMinutes,
+                                 Consumer<String> lineConsumer,
+                                 AtomicReference<Process> processRef,
+                                 String... command) {
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.directory(workDir.toFile());
         pb.redirectErrorStream(true);
+        // 将子进程 stdin 重定向为空，避免 Claude CLI 等待 stdin 超时产生 warning
+        pb.redirectInput(ProcessBuilder.Redirect.from(new java.io.File("/dev/null")));
 
         Process process = null;
         try {
             process = pb.start();
+            if (processRef != null) {
+                processRef.set(process);
+            }
             StringBuilder output = new StringBuilder();
 
             try (BufferedReader reader = new BufferedReader(

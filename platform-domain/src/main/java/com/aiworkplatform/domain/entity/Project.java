@@ -9,13 +9,17 @@ import java.time.LocalDateTime;
 @TableName("project")
 public class Project {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     private String projectId;
     private String name;
     private String description;
+    private String gitUrl;
+    private String defaultBranch;
     private String workspacePath;
+    private String codePath;
+    private String cloneErrorMessage;
     private String status;
     private String deployUrl;
     private String createdBy;

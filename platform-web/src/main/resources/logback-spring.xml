@@ -6,25 +6,25 @@
 
     <!-- 脱敏转换器（全环境生效） -->
     <conversionRule conversionWord="desensitize"
-                    converterClass="com.aiworkplatform.web.config.logging.DesensitizeConverter"/>
+                    class="com.aiworkplatform.web.config.logging.DesensitizeConverter"/>
 
     <!-- 公共日志格式 -->
     <property name="LOG_PATTERN_COLOR"
-              value="%d{HH:mm:ss.SSS} %highlight(%-5level) [%thread] [%X{traceId:-}] %cyan(%-40.40logger{39}) : %desensitize(%msg)%n"/>
+              value="%d{HH:mm:ss.SSS} %highlight(%-5level) [%thread] [%X{traceId:-}] %cyan(%-40.40logger{39}) : %desensitize%n"/>
     <property name="LOG_PATTERN_PLAIN"
-              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{traceId:-}] %-40.40logger{39} : %desensitize(%msg)%n"/>
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{traceId:-}] %-40.40logger{39} : %desensitize%n"/>
 
     <!-- 按 profile 加载对应的环境配置 -->
     <springProfile name="default,dev">
-        <include resource="logback-dev.xml"/>
+        <include resource="logback-spring-dev.xml"/>
     </springProfile>
 
     <springProfile name="test">
-        <include resource="logback-test.xml"/>
+        <include resource="logback-spring-test.xml"/>
     </springProfile>
 
     <springProfile name="prod">
-        <include resource="logback-prod.xml"/>
+        <include resource="logback-spring-prod.xml"/>
     </springProfile>
 
 </configuration>

@@ -3,6 +3,7 @@ package com.aiworkplatform.service.deploy;
 import com.aiworkplatform.common.exception.BusinessException;
 import com.aiworkplatform.domain.mapper.DeploymentMapper;
 import com.aiworkplatform.service.chat.MessagePushService;
+import com.aiworkplatform.service.deploy.impl.DeployServiceImpl;
 import com.aiworkplatform.service.project.ProjectService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,7 +16,7 @@ import static org.mockito.Mockito.*;
 class DeployServiceTest {
 
     private DeployConfig deployConfig;
-    private DeployService deployService;
+    private DeployServiceImpl deployService;
 
     @BeforeEach
     void setUp() {
@@ -27,7 +28,7 @@ class DeployServiceTest {
         server.setUsername("root");
         deployConfig.setServers(List.of(server));
 
-        deployService = new DeployService(
+        deployService = new DeployServiceImpl(
                 deployConfig,
                 mock(DeploymentMapper.class),
                 mock(ProjectService.class),
@@ -39,7 +40,7 @@ class DeployServiceTest {
     @Test
     void should_throwException_when_serverNotFound() {
         deployConfig.setServers(List.of());
-        DeployService svc = new DeployService(
+        DeployServiceImpl svc = new DeployServiceImpl(
                 deployConfig,
                 mock(DeploymentMapper.class),
                 mock(ProjectService.class),

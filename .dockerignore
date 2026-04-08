@@ -1,0 +1,33 @@
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# Node（前端有独立 Dockerfile）
+platform-frontend/node_modules/
+platform-frontend/dist/
+
+# Maven 构建产物（只保留 platform-web/target 的 JAR）
+platform-common/target/
+platform-domain/target/
+platform-service/target/
+
+# 文档和配置
+*.md
+.specify/
+context/
+requirements/
+.claude/
+
+# OS
+.DS_Store
+*.log
+logs/
+
+# Docker
+docker-compose.override.yml
+.env

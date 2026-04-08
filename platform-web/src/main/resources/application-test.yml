@@ -1,6 +1,8 @@
 # ========== 测试环境 ==========
 
 spring:
+  flyway:
+    clean-disabled: true
   datasource:
     url: jdbc:mysql://test-db:3306/ai_work_platform?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ai_platform
