@@ -31,7 +31,10 @@
 | L011 | 禁止非规范圆角 | WARN | `border-radius:\s*(\d+)px` 且值不在 `[0, 4, 6, 8, 12, 50%]` 范围内 | `*.vue` `*.css` `*.scss` | 圆角值必须使用设计规范中的标准值：4px（小元素）、6px（Logo）、8px（按钮/导航项）、12px（卡片）、50%（圆形）。参考 `platform-frontend/DESIGN.md` §4 Component Styling。 | DESIGN.md |
 | L012 | 禁止非规范阴影 | WARN | `box-shadow:` 且不包含 `rgba(38, 38, 38` | `*.vue` `*.css` `*.scss` | 阴影必须使用设计规范定义的值：卡片默认 `rgba(38, 38, 38, 0.1) 0px 1px 5px 0px`，hover `rgba(38, 38, 38, 0.15) 0px 2px 8px 0px`。禁止使用 `rgba(0,0,0,...)` 等非规范阴影。参考 `platform-frontend/DESIGN.md` §7 Shadow System。 | DESIGN.md |
 | L013 | 前端修改前必须读取 DESIGN.md | WARN | 编辑 `*.vue` 文件时，检查当前会话是否已读取 `platform-frontend/DESIGN.md` | `*.vue` | 修改任何 Vue 组件的样式前，必须先读取 `platform-frontend/DESIGN.md`，确保颜色、字体、间距、圆角、阴影等符合设计规范。这是强制要求，不可跳过。 | DESIGN.md |
-| L014 | Service 变更必须有对应测试变更 | ERROR | `git diff --name-only` 中包含 `*ServiceImpl.java` 但不包含对应的 `*Test.java` | `*ServiceImpl.java` | 检测到 ServiceImpl 代码变更但没有对应测试变更。必须执行 TDD 流程：(1) 先定义接口/方法签名 (2) 编写单元测试（正常+边界+异常）(3) 运行确认红灯 (4) 编写实现 (5) 运行确认绿灯。**每个 task 独立执行此流程，禁止攒到最后统一补测试。** | experience/代码审查模式（第三次验证，置信度高） |
+| L014 | Service 变更必须先写测试再写实现 | ERROR | `git diff --name-only` 中包含 `*ServiceImpl.java` 但不包含对应的 `*Test.java` | `*ServiceImpl.java` | 检测到 ServiceImpl 代码变更但没有对应测试变更。**顺序不可逆**：必须先写测试、再写实现，禁止先改业务代码再补测试。正确 TDD 流程：(1) 定义接口/方法签名 (2) 编写单元测试（正常+边界+异常）(3) 运行确认红灯 (4) 编写实现 (5) 运行确认绿灯。每个 task 独立执行，禁止攒到最后统一补测试。 | experience/代码审查模式（第四次验证，置信度高） |
+| L015 | @TableName 实体类必须继承 BaseEntity | ERROR | `@TableName` 所在类未 `extends BaseEntity` | `*entity/*.java` | 所有被 @TableName 修饰的实体类必须继承 BaseEntity（含 id、createdBy、createdAt、updatedAt、deleted 公共字段）。修改类声明为 `public class XxxEntity extends BaseEntity`，移除类中与 BaseEntity 重复的字段，添加 `@EqualsAndHashCode(callSuper = true)`。 | experience/实体类规范 |
+| L016 | @TableName 实体类字段必须有中文注释 | WARN | `@TableName` 所在类中存在无 `/** ... */` 注释的 `private` 字段 | `*entity/*.java` | 实体类每个字段（含继承自 BaseEntity 的字段）必须有 `/** 中文注释 */` Javadoc 注释。注释应说明字段含义，枚举类型字段还需列出可选值（如 `/** 状态: running/success/failed */`）。 | experience/实体类规范 |
+| L017 | 新增实体表字段必须有 COMMENT | WARN | Flyway 迁移中 `ADD COLUMN` 或 `CREATE TABLE` 的列定义缺少 `COMMENT` | `*.sql` | 所有数据库列定义必须带 `COMMENT '中文说明'`。包括 ALTER TABLE ADD COLUMN 和 CREATE TABLE 中的每一列。确保 Java 实体注释与数据库 COMMENT 含义一致。 | experience/实体类规范 |
 
 ## 检查级别说明
 

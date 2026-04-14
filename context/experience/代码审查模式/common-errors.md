@@ -54,6 +54,13 @@
 - **正确做法**：`@Async` 方法放在独立 Service 中，由 Controller 层编排调用顺序（先 createProject 再 cloneRepository），避免 Service 间循环依赖
 - **适用场景**：涉及 `@Async`/`@Transactional` 等需要 AOP 代理的场景
 
+## 2026-04-09 先写业务代码再补测试（第四次：local 项目 workspacePath 赋值逻辑变更）
+
+- **现象**：修改 `ProjectServiceImpl.createProject()` 中 local 类型的 `workspacePath` 赋值逻辑后，才补充单元测试断言 `workspacePath == localPath`
+- **原因**：AI 将"先改业务逻辑、再补测试"视为默认流程，在小改动场景尤其容易犯
+- **正确做法**：无论改动大小，必须先写/改测试（定义预期：local 项目 workspacePath 应等于 localPath），确认红灯后再改业务实现，确认绿灯。**这是不可跳过的顺序约束**
+- **适用场景**：所有 Service 层代码变更，包括"看起来很小"的字段赋值逻辑修改
+
 ## 2026-04-08 @Async 同 bean 内自调用仍不走代理（第二次验证）
 
 - **现象**：GitServiceImpl.retryClone() 内部调用 this.cloneRepository()，虽然 cloneRepository 有 @Async 注解，但实际同步执行，WebSocket 进度推送不工作
