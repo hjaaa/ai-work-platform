@@ -1,0 +1,30 @@
+2026-04-09 16:41 | auto-save | context-compact | 上下文压缩前自动保存，请读取本文件恢复状态
+## Current State
+- Status: in_progress
+- Phase: analysis → design
+
+## What Worked
+- 完整实施，所有测试通过（10 个用例全绿）
+- 文件操作先于 DB 顺序正确
+- CLAUDE.md 幂等注入逻辑通过测试验证
+- 关联操作物理删除（非软删除），规避 unique key + deleted 不一致问题
+- `any()` 对 BaseMapper insert 有歧义，需改为 `any(SpecProjectLink.class)` ← 坑点
+
+## What Did NOT Work
+- mvn compile 不带 JDK 路径会失败：需 JAVA_HOME=~/devsoft/jdk-21.0.10.jdk/Contents/Home
+- platform-service 测试前需先 install platform-domain
+
+## Exact Next Step
+- 实施完成，可验证
+
+## Files State
+- V12/V13 Flyway 迁移 — 已创建
+- DevSpec, SpecProjectLink 实体 — 已创建
+- DevSpecMapper, SpecProjectLinkMapper — 已创建
+- SpecService + SpecServiceImpl — 已创建
+- SpecServiceImplTest (10 个用例) — 已通过
+- CreateSpecRequest, UpdateSpecRequest, LinkSpecRequest, SpecVO — 已创建
+- SpecController — 已创建
+- platform-frontend/src/api/spec.js — 已创建
+- platform-frontend/src/views/SpecView.vue — 已创建
+- WorkbenchView.vue — 已修改（ruleMode + handleRules + SpecView 引入）

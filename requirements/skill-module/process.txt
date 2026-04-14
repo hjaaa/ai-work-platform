@@ -1,23 +1,36 @@
 # 进度日志（存档/读档）
-# 用途：跨会话恢复时 Agent 读取本文件，快速重建工作上下文
-# 格式参考 ECC save-session 结构，确保恢复时信息完整
 
 ## Current State
-# status: not_started | in_progress | blocked | completed
-# phase: analysis | design | implementation | review | done
-# blocked_by: (如果 blocked，写明原因)
+status: completed
+phase: done
+blocked_by:
 
 ## What Worked
-# 已验证有效的方案和决策（需有验证证据）
+- 文件操作先于 DB 写入，写文件失败直接抛异常 BusinessException，不会出现 DB/文件不一致
+- 个人 skill 路径：System.getProperty("user.home")/.claude/skills/{skillId}.md
+- 项目 skill 路径：project.codePath/.claude/skills/{skillId}.md
+- TDD 10 个测试全绿，路径传参约定：个人 skill 的 personalSkillBaseDir = ~ 等价目录
+- SkillServiceImpl 中 resolveSkillFilePath 接受 null → 自动 fallback 到 user.home
+- WorkbenchView skillMode / chatMode 互斥，handleNewTask 也会重置 skillMode
 
 ## What Did NOT Work
-# 尝试过但失败的路（最重要：防止 AI 下次重试同样的路）
-# 格式：- 尝试 [方案] → 失败，因为 [原因]（不要再试）
+- 测试 should_delete_skill_and_remove_file 初始路径写错（传 tempDir.getParent() 而非 tempDir），修正为 tempDir
 
 ## Exact Next Step
-# 精确到文件+方法级别的下一步操作
-# 格式：[文件路径] → [具体要做什么]
+已完成，无下一步
 
 ## Files State
-# 每个涉及的文件状态
-# 格式：[文件路径] → Complete | In Progress | Not Started
+platform-web/src/main/resources/db/migration/V11__add_skill_table.sql → Complete
+platform-domain/src/main/java/com/aiworkplatform/domain/enums/SkillScope.java → Complete
+platform-domain/src/main/java/com/aiworkplatform/domain/entity/Skill.java → Complete
+platform-domain/src/main/java/com/aiworkplatform/domain/mapper/SkillMapper.java → Complete
+platform-service/src/main/java/com/aiworkplatform/service/skill/SkillService.java → Complete
+platform-service/src/main/java/com/aiworkplatform/service/skill/impl/SkillServiceImpl.java → Complete
+platform-service/src/test/java/com/aiworkplatform/service/skill/SkillServiceImplTest.java → Complete
+platform-web/src/main/java/com/aiworkplatform/web/controller/SkillController.java → Complete
+platform-web/src/main/java/com/aiworkplatform/web/dto/CreateSkillRequest.java → Complete
+platform-web/src/main/java/com/aiworkplatform/web/dto/UpdateSkillRequest.java → Complete
+platform-web/src/main/java/com/aiworkplatform/web/dto/SkillVO.java → Complete
+platform-frontend/src/api/skill.js → Complete
+platform-frontend/src/views/SkillView.vue → Complete
+platform-frontend/src/views/WorkbenchView.vue → Complete（添加 skillMode + SkillView 集成）

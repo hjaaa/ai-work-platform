@@ -1,0 +1,29 @@
+# 进度日志（存档/读档）
+
+## Current State
+status: completed
+phase: done
+blocked_by:
+
+## What Worked
+- 后端 `SkillService.listSkills` 增加 `includeSystem` 参数，scope=null + includeSystem=true 时不排除 SYSTEM
+- 前端监听 textarea input 事件，检测末尾 `$` 弹出技能浮层
+- 选中技能后替换末尾 `$` 为 `$skillName `，后端 SkillPromptConverter 已有处理
+- v-click-outside 指令复用项目已有实现
+- 两个 textarea（欢迎页 + 聊天模式）都支持 $ 触发
+- wb-input-box 需加 position: relative 才能让弹窗正确定位
+
+## What Did NOT Work
+
+## Exact Next Step
+已完成，无下一步
+
+## Files State
+platform-domain/src/main/java/com/aiworkplatform/domain/enums/SkillScope.java → Complete（增加 SYSTEM）
+platform-service/src/main/java/com/aiworkplatform/service/skill/SkillService.java → Complete（listSkills 增加 includeSystem）
+platform-service/src/main/java/com/aiworkplatform/service/skill/impl/SkillServiceImpl.java → Complete
+platform-service/src/test/java/com/aiworkplatform/service/skill/SkillServiceImplTest.java → Complete（17 测试）
+platform-web/src/main/java/com/aiworkplatform/web/controller/SkillController.java → Complete
+platform-web/src/main/resources/db/migration/V14__skill_scope_add_system.sql → Complete
+platform-frontend/src/api/skill.js → Complete
+platform-frontend/src/views/WorkbenchView.vue → Complete（$ 触发技能弹窗）

@@ -1,0 +1,10 @@
+id: local-project-type
+title: 支持本地项目类别
+status: in_progress
+current_phase: analysis
+created_at: 2026-04-09
+created_by: richardhuang
+tags:
+  - project
+  - local
+  - workspacePath

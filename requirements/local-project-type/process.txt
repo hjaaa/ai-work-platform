@@ -1,0 +1,26 @@
+## Current State
+- status: completed
+- phase: implementation done
+
+## What Worked
+- 新增 localPath 独立字段而非复用 workspacePath，workspacePath 保持系统托管（存上传文件等）
+- 前端根据 navigator.platform 自动判断 Mac/Windows/Linux 显示不同路径占位符
+- 删除时只清理 workspacePath（系统目录），不碰 localPath（用户目录）
+
+## What Did NOT Work
+- (暂无)
+
+## Exact Next Step
+- 等待用户验证
+
+## Files State
+- V10__add_project_type_and_local_path.sql — 新建
+- ProjectType.java — 新建（枚举）
+- Project.java — 修改（增加 projectType、localPath 字段）
+- CreateProjectRequest.java — 修改（增加 projectType、localPath，gitUrl 不再强制 @NotBlank）
+- UpdateProjectRequest.java — 修改（增加 localPath，gitUrl 不再强制 @NotBlank）
+- ProjectController.java — 修改（按类型校验、分流 clone）
+- ProjectService.java — 修改（接口签名变更）
+- ProjectServiceImpl.java — 修改（创建/更新/删除逻辑按类型分流）
+- project.js — 修改（API 参数增加 projectType、localPath）
+- ProjectListView.vue — 修改（表单类型切换、卡片标签、校验逻辑）
