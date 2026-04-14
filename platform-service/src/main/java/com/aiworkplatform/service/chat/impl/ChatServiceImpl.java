@@ -25,6 +25,8 @@ import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class ChatServiceImpl implements ChatService {
@@ -38,6 +40,9 @@ public class ChatServiceImpl implements ChatService {
     private final ChatThreadService chatThreadService;
     private final ClaudeCodeOrchestrator orchestrator;
     private final MessagePushService messagePushService;
+
+    /** 记录已被用户取消的线程，防止异步方法在取消后仍保存 assistant 消息 */
+    private final Set<String> cancelledThreads = ConcurrentHashMap.newKeySet();
 
     public ChatServiceImpl(ConversationMapper conversationMapper,
                            GenerationMapper generationMapper,
@@ -94,12 +99,23 @@ public class ChatServiceImpl implements ChatService {
                     threadId, Path.of(project.getWorkspacePath()), cliPrompt, sessionId);
 
             if (result.isCancelled()) {
+                cancelledThreads.remove(threadId);
                 generation.setStatus(GenerationStatus.FAILED.getValue());
                 generation.setDurationMs((int) (System.currentTimeMillis() - startTime));
                 generation.setErrorMessage("用户取消");
                 generationMapper.updateById(generation);
 
                 messagePushService.pushProgressToThread(threadId, projectId, "已取消生成");
+                return;
+            }
+
+            // 检查是否在生成过程中被用户取消（进程已完成但取消请求随后到达的竞态情况）
+            if (cancelledThreads.remove(threadId)) {
+                log.info("生成已完成但用户已取消，丢弃结果: threadId={}", threadId);
+                generation.setStatus(GenerationStatus.FAILED.getValue());
+                generation.setDurationMs((int) (System.currentTimeMillis() - startTime));
+                generation.setErrorMessage("用户取消");
+                generationMapper.updateById(generation);
                 return;
             }
 
@@ -131,11 +147,16 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public void cancelThread(String threadId) {
-        boolean cancelled = orchestrator.cancel(threadId);
-        if (cancelled) {
-            log.info("取消线程生成: threadId={}", threadId);
+        // 标记线程为已取消，阻止异步方法后续保存 assistant 消息
+        cancelledThreads.add(threadId);
+
+        boolean processKilled = orchestrator.cancel(threadId);
+        if (processKilled) {
+            log.info("取消线程生成（进程已终止）: threadId={}", threadId);
         } else {
-            log.info("线程无运行中任务，忽略取消: threadId={}", threadId);
+            // 进程已结束，assistant 消息可能已保存到数据库，需要清理
+            log.info("线程进程已结束，清理已保存的 assistant 消息: threadId={}", threadId);
+            deleteLatestAssistantMessage(threadId);
         }
     }
 
@@ -173,6 +194,23 @@ public class ChatServiceImpl implements ChatService {
         conversation.setContent(content);
         conversation.setMessageType(messageType);
         conversationMapper.insert(conversation);
+    }
+
+    /**
+     * 删除线程中最新的 assistant 消息（取消时清理已保存的回复）
+     */
+    private void deleteLatestAssistantMessage(String threadId) {
+        List<Conversation> assistantMsgs = conversationMapper.selectList(
+                new LambdaQueryWrapper<Conversation>()
+                        .eq(Conversation::getThreadId, threadId)
+                        .eq(Conversation::getRole, "assistant")
+                        .orderByDesc(Conversation::getCreatedAt)
+                        .last("LIMIT 1"));
+        if (!assistantMsgs.isEmpty()) {
+            conversationMapper.deleteById(assistantMsgs.get(0).getId());
+            log.info("已删除线程最新 assistant 消息: threadId={}, conversationId={}",
+                    threadId, assistantMsgs.get(0).getId());
+        }
     }
 
     /**

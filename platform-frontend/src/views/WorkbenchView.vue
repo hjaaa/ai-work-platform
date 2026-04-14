@@ -11,14 +11,24 @@
           </svg>
           <span>新任务</span>
         </div>
-        <div class="wb-action-item">
+        <div class="wb-action-item" :class="{ active: ruleMode }" @click="handleRules">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10 9 9 9 8 9"/>
+          </svg>
+          <span>规范</span>
+        </div>
+        <div class="wb-action-item" :class="{ active: skillMode }" @click="handleSkillAndApps">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="3" width="7" height="7" rx="1"/>
             <rect x="14" y="3" width="7" height="7" rx="1"/>
             <rect x="3" y="14" width="7" height="7" rx="1"/>
             <rect x="14" y="14" width="7" height="7" rx="1"/>
           </svg>
-          <span>技能和应用</span>
+          <span>技能</span>
         </div>
       </div>
 
@@ -99,7 +109,18 @@
 
     <!-- 主内容区 -->
     <div class="wb-main">
-      <!-- 顶部标题 -->
+      <!-- 技能面板 -->
+      <template v-if="skillMode">
+        <SkillView />
+      </template>
+
+      <!-- 规范面板 -->
+      <template v-else-if="ruleMode">
+        <SpecView />
+      </template>
+
+      <!-- 顶部标题（聊天 / 新任务模式） -->
+      <template v-else>
       <div class="wb-main-header">
         <h2 class="wb-main-title">{{ chatMode ? (selectedProject?.name || '对话') : '新任务' }}</h2>
       </div>
@@ -144,6 +165,26 @@
         <!-- 底部输入区 -->
         <div class="wb-input-area">
           <div class="wb-input-box">
+            <!-- $ 技能弹窗 -->
+            <div v-if="showSkillPopup && filteredSkills.length > 0" class="skill-popup" v-click-outside="closeSkillPopup">
+              <div
+                v-for="(skill, idx) in filteredSkills"
+                :key="skill.skillId"
+                class="skill-popup-item"
+                :class="{ 'skill-popup-item--active': idx === highlightedSkillIndex }"
+                @click="selectSkillFromPopup(skill)"
+                @mouseenter="highlightedSkillIndex = idx"
+              >
+                <svg class="skill-popup-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/>
+                </svg>
+                <span class="skill-popup-name">{{ skill.name }}</span>
+                <span class="skill-popup-desc">{{ skill.description || '' }}</span>
+                <span :class="['skill-popup-scope', 'skill-scope-' + (skill.scope || '').toLowerCase()]">
+                  {{ { PERSONAL: '个人', PROJECT: '项目', SYSTEM: '系统' }[skill.scope] || skill.scope }}
+                </span>
+              </div>
+            </div>
             <div v-if="uploadedFiles.length > 0" class="wb-uploaded-files">
               <div v-for="(f, i) in uploadedFiles" :key="i" class="wb-file-tag">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -151,15 +192,29 @@
                 <button class="wb-file-remove" @click="uploadedFiles.splice(i, 1)">&times;</button>
               </div>
             </div>
-            <textarea
-              v-model="inputText"
-              class="wb-textarea"
-              :placeholder="uploadedFiles.length > 0 ? '描述你想对文件做什么...' : '输入任务描述，@ 添加文件，/ 使用命令'"
-              rows="2"
-              @keydown.enter.exact="handleSend"
-              @input="autoResize"
-              ref="textareaRef"
-            ></textarea>
+            <!-- 已选中 skill 标签 + 输入框 -->
+            <div class="wb-skill-input-row">
+              <div v-if="selectedSkill" class="wb-skill-tag">
+                <svg class="wb-skill-tag-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/>
+                </svg>
+                <span class="wb-skill-tag-name">{{ selectedSkill.name }}</span>
+                <button class="wb-skill-tag-remove" @click="removeSelectedSkill">&times;</button>
+              </div>
+              <textarea
+                v-model="inputText"
+                class="wb-textarea"
+                :placeholder="selectedSkill ? '输入任务描述...' : (uploadedFiles.length > 0 ? '描述你想对文件做什么...' : '输入任务描述，@ 添加文件，$ 使用技能')"
+                rows="2"
+                @keydown.enter.exact="handleWelcomeEnter($event)"
+                @keydown.arrow-up="handleSkillKeydown($event)"
+                @keydown.arrow-down="handleSkillKeydown($event)"
+                @input="autoResize(); handleInputForSkill($event)"
+                @keydown.esc="closeSkillPopup"
+                @keydown.backspace="!inputText && selectedSkill ? removeSelectedSkill() : null"
+                ref="textareaRef"
+              ></textarea>
+            </div>
             <div class="wb-input-toolbar">
               <div class="wb-toolbar-left">
                 <button class="wb-toolbar-btn wb-add-btn" title="添加文件" :disabled="uploading" @click="fileInputRef?.click()">
@@ -190,7 +245,14 @@
             <!-- 用户消息：右上角标签样式 -->
             <template v-if="msg.role === 'user'">
               <div class="chat-user-msg">
-                <span class="chat-user-tag">{{ msg.content }}</span>
+                <span class="chat-user-tag">
+                  <span v-if="parseSkillFromContent(msg.content).skillName" class="chat-skill-tag">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/>
+                    </svg>
+                    <span>{{ parseSkillFromContent(msg.content).skillName }}</span>
+                  </span>{{ parseSkillFromContent(msg.content).rest }}
+                </span>
               </div>
             </template>
             <!-- AI 回复：左对齐 Markdown -->
@@ -216,17 +278,32 @@
               </div>
             </template>
           </div>
-          <!-- 加载指示器 -->
-          <div v-if="loading" class="chat-loading">
-            <div class="chat-loading-dots">
-              <span></span><span></span><span></span>
-            </div>
-          </div>
+          <!-- 加载指示器已由"正在思考..."消息替代 -->
         </div>
 
         <!-- 底部输入区（聊天模式） -->
         <div class="wb-input-area">
           <div class="wb-input-box">
+            <!-- $ 技能弹窗 -->
+            <div v-if="showSkillPopup && filteredSkills.length > 0" class="skill-popup" v-click-outside="closeSkillPopup">
+              <div
+                v-for="(skill, idx) in filteredSkills"
+                :key="skill.skillId"
+                class="skill-popup-item"
+                :class="{ 'skill-popup-item--active': idx === highlightedSkillIndex }"
+                @click="selectSkillFromPopup(skill)"
+                @mouseenter="highlightedSkillIndex = idx"
+              >
+                <svg class="skill-popup-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/>
+                </svg>
+                <span class="skill-popup-name">{{ skill.name }}</span>
+                <span class="skill-popup-desc">{{ skill.description || '' }}</span>
+                <span :class="['skill-popup-scope', 'skill-scope-' + (skill.scope || '').toLowerCase()]">
+                  {{ { PERSONAL: '个人', PROJECT: '项目', SYSTEM: '系统' }[skill.scope] || skill.scope }}
+                </span>
+              </div>
+            </div>
             <div v-if="uploadedFiles.length > 0" class="wb-uploaded-files">
               <div v-for="(f, i) in uploadedFiles" :key="i" class="wb-file-tag">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -234,15 +311,31 @@
                 <button class="wb-file-remove" @click="uploadedFiles.splice(i, 1)">&times;</button>
               </div>
             </div>
-            <textarea
-              v-model="inputText"
-              class="wb-textarea"
-              :placeholder="uploadedFiles.length > 0 ? '描述你想对文件做什么...' : '要求后续变更'"
-              rows="2"
-              @keydown.enter.exact="handleChatSend"
-              @input="autoResize"
-              ref="chatTextareaRef"
-            ></textarea>
+            <!-- loading 时只显示取消提示，隐藏输入区 -->
+            <div v-if="loading" class="wb-cancel-hint">按 ESC 取消生成</div>
+            <!-- 已选中 skill 标签 + 输入框 -->
+            <div v-else class="wb-skill-input-row">
+              <div v-if="selectedSkill" class="wb-skill-tag">
+                <svg class="wb-skill-tag-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/>
+                </svg>
+                <span class="wb-skill-tag-name">{{ selectedSkill.name }}</span>
+                <button class="wb-skill-tag-remove" @click="removeSelectedSkill">&times;</button>
+              </div>
+              <textarea
+                v-model="inputText"
+                class="wb-textarea"
+                :placeholder="selectedSkill ? '输入任务描述...' : (uploadedFiles.length > 0 ? '描述你想对文件做什么...' : '要求后续变更，$ 使用技能')"
+                rows="2"
+                @keydown.enter.exact="handleChatEnter($event)"
+                @keydown.arrow-up="handleSkillKeydown($event)"
+                @keydown.arrow-down="handleSkillKeydown($event)"
+                @input="autoResize(); handleInputForSkill($event)"
+                @keydown.esc="closeSkillPopup"
+                @keydown.backspace="!inputText && selectedSkill ? removeSelectedSkill() : null"
+                ref="chatTextareaRef"
+              ></textarea>
+            </div>
             <div class="wb-input-toolbar">
               <div class="wb-toolbar-left">
                 <button class="wb-toolbar-btn wb-add-btn" title="添加文件" :disabled="uploading" @click="fileInputRef?.click()">
@@ -265,6 +358,7 @@
         </div>
       </template>
       <input ref="fileInputRef" type="file" hidden @change="handleFileSelected" />
+      </template><!-- end v-else (非技能面板) -->
     </div>
 
     <!-- 新建项目对话框 - Teambition 风格 -->
@@ -283,6 +377,32 @@
           <!-- Body -->
           <div class="tb-dialog-body">
             <div class="tb-form">
+              <!-- 项目类型 -->
+              <div class="tb-form-item">
+                <label class="tb-label">项目类型</label>
+                <div class="tb-type-switch">
+                  <button
+                    class="tb-type-btn"
+                    :class="{ active: createForm.projectType === 'git' }"
+                    @click="createForm.projectType = 'git'"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="4"/><line x1="1.05" y1="12" x2="7" y2="12"/><line x1="17.01" y1="12" x2="22.96" y2="12"/>
+                    </svg>
+                    Git 仓库
+                  </button>
+                  <button
+                    class="tb-type-btn"
+                    :class="{ active: createForm.projectType === 'local' }"
+                    @click="createForm.projectType = 'local'"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    本地项目
+                  </button>
+                </div>
+              </div>
               <!-- 项目名称（必填） -->
               <div class="tb-form-item">
                 <label class="tb-label">项目名称 <span class="tb-required">*</span></label>
@@ -296,8 +416,8 @@
                   />
                 </div>
               </div>
-              <!-- Git 仓库地址（必填） -->
-              <div class="tb-form-item">
+              <!-- Git 仓库地址（git 类型必填） -->
+              <div v-if="createForm.projectType === 'git'" class="tb-form-item">
                 <label class="tb-label">Git 仓库地址 <span class="tb-required">*</span></label>
                 <div class="tb-input-wrap" :class="{ focused: focusedField === 'gitUrl' }">
                   <input
@@ -309,8 +429,8 @@
                   />
                 </div>
               </div>
-              <!-- 默认分支（选填） -->
-              <div class="tb-form-item">
+              <!-- 默认分支（git 类型选填） -->
+              <div v-if="createForm.projectType === 'git'" class="tb-form-item">
                 <label class="tb-label">默认分支</label>
                 <div class="tb-input-wrap" :class="{ focused: focusedField === 'branch' }">
                   <input
@@ -321,6 +441,20 @@
                     @blur="focusedField = ''"
                   />
                 </div>
+              </div>
+              <!-- 本地项目路径（local 类型必填） -->
+              <div v-if="createForm.projectType === 'local'" class="tb-form-item">
+                <label class="tb-label">项目路径 <span class="tb-required">*</span></label>
+                <div class="tb-input-wrap" :class="{ focused: focusedField === 'localPath' }">
+                  <input
+                    v-model="createForm.localPath"
+                    class="tb-input"
+                    :placeholder="localPathPlaceholder"
+                    @focus="focusedField = 'localPath'"
+                    @blur="focusedField = ''"
+                  />
+                </div>
+                <span class="tb-hint">请输入项目在本机的绝对路径</span>
               </div>
               <!-- 项目描述（选填） -->
               <div class="tb-form-item">
@@ -355,11 +489,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ModeSelector from '../components/ModeSelector.vue'
+import SkillView from './SkillView.vue'
+import SpecView from './SpecView.vue'
 import { listProjects, createProject } from '../api/project'
-import { listThreads, createThread, getThreadMessages, sendThreadMessage, uploadThreadFile } from '../api/thread'
+import { listSkills } from '../api/skill'
+import { listThreads, createThread, getThreadMessages, sendThreadMessage, cancelThread, uploadThreadFile } from '../api/thread'
 import { connectWebSocket, disconnectWebSocket, subscribeThread, unsubscribeThread } from '../api/websocket'
 import { ElMessage } from 'element-plus'
 import MarkdownIt from 'markdown-it'
@@ -399,8 +536,14 @@ const showModeSelector = ref(false)
 const showProjectDropdown = ref(false)
 const newProjectId = ref('')
 const creating = ref(false)
-const createForm = ref({ name: '', gitUrl: '', defaultBranch: '', description: '' })
+const createForm = ref({ name: '', projectType: 'git', gitUrl: '', defaultBranch: '', localPath: '', description: '' })
 const focusedField = ref('')
+
+// 根据操作系统显示不同的路径提示
+const localPathPlaceholder = computed(() => {
+  const isWindows = navigator.platform?.toLowerCase().includes('win')
+  return isWindows ? 'D:\\projects\\my-project' : '/Users/username/projects/my-project'
+})
 const inputText = ref('')
 const textareaRef = ref(null)
 const chatTextareaRef = ref(null)
@@ -414,18 +557,47 @@ const projectThreads = ref([])
 const currentThreadId = ref(null)
 const lastThreadProject = ref(null) // 上次点击线程所属的项目
 
+// 技能面板模式
+const skillMode = ref(false)
+
+// $ 唤起技能列表
+const showSkillPopup = ref(false)
+const allSkills = ref([])
+const skillFilterKeyword = ref('') // $ 后输入的筛选关键词
+const highlightedSkillIndex = ref(-1)
+const selectedSkill = ref(null) // 已选中的 skill 对象，用于标签展示
+
+// 根据关键词过滤 skill 列表
+const filteredSkills = computed(() => {
+  if (!skillFilterKeyword.value) return allSkills.value
+  const kw = skillFilterKeyword.value.toLowerCase()
+  return allSkills.value.filter(s =>
+    (s.name && s.name.toLowerCase().includes(kw)) ||
+    (s.description && s.description.toLowerCase().includes(kw))
+  )
+})
+
+// 规范面板模式
+const ruleMode = ref(false)
+
 // 聊天模式相关
 const chatMode = ref(false)
 const messages = ref([])
 const loading = ref(false)
+// 每次发送消息递增，取消时也递增；WebSocket 回调只处理匹配当前 generation 的消息
+let requestGeneration = 0
+let activeGeneration = 0
 const messagesRef = ref(null)
 
 onMounted(async () => {
   await loadProjects()
+  loadAllSkills()
+  document.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
   disconnectWebSocket()
+  document.removeEventListener('keydown', handleKeydown)
 })
 
 async function loadProjects() {
@@ -438,6 +610,117 @@ async function loadProjects() {
   } catch (e) {
     ElMessage.error('加载项目列表失败')
   }
+}
+
+async function loadAllSkills() {
+  try {
+    const res = await listSkills({ includeSystem: true })
+    allSkills.value = res.data || []
+  } catch (e) {
+    // 静默忽略，技能弹窗为空
+  }
+}
+
+function handleInputForSkill(e) {
+  const value = e.target.value
+  // 已选中 skill 时不再唤起 popup
+  if (selectedSkill.value) return
+
+  // 查找最后一个 $ 的位置，提取 $ 后面的筛选关键词
+  const dollarIdx = value.lastIndexOf('$')
+  if (dollarIdx >= 0) {
+    const afterDollar = value.slice(dollarIdx + 1)
+    // $ 后面不含空格时，视为正在输入筛选关键词
+    if (!afterDollar.includes(' ')) {
+      showSkillPopup.value = true
+      skillFilterKeyword.value = afterDollar
+      highlightedSkillIndex.value = 0
+      return
+    }
+  }
+  // 没有 $ 或 $ 后已有空格，关闭弹窗
+  if (showSkillPopup.value) {
+    showSkillPopup.value = false
+    skillFilterKeyword.value = ''
+    highlightedSkillIndex.value = -1
+  }
+}
+
+function selectSkillFromPopup(skill) {
+  selectedSkill.value = skill
+  // 移除 $ 及其后的筛选关键词
+  const currentVal = inputText.value
+  const dollarIdx = currentVal.lastIndexOf('$')
+  if (dollarIdx >= 0) {
+    inputText.value = currentVal.slice(0, dollarIdx)
+  }
+  showSkillPopup.value = false
+  skillFilterKeyword.value = ''
+  highlightedSkillIndex.value = -1
+  // 聚焦回输入框
+  nextTick(() => {
+    const ta = textareaRef.value || chatTextareaRef.value
+    if (ta) ta.focus()
+  })
+}
+
+// 移除已选中的 skill 标签
+function removeSelectedSkill() {
+  selectedSkill.value = null
+}
+
+// 键盘导航 skill 列表
+function handleSkillKeydown(e) {
+  if (!showSkillPopup.value || filteredSkills.value.length === 0) return
+  const len = filteredSkills.value.length
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    highlightedSkillIndex.value = (highlightedSkillIndex.value + 1) % len
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    highlightedSkillIndex.value = (highlightedSkillIndex.value - 1 + len) % len
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    if (highlightedSkillIndex.value >= 0 && highlightedSkillIndex.value < len) {
+      selectSkillFromPopup(filteredSkills.value[highlightedSkillIndex.value])
+    }
+  }
+}
+
+// 欢迎页 Enter 键统一处理
+function handleWelcomeEnter(e) {
+  if (showSkillPopup.value) {
+    handleSkillKeydown(e)
+  } else {
+    e.preventDefault()
+    handleSend()
+  }
+}
+
+// 聊天页 Enter 键统一处理
+function handleChatEnter(e) {
+  if (showSkillPopup.value) {
+    handleSkillKeydown(e)
+  } else {
+    e.preventDefault()
+    handleChatSend()
+  }
+}
+
+function closeSkillPopup() {
+  showSkillPopup.value = false
+  skillFilterKeyword.value = ''
+  highlightedSkillIndex.value = -1
+}
+
+// 从消息内容解析 $skillName 前缀，用于渲染标签
+function parseSkillFromContent(content) {
+  if (!content) return { skillName: null, rest: content }
+  const match = content.match(/^\$(\S+)\s*(.*)$/)
+  if (match) {
+    return { skillName: match[1], rest: match[2] || '' }
+  }
+  return { skillName: null, rest: content }
 }
 
 async function toggleProject(project) {
@@ -462,6 +745,8 @@ async function selectThread(project, thread) {
   selectedProject.value = project
   lastThreadProject.value = project
   currentThreadId.value = thread.threadId
+  skillMode.value = false
+  ruleMode.value = false
   await enterChatModeForThread(thread.threadId)
 }
 
@@ -508,8 +793,28 @@ function formatTime(dateStr) {
   return date.toLocaleDateString()
 }
 
+// 切换技能面板
+function handleSkillAndApps() {
+  skillMode.value = !skillMode.value
+  if (skillMode.value) {
+    chatMode.value = false
+    ruleMode.value = false
+  }
+}
+
+// 切换规范面板
+function handleRules() {
+  ruleMode.value = !ruleMode.value
+  if (ruleMode.value) {
+    skillMode.value = false
+    chatMode.value = false
+  }
+}
+
 // 新任务：根据优先级确定项目并新建线程
 async function handleNewTask() {
+  skillMode.value = false
+  ruleMode.value = false
   const targetProject = lastThreadProject.value || selectedProject.value || projects.value[0]
   if (!targetProject) {
     ElMessage.warning('请先创建一个项目')
@@ -528,17 +833,26 @@ async function handleCreate() {
     ElMessage.warning('请输入项目名称')
     return
   }
-  if (!createForm.value.gitUrl.trim()) {
+  const type = createForm.value.projectType
+  if (type === 'git' && !createForm.value.gitUrl.trim()) {
     ElMessage.warning('请输入 Git 仓库地址')
+    return
+  }
+  if (type === 'local' && !createForm.value.localPath.trim()) {
+    ElMessage.warning('请输入项目路径')
     return
   }
   creating.value = true
   try {
     const res = await createProject(createForm.value)
-    ElMessage.success('项目创建成功，正在拉取代码...')
+    if (type === 'local') {
+      ElMessage.success('本地项目创建成功')
+    } else {
+      ElMessage.success('项目创建成功，正在拉取代码...')
+    }
     showCreateDialog.value = false
     newProjectId.value = res.data.projectId
-    createForm.value = { name: '', gitUrl: '', defaultBranch: '', description: '' }
+    createForm.value = { name: '', projectType: 'git', gitUrl: '', defaultBranch: '', localPath: '', description: '' }
     await loadProjects()
     showModeSelector.value = true
   } catch (e) {
@@ -552,14 +866,25 @@ function handleModeSelect(mode) {
   router.push(`/project/${newProjectId.value}?mode=${mode}`)
 }
 
+// 构建发送内容：如果选中了 skill，前面拼 $skillName
+function buildSendContent() {
+  const text = inputText.value.trim()
+  if (selectedSkill.value) {
+    return '$' + selectedSkill.value.name + ' ' + text
+  }
+  return text
+}
+
 // 欢迎页发送：进入聊天模式
 function handleSend() {
-  if (!inputText.value.trim()) return
+  if (!inputText.value.trim() && !selectedSkill.value) return
   if (!selectedProject.value) {
     ElMessage.warning('请先选择一个项目')
     return
   }
-  enterChatMode(inputText.value.trim())
+  const content = buildSendContent()
+  selectedSkill.value = null
+  enterChatMode(content)
 }
 
 // 进入聊天模式（为指定线程）
@@ -606,9 +931,10 @@ async function enterChatMode(firstMessage) {
 
 // 聊天模式发送
 function handleChatSend() {
-  if (!inputText.value.trim() || loading.value || !currentThreadId.value) return
-  const content = inputText.value.trim()
+  if ((!inputText.value.trim() && !selectedSkill.value) || loading.value || !currentThreadId.value) return
+  const content = buildSendContent()
   inputText.value = ''
+  selectedSkill.value = null
   doSendMessage(currentThreadId.value, content)
 }
 
@@ -621,6 +947,8 @@ async function doSendMessage(threadId, content) {
 
   messages.value.push({ role: 'user', content: displayContent, messageType: 'text' })
   uploadedFiles.value = []
+  requestGeneration++
+  activeGeneration = requestGeneration
   loading.value = true
   scrollToBottom()
 
@@ -634,6 +962,29 @@ async function doSendMessage(threadId, content) {
   } catch (e) {
     loading.value = false
     ElMessage.error('发送失败: ' + e.message)
+  }
+}
+
+// ESC 取消正在进行的对话
+function handleKeydown(e) {
+  if (e.key === 'Escape' && currentThreadId.value && activeGeneration === requestGeneration && requestGeneration > 0) {
+    handleCancel()
+  }
+}
+
+async function handleCancel() {
+  if (!currentThreadId.value) return
+  // 递增 activeGeneration 使其不匹配 requestGeneration，阻止后续 WebSocket 消息
+  activeGeneration++
+  loading.value = false
+  // 立即移除"正在思考..."等 progress 消息以及已收到的部分/完整回复
+  while (messages.value.length > 0 && messages.value[messages.value.length - 1].role !== 'user') {
+    messages.value.pop()
+  }
+  try {
+    await cancelThread(currentThreadId.value)
+  } catch (e) {
+    // 取消请求失败不影响前端状态，静默处理
   }
 }
 
@@ -696,6 +1047,8 @@ function connectWsForThread(threadId) {
   disconnectWebSocket()
   connectWebSocket(() => {
     subscribeThread(threadId, (msg) => {
+      // 取消后忽略后续 WebSocket 消息（generation 不匹配说明已被取消）
+      if (activeGeneration !== requestGeneration) return
       // 进度消息替换逻辑：如果最后一条也是 progress，则替换
       if (msg.messageType === 'progress') {
         const last = messages.value[messages.value.length - 1]
@@ -1104,6 +1457,7 @@ watch(messages, () => scrollToBottom(), { deep: true })
 }
 
 .wb-input-box {
+  position: relative;
   width: 100%;
   max-width: 860px;
   background: #fff;
@@ -1169,6 +1523,15 @@ watch(messages, () => scrollToBottom(), { deep: true })
 
 .wb-file-remove:hover {
   color: rgba(38, 38, 38, 0.76);
+}
+
+.wb-cancel-hint {
+  display: block;
+  padding: 16px 20px 8px;
+  font-size: 15px;
+  color: rgba(38, 38, 38, 0.36);
+  min-height: 48px;
+  box-sizing: border-box;
 }
 
 .wb-textarea {
@@ -1294,7 +1657,10 @@ watch(messages, () => scrollToBottom(), { deep: true })
 }
 
 .chat-user-tag {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
   max-width: 70%;
   padding: 10px 16px;
   background: rgba(38, 38, 38, 0.05);
@@ -1303,6 +1669,24 @@ watch(messages, () => scrollToBottom(), { deep: true })
   line-height: 1.5;
   color: #262626;
   word-break: break-word;
+}
+
+/* 消息中的 skill 标签 */
+.chat-skill-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px 1px 5px;
+  background: rgba(115, 83, 233, 0.08);
+  border-radius: 4px;
+  white-space: nowrap;
+  color: rgba(115, 83, 233, 1);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.chat-skill-tag svg {
+  flex-shrink: 0;
 }
 
 /* AI 消息：左对齐 Markdown */
@@ -1409,46 +1793,131 @@ watch(messages, () => scrollToBottom(), { deep: true })
   to { transform: rotate(360deg); }
 }
 
-/* 加载指示器（三个点动画） */
-.chat-loading {
-  max-width: 760px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 0 32px 16px;
+/* $ 技能弹窗 */
+.skill-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid rgba(38, 38, 38, 0.1);
+  border-radius: 12px;
+  box-shadow: rgba(38, 38, 38, 0.12) 0 4px 16px 0;
+  margin-bottom: 4px;
+  z-index: 100;
+  padding: 6px 0;
 }
 
-.chat-loading-dots {
+.skill-popup-item {
   display: flex;
-  gap: 6px;
-  padding: 12px 0;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.skill-popup-item:hover,
+.skill-popup-item--active {
+  background: rgba(38, 38, 38, 0.04);
 }
 
-.chat-loading-dots span {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(38, 38, 38, 0.2);
-  animation: dotPulse 1.4s ease-in-out infinite;
+.skill-popup-icon {
+  flex-shrink: 0;
+  color: rgba(38, 38, 38, 0.36);
 }
 
-.chat-loading-dots span:nth-child(2) {
-  animation-delay: 0.2s;
+.skill-popup-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #262626;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.chat-loading-dots span:nth-child(3) {
-  animation-delay: 0.4s;
+.skill-popup-desc {
+  font-size: 13px;
+  color: rgba(38, 38, 38, 0.56);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
-@keyframes dotPulse {
-  0%, 80%, 100% {
-    opacity: 0.3;
-    transform: scale(0.8);
-  }
-  40% {
-    opacity: 1;
-    transform: scale(1);
-  }
+.skill-popup-scope {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  margin-left: auto;
 }
+.skill-scope-personal {
+  color: #0091FF;
+  background: rgba(0, 145, 255, 0.06);
+}
+.skill-scope-project {
+  color: rgba(0, 136, 91, 1);
+  background: rgba(0, 136, 91, 0.06);
+}
+.skill-scope-system {
+  color: rgba(38, 38, 38, 0.56);
+  background: rgba(38, 38, 38, 0.06);
+}
+
+/* skill 标签 + 输入框行 */
+.wb-skill-input-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  width: 100%;
+}
+.wb-skill-input-row .wb-textarea {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 已选中 skill 标签样式（参照设计图紫色调） */
+.wb-skill-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 6px;
+  margin: 14px 0 0 16px;
+  background: rgba(115, 83, 233, 0.08);
+  border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  height: 28px;
+  box-sizing: border-box;
+}
+.wb-skill-tag-icon {
+  width: 14px;
+  height: 14px;
+  color: rgba(115, 83, 233, 1);
+  flex-shrink: 0;
+}
+.wb-skill-tag-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(115, 83, 233, 1);
+  line-height: 1;
+}
+.wb-skill-tag-remove {
+  background: none;
+  border: none;
+  color: rgba(115, 83, 233, 0.4);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  margin-left: 2px;
+}
+.wb-skill-tag-remove:hover {
+  color: rgba(115, 83, 233, 1);
+}
+
 </style>
 
 <!-- Teambition 弹窗样式（Teleport 到 body，不能 scoped） -->
