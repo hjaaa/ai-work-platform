@@ -1,26 +1,29 @@
 package com.aiworkplatform.domain.entity;
 
-import com.baomidou.mybatisplus.annotation.*;
+import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
-import java.time.LocalDateTime;
-
+/**
+ * 对话消息实体
+ */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("conversation")
-public class Conversation {
+public class Conversation extends BaseEntity {
 
-    @TableId(type = IdType.ASSIGN_ID)
-    private Long id;
-
+    /** 项目标识 */
     private String projectId;
+
+    /** 所属线程标识 */
     private String threadId;
+
+    /** 角色: user/assistant/system */
     private String role;
+
+    /** 消息内容 */
     private String content;
+
+    /** 消息类型: text/file/code/progress */
     private String messageType;
-
-    @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
-
-    @TableLogic
-    private Integer deleted;
 }

@@ -1,24 +1,23 @@
 package com.aiworkplatform.domain.entity;
 
-import com.baomidou.mybatisplus.annotation.*;
+import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
-import java.time.LocalDateTime;
-
+/**
+ * 系统配置实体
+ */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @TableName("system_config")
-public class SystemConfig {
+public class SystemConfig extends BaseEntity {
 
-    @TableId(type = IdType.ASSIGN_ID)
-    private Long id;
-
+    /** 配置键 */
     private String configKey;
+
+    /** 配置值 */
     private String configValue;
+
+    /** 配置说明 */
     private String description;
-
-    @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createdAt;
-
-    @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updatedAt;
 }
