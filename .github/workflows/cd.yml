@@ -78,7 +78,10 @@ jobs:
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             # 进入部署目录
-            cd ${{ secrets.DEPLOY_PATH }}
+            cd "${{ secrets.DEPLOY_PATH }}"
+
+            # 指定本次部署的镜像版本（与 CI 推送的 SHA 一致）
+            export IMAGE_TAG="${{ github.sha }}"
 
             # 拉取最新镜像
             docker compose -f docker-compose.prod.yml pull
