@@ -1,7 +1,7 @@
 import http from './http'
 
-export function createProject({ name, gitUrl, defaultBranch, description }) {
-  return http.post('/projects', { name, gitUrl, defaultBranch, description })
+export function createProject({ name, projectType, gitUrl, defaultBranch, localPath, description }) {
+  return http.post('/projects', { name, projectType, gitUrl, defaultBranch, localPath, description })
 }
 
 export function listProjects() {
@@ -12,8 +12,8 @@ export function getProject(projectId) {
   return http.get(`/projects/${projectId}`)
 }
 
-export function updateProject(projectId, { name, gitUrl, defaultBranch, description }) {
-  return http.put(`/projects/${projectId}`, { name, gitUrl, defaultBranch, description })
+export function updateProject(projectId, { name, gitUrl, defaultBranch, localPath, description }) {
+  return http.put(`/projects/${projectId}`, { name, gitUrl, defaultBranch, localPath, description })
 }
 
 export function deleteProject(projectId) {

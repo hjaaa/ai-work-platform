@@ -1,8 +1,10 @@
 package com.aiworkplatform.web.controller;
 
+import com.aiworkplatform.common.exception.BusinessException;
 import com.aiworkplatform.common.result.Result;
 import com.aiworkplatform.domain.entity.Conversation;
 import com.aiworkplatform.domain.entity.Project;
+import com.aiworkplatform.domain.enums.ProjectType;
 import com.aiworkplatform.service.chat.ChatService;
 import com.aiworkplatform.service.git.GitService;
 import com.aiworkplatform.service.orchestrator.OrchestratorConfig;
@@ -11,6 +13,7 @@ import com.aiworkplatform.web.dto.CreateProjectRequest;
 import com.aiworkplatform.web.dto.UpdateProjectRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -36,12 +39,31 @@ public class ProjectController {
 
     @PostMapping
     public Result<Project> createProject(@RequestBody @Valid CreateProjectRequest request) {
+        String type = StringUtils.hasText(request.getProjectType()) ? request.getProjectType() : ProjectType.GIT.getValue();
+
+        // 按项目类型校验必填字段
+        if (ProjectType.GIT.getValue().equals(type)) {
+            if (!StringUtils.hasText(request.getGitUrl())) {
+                throw new BusinessException("Git 项目必须填写仓库地址");
+            }
+        } else if (ProjectType.LOCAL.getValue().equals(type)) {
+            if (!StringUtils.hasText(request.getLocalPath())) {
+                throw new BusinessException("本地项目必须填写项目路径");
+            }
+        } else {
+            throw new BusinessException("不支持的项目类型: " + type);
+        }
+
         // TODO: 从认证上下文获取 createdBy，暂时硬编码
         Project project = projectService.createProject(
-                request.getName(), request.getGitUrl(), request.getDefaultBranch(),
-                request.getDescription(), orchestratorConfig.getWorkspaceBasePath(), "default-user");
-        // 异步拉取代码
-        gitService.cloneRepository(project.getProjectId());
+                request.getName(), type, request.getGitUrl(), request.getDefaultBranch(),
+                request.getLocalPath(), request.getDescription(),
+                orchestratorConfig.getWorkspaceBasePath(), "default-user");
+
+        // 仅 Git 项目需要异步拉取代码
+        if (ProjectType.GIT.getValue().equals(type)) {
+            gitService.cloneRepository(project.getProjectId());
+        }
         return Result.success(project);
     }
 
@@ -81,7 +103,7 @@ public class ProjectController {
                                          @RequestBody @Valid UpdateProjectRequest request) {
         Project project = projectService.updateProject(
                 projectId, request.getName(), request.getGitUrl(),
-                request.getDefaultBranch(), request.getDescription());
+                request.getDefaultBranch(), request.getLocalPath(), request.getDescription());
         return Result.success(project);
     }
 

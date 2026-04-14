@@ -40,13 +40,14 @@ class ProjectServiceImplTest {
 
         // when
         Project result = projectService.createProject(
-                "测试项目", "git@github.com:test/repo.git", "develop",
-                "描述", tempDir.toString(), "user1");
+                "测试项目", "git", "git@github.com:test/repo.git", "develop",
+                null, "描述", tempDir.toString(), "user1");
 
         // then
         assertNotNull(result.getProjectId());
         assertTrue(result.getProjectId().startsWith("proj-"));
         assertEquals("测试项目", result.getName());
+        assertEquals("git", result.getProjectType());
         assertEquals("git@github.com:test/repo.git", result.getGitUrl());
         assertEquals("develop", result.getDefaultBranch());
         assertEquals("描述", result.getDescription());
@@ -62,8 +63,8 @@ class ProjectServiceImplTest {
 
         // when
         Project result = projectService.createProject(
-                "测试项目", "git@github.com:test/repo.git", "",
-                null, tempDir.toString(), "user1");
+                "测试项目", "git", "git@github.com:test/repo.git", "",
+                null, null, tempDir.toString(), "user1");
 
         // then
         assertEquals("main", result.getDefaultBranch());
@@ -76,8 +77,8 @@ class ProjectServiceImplTest {
 
         // when
         Project result = projectService.createProject(
-                "测试项目", "git@github.com:test/repo.git", null,
-                null, tempDir.toString(), "user1");
+                "测试项目", "git", "git@github.com:test/repo.git", null,
+                null, null, tempDir.toString(), "user1");
 
         // then
         assertEquals("main", result.getDefaultBranch());
@@ -120,6 +121,25 @@ class ProjectServiceImplTest {
         Project updated = captor.getValue();
         assertEquals(ProjectStatus.FAILED.getValue(), updated.getStatus());
         assertEquals("认证失败: Permission denied", updated.getCloneErrorMessage());
+    }
+
+    @Test
+    void should_create_local_project_with_workspace_path_equal_to_local_path() {
+        // given
+        when(projectMapper.insert(any(Project.class))).thenReturn(1);
+        String localPath = tempDir.toString();
+
+        // when
+        Project result = projectService.createProject(
+                "本地项目", "local", null, null,
+                localPath, "描述", "/any/base", "user1");
+
+        // then
+        assertEquals("local", result.getProjectType());
+        assertEquals(localPath, result.getLocalPath());
+        // workspacePath 应与 localPath 相同，而不是系统托管目录
+        assertEquals(localPath, result.getWorkspacePath());
+        assertEquals(ProjectStatus.ACTIVE.getValue(), result.getStatus());
     }
 
     @Test

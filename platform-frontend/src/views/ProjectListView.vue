@@ -19,33 +19,36 @@
         @click="openEditDialog(project)"
       >
         <div class="card-cover" :style="{ backgroundColor: getCoverColor(project.projectId) }">
-          <!-- clone 中：显示加载动画 -->
-          <div v-if="project.status === 'creating'" class="clone-loading">
+          <!-- clone 中：显示加载动画（仅 git 项目） -->
+          <div v-if="project.status === 'creating' && project.projectType !== 'local'" class="clone-loading">
             <svg class="clone-spinner" width="24" height="24" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
               <path d="M12 2a10 10 0 0 1 10 10" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
             </svg>
             <span class="clone-text">代码拉取中...</span>
           </div>
-          <!-- clone 失败：显示错误标记 -->
-          <div v-else-if="project.status === 'failed'" class="clone-failed">
+          <!-- clone 失败：显示错误标记（仅 git 项目） -->
+          <div v-else-if="project.status === 'failed' && project.projectType !== 'local'" class="clone-failed">
             <span class="failed-icon">!</span>
             <span class="clone-text">拉取失败</span>
           </div>
           <!-- 正常状态 -->
           <span v-else class="cover-initial">{{ project.name?.charAt(0) || 'P' }}</span>
+          <!-- 本地项目标签 -->
+          <span v-if="project.projectType === 'local'" class="card-type-tag tag-local">本地</span>
+          <span v-else class="card-type-tag tag-git">Git</span>
         </div>
         <div class="card-info">
           <span class="card-name">{{ project.name }}</span>
-          <span v-if="project.status === 'failed'" class="card-error" :title="project.cloneErrorMessage">
+          <span v-if="project.status === 'failed' && project.projectType !== 'local'" class="card-error" :title="project.cloneErrorMessage">
             {{ project.cloneErrorMessage?.substring(0, 30) }}...
           </span>
         </div>
         <!-- 悬浮操作按钮 -->
         <div class="card-actions" @click.stop>
-          <!-- 重试拉取：仅失败项目显示 -->
+          <!-- 重试拉取：仅 git 失败项目显示 -->
           <span
-            v-if="project.status === 'failed'"
+            v-if="project.status === 'failed' && project.projectType !== 'local'"
             class="action-btn action-retry"
             title="重试拉取代码"
             @click="handleRetryClone(project.projectId)"
@@ -90,6 +93,32 @@
           <!-- Body -->
           <div class="tb-dialog-body">
             <div class="tb-form">
+              <!-- 项目类型（仅创建时显示） -->
+              <div v-if="dialogMode === 'create'" class="tb-form-item">
+                <label class="tb-label">项目类型</label>
+                <div class="tb-type-switch">
+                  <button
+                    class="tb-type-btn"
+                    :class="{ active: formData.projectType === 'git' }"
+                    @click="formData.projectType = 'git'"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="4"/><line x1="1.05" y1="12" x2="7" y2="12"/><line x1="17.01" y1="12" x2="22.96" y2="12"/>
+                    </svg>
+                    Git 仓库
+                  </button>
+                  <button
+                    class="tb-type-btn"
+                    :class="{ active: formData.projectType === 'local' }"
+                    @click="formData.projectType = 'local'"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    本地项目
+                  </button>
+                </div>
+              </div>
               <!-- 项目名称（必填） -->
               <div class="tb-form-item">
                 <label class="tb-label">项目名称 <span class="tb-required">*</span></label>
@@ -103,8 +132,8 @@
                   />
                 </div>
               </div>
-              <!-- Git 仓库地址（必填） -->
-              <div class="tb-form-item">
+              <!-- Git 仓库地址（git 类型必填） -->
+              <div v-if="currentProjectType === 'git'" class="tb-form-item">
                 <label class="tb-label">Git 仓库地址 <span class="tb-required">*</span></label>
                 <div class="tb-input-wrap" :class="{ focused: focusedField === 'gitUrl' }">
                   <input
@@ -116,8 +145,8 @@
                   />
                 </div>
               </div>
-              <!-- 默认分支（选填） -->
-              <div class="tb-form-item">
+              <!-- 默认分支（git 类型选填） -->
+              <div v-if="currentProjectType === 'git'" class="tb-form-item">
                 <label class="tb-label">默认分支</label>
                 <div class="tb-input-wrap" :class="{ focused: focusedField === 'branch' }">
                   <input
@@ -128,6 +157,20 @@
                     @blur="focusedField = ''"
                   />
                 </div>
+              </div>
+              <!-- 本地项目路径（local 类型必填） -->
+              <div v-if="currentProjectType === 'local'" class="tb-form-item">
+                <label class="tb-label">项目路径 <span class="tb-required">*</span></label>
+                <div class="tb-input-wrap" :class="{ focused: focusedField === 'localPath' }">
+                  <input
+                    v-model="formData.localPath"
+                    class="tb-input"
+                    :placeholder="localPathPlaceholder"
+                    @focus="focusedField = 'localPath'"
+                    @blur="focusedField = ''"
+                  />
+                </div>
+                <span class="tb-hint">请输入项目在本机的绝对路径</span>
               </div>
               <!-- 项目描述（选填） -->
               <div class="tb-form-item">
@@ -162,7 +205,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import ModeSelector from '../components/ModeSelector.vue'
 import { listProjects, createProject, updateProject, deleteProject, retryClone } from '../api/project'
@@ -177,8 +220,21 @@ const editingProjectId = ref('')
 const showModeSelector = ref(false)
 const newProjectId = ref('')
 const submitting = ref(false)
-const formData = ref({ name: '', gitUrl: '', defaultBranch: '', description: '' })
+const formData = ref({ name: '', projectType: 'git', gitUrl: '', defaultBranch: '', localPath: '', description: '' })
 const focusedField = ref('')
+const editingProjectType = ref('git') // 编辑时记录原始项目类型
+
+// 当前项目类型：创建时用 formData，编辑时用原始类型（不可切换）
+const currentProjectType = computed(() => {
+  if (dialogMode.value === 'edit') return editingProjectType.value
+  return formData.value.projectType
+})
+
+// 根据操作系统显示不同的路径提示
+const localPathPlaceholder = computed(() => {
+  const isWindows = navigator.platform?.toLowerCase().includes('win')
+  return isWindows ? 'D:\\projects\\my-project' : '/Users/username/projects/my-project'
+})
 
 // 根据项目 ID 生成封面背景色
 const coverColors = [
@@ -241,17 +297,20 @@ async function loadProjects() {
 function openCreateDialog() {
   dialogMode.value = 'create'
   editingProjectId.value = ''
-  formData.value = { name: '', gitUrl: '', defaultBranch: '', description: '' }
+  formData.value = { name: '', projectType: 'git', gitUrl: '', defaultBranch: '', localPath: '', description: '' }
   showDialog.value = true
 }
 
 function openEditDialog(project) {
   dialogMode.value = 'edit'
   editingProjectId.value = project.projectId
+  editingProjectType.value = project.projectType || 'git'
   formData.value = {
     name: project.name || '',
+    projectType: project.projectType || 'git',
     gitUrl: project.gitUrl || '',
     defaultBranch: project.defaultBranch || '',
+    localPath: project.localPath || '',
     description: project.description || '',
   }
   showDialog.value = true
@@ -262,18 +321,27 @@ async function handleSubmit() {
     ElMessage.warning('请输入项目名称')
     return
   }
-  if (!formData.value.gitUrl.trim()) {
+  const type = currentProjectType.value
+  if (type === 'git' && !formData.value.gitUrl.trim()) {
     ElMessage.warning('请输入 Git 仓库地址')
+    return
+  }
+  if (type === 'local' && !formData.value.localPath.trim()) {
+    ElMessage.warning('请输入项目路径')
     return
   }
   submitting.value = true
   try {
     if (dialogMode.value === 'create') {
       const res = await createProject(formData.value)
-      ElMessage.success('项目创建成功，正在拉取代码...')
+      if (type === 'local') {
+        ElMessage.success('本地项目创建成功')
+      } else {
+        ElMessage.success('项目创建成功，正在拉取代码...')
+        watchCloneProgress(res.data.projectId)
+      }
       newProjectId.value = res.data.projectId
       await loadProjects()
-      watchCloneProgress(res.data.projectId)
     } else {
       await updateProject(editingProjectId.value, formData.value)
       ElMessage.success('项目更新成功')
@@ -387,6 +455,7 @@ function formatTime(time) {
 
 /* 封面区域 */
 .card-cover {
+  position: relative;
   height: 100px;
   display: flex;
   align-items: center;
@@ -487,6 +556,26 @@ function formatTime(time) {
 }
 .action-delete:hover {
   color: #F56C6C;
+}
+
+/* 项目类型标签 */
+.card-type-tag {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+  user-select: none;
+}
+.tag-local {
+  background: rgba(255, 255, 255, 0.85);
+  color: #50C878;
+}
+.tag-git {
+  background: rgba(255, 255, 255, 0.85);
+  color: #4A90D9;
 }
 
 /* 创建项目占位卡片 */
@@ -614,6 +703,42 @@ function formatTime(time) {
 .tb-required {
   color: #F5222D;
   margin-left: 2px;
+}
+
+.tb-hint {
+  font-size: 12px;
+  color: rgba(38, 38, 38, 0.36);
+  margin-top: 2px;
+}
+
+/* 项目类型切换按钮组 */
+.tb-type-switch {
+  display: flex;
+  gap: 8px;
+}
+.tb-type-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  border: 1px solid rgba(38, 38, 38, 0.22);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 14px;
+  color: rgba(38, 38, 38, 0.76);
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+  font-family: inherit;
+}
+.tb-type-btn:hover {
+  border-color: rgba(38, 38, 38, 0.36);
+}
+.tb-type-btn.active {
+  border-color: #0091FF;
+  color: #0091FF;
+  background: rgba(0, 145, 255, 0.04);
 }
 
 /* 输入框 */

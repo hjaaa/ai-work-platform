@@ -3,6 +3,7 @@ package com.aiworkplatform.service.project.impl;
 import com.aiworkplatform.common.exception.BusinessException;
 import com.aiworkplatform.domain.entity.Project;
 import com.aiworkplatform.domain.enums.ProjectStatus;
+import com.aiworkplatform.domain.enums.ProjectType;
 import com.aiworkplatform.domain.mapper.ProjectMapper;
 import com.aiworkplatform.service.project.ProjectService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -31,40 +32,57 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     @Override
-    public Project createProject(String name, String gitUrl, String defaultBranch,
-                                 String description, String workspaceBasePath, String createdBy) {
+    public Project createProject(String name, String projectType, String gitUrl, String defaultBranch,
+                                 String localPath, String description, String workspaceBasePath, String createdBy) {
         String projectId = "proj-" + UUID.randomUUID().toString().substring(0, 8);
+        boolean isLocal = ProjectType.LOCAL.getValue().equals(projectType);
 
-        // 创建工作区目录
-        Path basePath = Path.of(workspaceBasePath);
-        if (!Files.exists(basePath)) {
-            try {
-                Files.createDirectories(basePath);
-            } catch (Exception e) {
-                log.error("创建工作区基础目录失败: path={}", basePath, e);
-                throw new BusinessException("创建工作区基础目录失败，请检查路径权限: " + basePath);
+        // 确定 workspacePath：local 类型直接使用用户的本地路径；git 类型在系统目录下创建新目录
+        final String resolvedWorkspacePath;
+        if (isLocal) {
+            resolvedWorkspacePath = localPath;
+        } else {
+            Path basePath = Path.of(workspaceBasePath);
+            if (!Files.exists(basePath)) {
+                try {
+                    Files.createDirectories(basePath);
+                } catch (Exception e) {
+                    log.error("创建工作区基础目录失败: path={}", basePath, e);
+                    throw new BusinessException("创建工作区基础目录失败，请检查路径权限: " + basePath);
+                }
             }
-        }
-        Path workspacePath = basePath.resolve(projectId);
-        try {
-            Files.createDirectory(workspacePath);
-        } catch (Exception e) {
-            log.error("创建项目工作区失败: projectId={}, path={}", projectId, workspacePath, e);
-            throw new BusinessException("创建项目工作区失败: " + workspacePath);
+            Path workspacePath = basePath.resolve(projectId);
+            try {
+                Files.createDirectory(workspacePath);
+            } catch (Exception e) {
+                log.error("创建项目工作区失败: projectId={}, path={}", projectId, workspacePath, e);
+                throw new BusinessException("创建项目工作区失败: " + workspacePath);
+            }
+            resolvedWorkspacePath = workspacePath.toString();
         }
 
         Project project = new Project();
         project.setProjectId(projectId);
+        project.setProjectType(projectType);
         project.setName(name);
-        project.setGitUrl(gitUrl);
-        project.setDefaultBranch(StringUtils.hasText(defaultBranch) ? defaultBranch : "main");
         project.setDescription(description);
-        project.setWorkspacePath(workspacePath.toString());
-        project.setStatus(ProjectStatus.CREATING.getValue());
+        project.setWorkspacePath(resolvedWorkspacePath);
         project.setCreatedBy(createdBy);
 
+        if (isLocal) {
+            // 本地项目：workspacePath 即 localPath，状态直接为 active
+            project.setLocalPath(localPath);
+            project.setStatus(ProjectStatus.ACTIVE.getValue());
+            log.info("本地项目已创建: projectId={}, name={}, localPath={}, createdBy={}", projectId, name, localPath, createdBy);
+        } else {
+            // Git 项目：记录仓库信息，状态为 creating（等待 clone）
+            project.setGitUrl(gitUrl);
+            project.setDefaultBranch(StringUtils.hasText(defaultBranch) ? defaultBranch : "main");
+            project.setStatus(ProjectStatus.CREATING.getValue());
+            log.info("Git 项目已创建: projectId={}, name={}, gitUrl={}, createdBy={}", projectId, name, gitUrl, createdBy);
+        }
+
         projectMapper.insert(project);
-        log.info("项目已创建: projectId={}, name={}, gitUrl={}, createdBy={}", projectId, name, gitUrl, createdBy);
         return project;
     }
 
@@ -87,12 +105,20 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     @Override
-    public Project updateProject(String projectId, String name, String gitUrl, String defaultBranch, String description) {
+    public Project updateProject(String projectId, String name, String gitUrl, String defaultBranch,
+                                 String localPath, String description) {
         Project project = getByProjectId(projectId);
         project.setName(name);
-        project.setGitUrl(gitUrl);
-        project.setDefaultBranch(StringUtils.hasText(defaultBranch) ? defaultBranch : "main");
         project.setDescription(description);
+
+        boolean isLocal = ProjectType.LOCAL.getValue().equals(project.getProjectType());
+        if (isLocal) {
+            project.setLocalPath(localPath);
+        } else {
+            project.setGitUrl(gitUrl);
+            project.setDefaultBranch(StringUtils.hasText(defaultBranch) ? defaultBranch : "main");
+        }
+
         projectMapper.updateById(project);
         log.info("项目已更新: projectId={}, name={}", projectId, name);
         return project;
@@ -102,7 +128,8 @@ public class ProjectServiceImpl implements ProjectService {
     public void deleteProject(String projectId) {
         Project project = getByProjectId(projectId);
 
-        // 清理磁盘上的工作区目录（含 clone 的代码）
+        // 清理系统托管的工作区目录（含上传文件、clone 代码等）
+        // 注意：不清理本地项目的 localPath（那是用户自己的项目目录）
         String workspacePath = project.getWorkspacePath();
         if (StringUtils.hasText(workspacePath)) {
             Path dirPath = Path.of(workspacePath);
@@ -122,7 +149,9 @@ public class ProjectServiceImpl implements ProjectService {
         }
 
         projectMapper.deleteById(project.getId());
-        log.info("项目已删除: projectId={}", projectId);
+        boolean isLocal = ProjectType.LOCAL.getValue().equals(project.getProjectType());
+        log.info("项目已删除: projectId={}, type={}{}", projectId, project.getProjectType(),
+                isLocal ? ", localPath 已保留不清理" : "");
     }
 
     @Override

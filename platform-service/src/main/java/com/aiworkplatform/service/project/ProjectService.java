@@ -12,9 +12,12 @@ public interface ProjectService {
 
     /**
      * 创建新项目
+     *
+     * @param projectType 项目类型: git / local
+     * @param localPath 本地项目路径（local 类型时必填）
      */
-    Project createProject(String name, String gitUrl, String defaultBranch,
-                          String description, String workspaceBasePath, String createdBy);
+    Project createProject(String name, String projectType, String gitUrl, String defaultBranch,
+                          String localPath, String description, String workspaceBasePath, String createdBy);
 
     /**
      * 根据 projectId 查询项目
@@ -27,9 +30,10 @@ public interface ProjectService {
     List<Project> listByUser(String createdBy);
 
     /**
-     * 更新项目基本信息（名称、Git 地址、默认分支、描述）
+     * 更新项目基本信息
      */
-    Project updateProject(String projectId, String name, String gitUrl, String defaultBranch, String description);
+    Project updateProject(String projectId, String name, String gitUrl, String defaultBranch,
+                          String localPath, String description);
 
     /**
      * 删除项目（逻辑删除）
