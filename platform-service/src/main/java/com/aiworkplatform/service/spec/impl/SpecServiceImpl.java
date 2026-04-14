@@ -132,7 +132,7 @@ public class SpecServiceImpl implements SpecService {
 
         String resolvedPath = resolveProjectPath(project);
         if (resolvedPath == null) {
-            throw new BusinessException("项目代码路径为空，请确认项目已完成初始化（specId=" + specId + ", projectId=" + projectId + "）");
+            throw new BusinessException("项目 codePath 为空，请确认项目已完成初始化（specId=" + specId + ", projectId=" + projectId + "）");
         }
 
         // 幂等：已存在关联则直接返回
