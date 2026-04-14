@@ -4,6 +4,18 @@
 
 ---
 
+## [1.0.1] - 2026-04-14
+
+### CI/CD
+- 新增 GitHub Actions CI/CD 流水线（push/PR 自动触发后端单元测试 + 前端构建）
+- 新增 CD 流水线：合并到 main 后自动构建 Docker 镜像推送到 GHCR 并 SSH 部署到生产服务器
+- fix(cd): 注入 IMAGE_TAG 确保部署指定 SHA 版本
+
+### Chore
+- 新增生产环境 docker-compose 配置（使用 GHCR 镜像，不在服务器本地构建）
+
+---
+
 ## [1.0.0] - 2026-04-14
 
 ### Features
