@@ -1,4 +1,5 @@
 import axios from 'axios'
+import type { AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 
 // 后端统一返回结构
@@ -8,15 +9,15 @@ export interface R<T = unknown> {
   data: T
 }
 
-const request = axios.create({
+const service = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
   timeout: 30000,
 })
 
 // 预留请求拦截：登录联调后在此注入 Authorization 头
-request.interceptors.request.use((config) => config)
+service.interceptors.request.use((config) => config)
 
-request.interceptors.response.use(
+service.interceptors.response.use(
   (response) => {
     const res = response.data as R
     if (res.code !== undefined && res.code !== 0) {
@@ -32,5 +33,22 @@ request.interceptors.response.use(
     return Promise.reject(error)
   },
 )
+
+// 拦截器已将响应解包为 R 结构，这里通过 axios 第二泛型收敛类型，
+// 使调用方拿到与运行时一致的 Promise<R<T>>
+const request = {
+  get<T = unknown>(url: string, config?: AxiosRequestConfig) {
+    return service.get<T, R<T>>(url, config)
+  },
+  post<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) {
+    return service.post<T, R<T>>(url, data, config)
+  },
+  put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) {
+    return service.put<T, R<T>>(url, data, config)
+  },
+  delete<T = unknown>(url: string, config?: AxiosRequestConfig) {
+    return service.delete<T, R<T>>(url, config)
+  },
+}
 
 export default request
