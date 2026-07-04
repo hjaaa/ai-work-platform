@@ -23,7 +23,7 @@
 - **MySQL**（`db/` 及各模块 mapper，建表 / 索引 / SQL / ORM）→ `context/team/coding/mysql/`
 - **前端**（`ai-work-ui`，Vue 3 + TypeScript）→ `context/team/coding/frontend/`，含通用、HTML、CSS、JavaScript、TypeScript 编码规约（`01`~`05`）与 Vue 组件规约（`06`）；React、Node.js 规约（`07`~`08`）本项目未使用，供其他技术栈项目复用
 
-与语言无关的工程协作规范（Git 提交、更新日志）见 `context/team/engineering/`，索引见 [context/team/engineering/README.md](context/team/engineering/README.md)。
+与语言无关的工程协作规范（Git 提交、更新日志、Pull Request）见 `context/team/engineering/`，索引见 [context/team/engineering/README.md](context/team/engineering/README.md)。
 
 其中标注【强制】的条目不允许违反；【推荐】条目除非有充分理由并在代码评审中说明，否则应遵守。
 
@@ -31,4 +31,4 @@
 
 Commit Message、工作流、分支与 Tag 命名遵循团队 Git 规约：[context/team/engineering/01-git.md](context/team/engineering/01-git.md)（`type(scope): summary` 格式，如 `fix(upms): 清理登录失败缓存`）。
 
-PR 要求：描述影响范围、列出受影响模块、关联相关 issue；UI 或 OpenAPI 响应有变化时附 curl/Postman 示例或截图；不提交生成产物；显式说明表结构 / 配置变更。
+PR 描述必须按 [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) 的结构填写（规约见 [context/team/engineering/03-pull-request.md](context/team/engineering/03-pull-request.md)）；用 `gh pr create --body` 等方式创建 PR 时模板不会自动应用，须主动按模板结构组织描述。不提交生成产物。
