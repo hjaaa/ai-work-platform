@@ -422,6 +422,25 @@
                     <skip>true</skip>
                 </configuration>
             </plugin>
+            <!-- 重复依赖版本声明检查：本 BOM 不继承根 POM，需在此显式声明与根 pom 相同的规则（插件版本手工保持一致）。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>enforce-dependency-rules</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <banDuplicatePomDependencyVersions/>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
