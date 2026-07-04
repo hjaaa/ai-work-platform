@@ -91,11 +91,11 @@ public class SysMessageEntity extends Model<SysMessageEntity> {
 	private LocalDateTime updateTime;
 
 	/**
-	 * 删除时间
+	 * 删除标记，0未删除，1已删除
 	 */
 	@TableLogic
 	@TableField(fill = FieldFill.INSERT)
-	@Schema(description = "删除时间")
+	@Schema(description = "删除标记，0未删除，1已删除")
 	private String delFlag;
 
 }
