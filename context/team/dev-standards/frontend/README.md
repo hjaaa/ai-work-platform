@@ -1,6 +1,6 @@
 # 前端开发规范（团队规范）
 
-适用范围：`ai-work-ui`（Vue 3 + TypeScript + Vite + Pinia + Element Plus + Tailwind CSS）。
+适用范围：Vue 3 + TypeScript + Vite 技术栈的前端工程。
 
 约束级别（【强制】/【推荐】/【参考】）说明见 [../README.md](../README.md)。
 
@@ -17,5 +17,5 @@
 
 ## 与工具链的关系
 
-- 文中标注 eslint / stylelint 规则名的条目大多可由工具自动检查；本项目 lint 链为 oxlint + ESLint + Prettier，提交前必须通过 `npm run lint` 与 `npm run type-check`
-- 格式类条目（缩进、行宽、引号、分号等）以项目 `.prettierrc.json` 与 `.editorconfig` 实配为准，冲突时以工具实配为先
+- 文中标注 eslint / stylelint 规则名的条目大多可由工具自动检查，是否启用以所在工程的 lint 配置为准；提交前须通过工程的 lint 与类型检查
+- 格式类条目（缩进、行宽、引号、分号等）以工程的 Prettier 与 EditorConfig 实配为准，冲突时以工具实配为先

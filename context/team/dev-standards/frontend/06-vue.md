@@ -2,17 +2,17 @@
 
 ## 前言
 
-本规约适用于 `ai-work-ui` 中的 Vue 单文件组件（SFC），统一使用 **Composition API + `<script setup lang="ts">`**，不使用 Options API。
+本规约适用于 Vue 3 单文件组件（SFC），统一使用 **Composition API + `<script setup lang="ts">`**，不使用 Options API。
 
-条目中标注的 eslint 规则来自 `eslint-plugin-vue`：属于 `flat/essential` 预设的规则项目已启用（lint 兜底）；其余规则未在当前 lint 链中启用，须人工遵循。
+条目中标注的 eslint 规则来自 `eslint-plugin-vue`，是否已启用以所在工程的 lint 配置为准；未被 lint 覆盖的条目须人工遵循。
 
 ## 1 组件命名
 
-- 1.1 【强制】组件名必须由多个单词组成。eslint: [vue/multi-word-component-names](https://eslint.vuejs.org/rules/multi-word-component-names.html)（已启用）
+- 1.1 【强制】组件名必须由多个单词组成。eslint: [vue/multi-word-component-names](https://eslint.vuejs.org/rules/multi-word-component-names.html)
 
   避免与现有及未来的 HTML 元素冲突（HTML 元素都是单个单词）。
 
-  **例外**：根组件 `App.vue`、路由页面组件（`src/views/**/index.vue`、`src/layout/index.vue`），已在 eslint 配置中豁免。
+  **例外**：根组件 `App.vue`，以及按目录约定命名的路由页面组件（如 `views/<模块>/index.vue`）；豁免范围应在工程 eslint 配置中显式声明。
 
   ```vue
   <!-- bad -->
@@ -99,7 +99,7 @@
 
 - 2.1 【强制】prop 定义必须尽可能详细，至少指定类型。
 
-  本项目为 TypeScript 工程，优先使用**类型声明式** `defineProps`，必填/可选由类型表达，默认值用 `withDefaults`；需要运行时校验时再改用运行时声明并提供 `validator`。
+  TypeScript 工程优先使用**类型声明式** `defineProps`，必填/可选由类型表达，默认值用 `withDefaults`；需要运行时校验时再改用运行时声明并提供 `validator`。
 
   ```vue
   <script setup lang="ts">
@@ -117,7 +117,7 @@
   </script>
   ```
 
-- 2.2 【强制】父子组件通信遵循"prop 向下、事件向上"，禁止在子组件中修改 prop，禁止访问 `$parent`。eslint: [vue/no-mutating-props](https://eslint.vuejs.org/rules/no-mutating-props.html)（已启用）
+- 2.2 【强制】父子组件通信遵循"prop 向下、事件向上"，禁止在子组件中修改 prop，禁止访问 `$parent`。eslint: [vue/no-mutating-props](https://eslint.vuejs.org/rules/no-mutating-props.html)
 
   隐式的父子通信（改 prop、摸 `$parent`）造成紧耦合，父组件状态变化难以追踪。
 
@@ -144,7 +144,7 @@
 
 ## 3 模板
 
-- 3.1 【强制】`v-for` 必须绑定 `key`。eslint: [vue/require-v-for-key](https://eslint.vuejs.org/rules/require-v-for-key.html)（已启用）
+- 3.1 【强制】`v-for` 必须绑定 `key`。eslint: [vue/require-v-for-key](https://eslint.vuejs.org/rules/require-v-for-key.html)
 
   key 用于维护列表项的组件状态与对象恒定性，保证 diff 与动画行为可预测。key 使用业务主键，不要用数组下标。
 
@@ -156,7 +156,7 @@
   <li v-for="todo in todos" :key="todo.id">{{ todo.text }}</li>
   ```
 
-- 3.2 【强制】禁止在同一元素上同时使用 `v-if` 和 `v-for`。eslint: [vue/no-use-v-if-with-v-for](https://eslint.vuejs.org/rules/no-use-v-if-with-v-for.html)（已启用）
+- 3.2 【强制】禁止在同一元素上同时使用 `v-if` 和 `v-for`。eslint: [vue/no-use-v-if-with-v-for](https://eslint.vuejs.org/rules/no-use-v-if-with-v-for.html)
 
   过滤列表用 computed；条件渲染个别项用 `<template>` 包一层 `v-for`。
 
@@ -187,7 +187,7 @@
 
 - 3.4 【推荐】prop 声明用 camelCase；模板中传参用 kebab-case。
 
-  声明遵循 JavaScript 命名约定，模板传参与 HTML 属性风格及 Element Plus 文档风格一致。同一写法在全项目内保持统一。
+  声明遵循 JavaScript 命名约定，模板传参与 HTML 属性风格一致。同一写法在同一工程内保持统一。
 
   ```vue
   <!-- bad -->
@@ -236,7 +236,7 @@
   <input type="text" />
   ```
 
-- 3.8 【推荐】统一使用指令缩写：`:` 代替 `v-bind:`，`@` 代替 `v-on:`，`#` 代替 `v-slot:`，全项目不混用全称。
+- 3.8 【推荐】统一使用指令缩写：`:` 代替 `v-bind:`，`@` 代替 `v-on:`，`#` 代替 `v-slot:`，同一工程内不混用全称。
 
   ```vue
   <!-- bad：缩写与全称混用 -->
@@ -252,7 +252,7 @@
 
 - 4.1 【强制】SFC 顶级块顺序统一为 `<template>` → `<script setup>` → `<style>`。
 
-  与项目现有组件保持一致，`<style>` 固定放最后。
+  统一顺序便于快速定位各块，`<style>` 固定放最后。
 
   ```vue
   <template>
@@ -270,7 +270,7 @@
 
 - 4.2 【强制】组件样式必须作用域化（`<style scoped>`），根组件 `App.vue` 与全局布局组件除外。
 
-  防止样式泄漏到其他组件或被第三方 CSS 干扰。本项目样式优先使用 Tailwind 工具类；确需自定义样式时写入 `<style scoped>`。
+  防止样式泄漏到其他组件或被第三方 CSS 干扰。使用原子化 CSS 框架（如 Tailwind）的工程优先使用工具类；确需自定义样式时写入 `<style scoped>`。
 
 - 4.3 【推荐】`scoped` 样式中使用类选择器，不使用元素选择器。
 
@@ -296,6 +296,6 @@
 
 ## 5 状态管理
 
-- 5.1 【推荐】跨组件共享的状态统一放 Pinia store（`src/stores/`）；不要用事件总线、层层透传 prop 或可变全局对象模拟全局状态。
+- 5.1 【推荐】跨组件共享的状态统一放 Pinia store；不要用事件总线、层层透传 prop 或可变全局对象模拟全局状态。
 
   组件内部状态用 `ref`/`reactive` 即可，不要为只有单个组件使用的状态建 store。
