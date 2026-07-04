@@ -8,6 +8,7 @@
 |---|---|
 | [01-git.md](01-git.md) | Git 规约（Commit Message、工作流、分支命名、Tag 命名） |
 | [02-changelog.md](02-changelog.md) | 更新日志规约（文件约定、格式） |
+| [03-pull-request.md](03-pull-request.md) | Pull Request 规约（模板文件、填写要求、标准模板） |
 
 ## 约束级别说明
 
