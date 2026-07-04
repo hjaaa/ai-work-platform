@@ -1,8 +1,0 @@
-id: skill-command-converter
-title: 工作台对话框 $skill-name 命令转换 — 让 CC CLI -p 模式支持触发 Skill
-status: in_progress
-current_phase: implementation
-related_services: [platform-service]
-created_at: 2026-04-08
-updated_at: 2026-04-08
-tags: [chat, skill, orchestrator, prompt-convert]
