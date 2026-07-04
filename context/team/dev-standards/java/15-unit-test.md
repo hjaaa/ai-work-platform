@@ -1,8 +1,6 @@
 # 单元测试
 
-> 《Java 开发手册（黄山版）》三、单元测试，含项目化补充说明
-
-**【项目调整】** 测试框架与命名遵循项目根目录 AGENTS.md：JUnit 5 + AssertJ + Mockito（spring-boot-starter-test），测试类命名 `*Tests.java`，fixture 放在 `src/test/resources`。与本章冲突时以 AGENTS.md 为准。
+测试框架与命名遵循项目根目录 AGENTS.md：JUnit 5 + AssertJ + Mockito（spring-boot-starter-test），测试类命名 `*Tests.java`，fixture 放在 `src/test/resources`。与本章冲突时以 AGENTS.md 为准。
 
 1. 【强制】好的单元测试必须遵守 AIR 原则。
 
@@ -72,7 +70,7 @@
 
 16. 【参考】不要对单元测试存在如下误解：
 
-    - 那是测试同学干的事情。本文是开发手册，凡是本文内容都是与开发同学强相关的。
+    - 那是测试同学干的事情。单元测试是开发职责的一部分，与开发同学强相关。
     - 单元测试代码是多余的。系统的整体功能与各单元部件的测试正常与否是强相关的。
     - 单元测试代码不需要维护。一年半载后，那么单元测试几乎处于废弃状态。
     - 单元测试与线上故障没有辩证关系。好的单元测试能够最大限度地规避线上故障。

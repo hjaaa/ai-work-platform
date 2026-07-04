@@ -1,8 +1,6 @@
 # 应用分层
 
-> 《Java 开发手册（黄山版）》六、工程结构（一），含项目化裁剪（与原书差异见 git 历史）
-
-**【项目调整】** 原书六层模型（开放 API / 终端显示 / Web / Service / Manager / DAO）按本项目微服务实际结构裁剪：各 `ai-work-*` 服务内部，**核心业务请求链**统一为 **controller → service（接口 + ServiceImpl，MyBatis-Plus IService）→ mapper（BaseMapper + XML）** 三层；不设 Manager 层，通用能力下沉到 `ai-work-common` 对应模块；跨服务调用走 Feign / 网关。三层约束仅针对业务请求链：config（配置）、handler（全局处理器）、feign（跨服务客户端）、security（安全组件）等支撑包按职责独立存在，不强行归入三层，也不要把策略、适配器、第三方封装硬塞进 ServiceImpl。
+各 `ai-work-*` 服务内部，**核心业务请求链**统一为 **controller → service（接口 + ServiceImpl，MyBatis-Plus IService）→ mapper（BaseMapper + XML）** 三层；不设 Manager 层，通用能力下沉到 `ai-work-common` 对应模块；跨服务调用走 Feign / 网关。三层约束仅针对业务请求链：config（配置）、handler（全局处理器）、feign（跨服务客户端）、security（安全组件）等支撑包按职责独立存在，不强行归入三层，也不要把策略、适配器、第三方封装硬塞进 ServiceImpl。
 
 1. 【推荐】分层依赖必须单向：controller 依赖 service，service 依赖 mapper，禁止反向依赖与跨层调用（如 controller 直接调用 mapper）。对第三方平台的封装、多 mapper 的组合复用等通用逻辑收敛在 service 层，可跨服务复用的抽取到 `ai-work-common`，不散落在 controller。
 

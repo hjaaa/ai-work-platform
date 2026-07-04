@@ -1,8 +1,8 @@
 # Java 开发规范（团队规范）
 
-本目录内容以阿里巴巴《Java 开发手册（黄山版）》（[p3c](https://github.com/alibaba/p3c) 项目，2022-02 发布，当前最新版）为源整理，并**按本项目技术栈做了项目化裁剪**（JDK 17、Spring Boot 4 微服务、Lombok、MyBatis-Plus、`R` 统一响应）。文档中标注 **【项目调整】** 处以标注内容为准，与原书的完整差异见 git 历史。
+本目录是本项目的 Java 开发规范，与项目技术栈（JDK 17、Spring Boot 4 微服务、Lombok、MyBatis-Plus、`R` 统一响应）配套。
 
-> 手册第五章「MySQL 数据库」已独立至 [../mysql/](../mysql/README.md)；「附 1：版本历史」「附 3：错误码列表」未收录（本项目不采用五位错误码体系）。
+> MySQL 数据库相关规范独立至 [../mysql/](../mysql/README.md)。
 
 约束级别（【强制】/【推荐】/【参考】）说明见 [../README.md](../README.md)。
 
@@ -57,4 +57,4 @@
 
 | 文档 | 内容 |
 |---|---|
-| [21-terminology.md](21-terminology.md) | 专有名词解释（附 2） |
+| [21-terminology.md](21-terminology.md) | 专有名词解释 |

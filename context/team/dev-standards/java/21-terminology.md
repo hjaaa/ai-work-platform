@@ -1,10 +1,8 @@
 # 专有名词解释
 
-> 《Java 开发手册（黄山版）》附 2
-
 1. POJO（Plain Ordinary Java Object）：在本规约中，POJO 专指只有 setter / getter / toString 的简单类，包括 DO / DTO / BO / VO 等。
 
-2. DO（Data Object）：阿里巴巴专指数据库表一一对应的 POJO 类。此对象与数据库表结构一一对应，通过 DAO 层向上传输数据源对象。
+2. DO（Data Object）：专指数据库表一一对应的 POJO 类。此对象与数据库表结构一一对应，通过 DAO 层向上传输数据源对象。
 
 3. PO（Persistent Object）：也指数据库表一一对应的 POJO 类。此对象与数据库表结构一一对应，通过 DAO 层向上传输数据源对象。
 

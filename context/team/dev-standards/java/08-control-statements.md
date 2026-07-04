@@ -1,7 +1,5 @@
 # 控制语句
 
-> 《Java 开发手册（黄山版）》一、编程规约（八）
-
 1. 【强制】在一个 switch 块内，每个 case 要么通过 continue / break / return 等来终止，要么注释说明程序将继续执行到哪一个 case 为止；在一个 switch 块内，都必须包含一个 default 语句并且放在最后，即使它什么代码也没有。
 
     **说明**：注意 break 是退出 switch 语句块，而 return 是退出方法体。
