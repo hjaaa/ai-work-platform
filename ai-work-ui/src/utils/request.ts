@@ -26,7 +26,9 @@ request.interceptors.response.use(
     return response.data
   },
   (error) => {
-    ElMessage.error(error.message || '网络异常')
+    // 401/424 等场景后端会返回含本地化 msg 的 R 结构，优先展示后端消息
+    const msg = (error.response?.data as R | undefined)?.msg || error.message || '网络异常'
+    ElMessage.error(msg)
     return Promise.reject(error)
   },
 )
