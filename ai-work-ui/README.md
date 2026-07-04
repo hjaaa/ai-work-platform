@@ -1,48 +1,43 @@
 # ai-work-ui
 
-This template should help get you started developing with Vue 3 in Vite.
+AI Work Platform 前端项目，基于 Vue 3 + TypeScript + Vite，参考 [pig-ui](https://github.com/pig-mesh/pig-ui) 的项目结构精简自建。
 
-## Recommended IDE Setup
+## 技术栈
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+- Vue 3 + TypeScript + Vite
+- Vue Router / Pinia
+- Element Plus / Tailwind CSS
+- Axios（统一封装于 `src/utils/request.ts`）
 
-## Recommended Browser Setup
+## 环境要求
 
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
+- Node >= 18
 
-## Type Support for `.vue` Imports in TS
+## 快速开始
 
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
-
-```sh
+```bash
 npm install
+npm run dev      # 开发（http://localhost:5173，/api 代理到网关 :9999）
+npm run build    # 生产构建
+npm run lint     # 代码检查
 ```
 
-### Compile and Hot-Reload for Development
+## 目录约定
 
-```sh
-npm run dev
+```
+src/
+├── api/        # 接口定义层，按业务域分文件
+├── assets/     # 静态资源
+├── components/ # 通用组件
+├── layout/     # 全局布局
+├── router/     # 路由（登录鉴权后接入动态路由）
+├── stores/     # Pinia 状态
+├── styles/     # 全局样式（Tailwind 入口）
+├── utils/      # 工具（request.ts 等）
+└── views/      # 页面，按业务域分目录
 ```
 
-### Type-Check, Compile and Minify for Production
+## 待办（后续迭代）
 
-```sh
-npm run build
-```
-
-### Lint with [ESLint](https://eslint.org/)
-
-```sh
-npm run lint
-```
+- 登录 / OAuth2 鉴权联调
+- 动态菜单与权限路由
