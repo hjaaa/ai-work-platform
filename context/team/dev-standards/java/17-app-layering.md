@@ -1,33 +1,17 @@
 # 应用分层
 
-> 《Java 开发手册（黄山版）》六、工程结构（一）应用分层
+> 《Java 开发手册（黄山版）》六、工程结构（一），含项目化裁剪（与原书差异见 git 历史）
 
-1. 【推荐】根据业务架构实践，结合业界分层规范与流行技术框架分析，推荐分层结构如图所示，默认上层依赖于下层，箭头关系表示可直接依赖，如：开放 API 层可以依赖于 Web 层（Controller 层），也可以直接依赖于 Service 层，依此类推：
+**【项目调整】** 原书六层模型（开放 API / 终端显示 / Web / Service / Manager / DAO）按本项目微服务实际结构裁剪：各 `ai-work-*` 服务内部统一为 **controller → service（接口 + ServiceImpl，MyBatis-Plus IService）→ mapper（BaseMapper + XML）** 三层；不设 Manager 层，通用能力下沉到 `ai-work-common` 对应模块；跨服务调用走 Feign / 网关。
 
-    ![应用分层](images/alibabaLevel.png)
+1. 【推荐】分层依赖必须单向：controller 依赖 service，service 依赖 mapper，禁止反向依赖与跨层调用（如 controller 直接调用 mapper）。对第三方平台的封装、多 mapper 的组合复用等通用逻辑收敛在 service 层，可跨服务复用的抽取到 `ai-work-common`，不散落在 controller。
 
-    - 开放 API 层：可直接封装 Service 接口暴露成 RPC 接口；通过 Web 封装成 http 接口；网关控制层等。
-    - 终端显示层：各个端的模板渲染并执行显示的层。当前主要是 velocity 渲染，JS 渲染，JSP 渲染，移动端展示等。
-    - Web 层：主要是对访问控制进行转发，各类基本参数校验，或者不复用的业务简单处理等。
-    - Service 层：相对具体的业务逻辑服务层。
-    - Manager 层：通用业务处理层，它有如下特征
-
-        1）对第三方平台封装的层，预处理返回结果及转化异常信息，适配上层接口。
-
-        2）对 Service 层通用能力的下沉，如缓存方案、中间件通用处理。
-
-        3）与 DAO 层交互，对多个 DAO 的组合复用。
-
-    - DAO 层：数据访问层，与底层 MySQL、Oracle、Hbase、OceanBase 等进行数据交互。
-    - 第三方服务：包括其它部门 RPC 服务接口，基础平台，其它公司的 HTTP 接口，如淘宝开放平台、支付宝付款服务、高德地图服务等。
-    - 外部数据接口：外部（应用）数据存储服务提供的接口，多见于数据迁移场景中。
-
-2. 【参考】（分层异常处理规约）在 DAO 层，产生的异常类型有很多，无法用细粒度的异常进行 catch，使用 catch(Exception e) 方式，并 throw new DAOException(e)，不需要打印日志，因为日志在 Manager 或 Service 层一定需要捕获并打印到日志文件中去，如果同台服务器再打日志，浪费性能和存储。在 Service 层出现异常时，必须记录出错日志到磁盘，尽可能带上参数和上下文信息，相当于保护案发现场。Manager 层与 Service 同机部署，日志方式与 DAO 层处理一致，如果是单独部署，则采用与 Service 一致的处理方式。Web 层绝不应该继续往上抛异常，因为已经处于顶层，如果意识到这个异常将导致页面无法正常渲染，那么就应该直接跳转到友好错误页面，尽量加上友好的错误提示信息。开放接口层要将异常处理成错误码和错误信息方式返回。
+2. 【参考】（分层异常处理规约）mapper 层产生的异常无需捕获打印，向上抛出由 service 层统一处理；service 层出现异常时，必须记录出错日志到磁盘，尽可能带上参数和上下文信息，相当于保护案发现场；controller 层不继续向上抛异常，由全局异常处理器（`GlobalBizExceptionHandler`）统一转为 `R` 错误响应返回。
 
 3. 【参考】分层领域模型规约：
 
-    - DO（Data Object）：此对象与数据库表结构一一对应，通过 DAO 层向上传输数据源对象。
-    - DTO（Data Transfer Object）：数据传输对象，Service 或 Manager 向外传输的对象。
-    - BO（Business Object）：业务对象，可以由 Service 层输出的封装业务逻辑的对象。
+    - DO（Data Object）：此对象与数据库表结构一一对应，通过 mapper 层向上传输数据源对象。
+    - DTO（Data Transfer Object）：数据传输对象，service 向外传输的对象。
+    - BO（Business Object）：业务对象，可以由 service 层输出的封装业务逻辑的对象。
     - Query：数据查询对象，各层接收上层的查询请求。注意超过 2 个参数的查询封装，禁止使用 Map 类来传输。
-    - VO（View Object）：显示层对象，通常是 Web 向模板渲染引擎层传输的对象。
+    - VO（View Object）：显示层对象，通常是返回给前端渲染的对象。

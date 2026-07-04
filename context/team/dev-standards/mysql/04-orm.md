@@ -1,6 +1,8 @@
 # ORM 映射
 
-> 《Java 开发手册（黄山版）》五、MySQL 数据库（四）
+> 《Java 开发手册（黄山版）》五、MySQL 数据库（四），含项目化补充说明
+
+**【项目调整】** 本项目使用 MyBatis-Plus：`BaseMapper` / `IService` 提供的通用 CRUD 与自动结果映射、`@TableLogic` 逻辑删除、`MetaObjectHandler` 字段自动填充，均视为满足本章对应条目的要求，不要为符合字面规定而手写等价代码。本章各条约束在编写自定义 SQL（Mapper XML 或注解 SQL）时逐条执行。
 
 1. 【强制】在表查询中，一律不要使用 * 作为查询的字段列表，需要哪些字段必须明确写明。
 

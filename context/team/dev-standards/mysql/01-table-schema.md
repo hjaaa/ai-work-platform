@@ -1,14 +1,14 @@
 # 建表规约
 
-> 《Java 开发手册（黄山版）》五、MySQL 数据库（一）
+> 《Java 开发手册（黄山版）》五、MySQL 数据库（一），含项目化裁剪（与原书差异见 git 历史）
 
 1. 【强制】表达是与否概念的字段，必须使用 is_xxx 的方式命名，数据类型是 unsigned tinyint（1 表示是，0 表示否）。
+
+    **【项目调整】** 逻辑删除字段例外：统一使用 `del_flag char(1) DEFAULT '0'`（'0' 未删除，'1' 已删除），对齐存量表与 MyBatis-Plus `@TableLogic` 配置，不采用原书 is_deleted unsigned tinyint 的要求。其余是/否概念字段仍按本条原文执行。
 
     **注意**：POJO 类中的任何布尔类型的变量，都不要加 is 前缀，所以，需要在 `<resultMap>` 设置从 is_xxx 到 Xxx 的映射关系。数据库表示是与否的值，使用 tinyint 类型，坚持 is_xxx 的命名方式是为了明确其取值含义与取值范围。
 
     **说明**：任何字段如果为非负数，必须是 unsigned。
-
-    **正例**：表达逻辑删除的字段名 is_deleted，1 表示删除，0 表示未删除。
 
 2. 【强制】表名、字段名必须使用小写字母或数字，禁止出现数字开头禁止两个下划线中间只出现数字。数据库字段名的修改代价很大，因为无法进行预发布，所以字段名称需要慎重考虑。
 
@@ -37,6 +37,8 @@
 8. 【强制】varchar 是可变长字符串，不预先分配存储空间，长度不要超过 5000，如果存储长度大于此值，定义字段类型为 text，独立出来一张表，用主键来对应，避免影响其它字段索引率。
 
 9. 【强制】表必备三字段：id，create_time，update_time。
+
+    **【项目调整】** 存量表中的 gmt_create / gmt_modified 为历史遗留，不强制迁移；新建表一律使用 create_time / update_time，并配合 `MetaObjectHandler` 自动填充。
 
     **说明**：其中 id 必为主键，类型为 bigint unsigned、单表时自增、步长为 1。create_time，update_time 的类型均为 datetime 类型，如果要记录时区信息，那么类型设置为 timestamp。
 
