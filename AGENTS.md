@@ -2,7 +2,7 @@
 
 ## 项目结构与模块组织
 
-`ai-work-platform` 通过根 `pom.xml` 聚合各 Spring Cloud 服务。运行时服务位于独立目录：`ai-work-register`（Nacos 注册中心）、`ai-work-gateway`（边缘路由）、`ai-work-auth`（授权）、`ai-work-upms`（用户与权限）、`ai-work-boot`（单体启动器）、`ai-work-visual`（监控、代码生成、quartz）。共享库与 DTO 位于 `ai-work-common`。示例 SQL 与 Docker 构建上下文在 `db/`，基础设施编排见 `docker-compose.yml`。所有模块均采用标准的 `src/main/java` 与 `src/test/java` 布局。
+`ai-work-platform` 通过根 `pom.xml` 聚合各 Spring Cloud 服务。运行时服务位于独立目录：`ai-work-register`（Nacos 注册中心）、`ai-work-gateway`（边缘路由）、`ai-work-auth`（授权）、`ai-work-upms`（用户与权限）、`ai-work-boot`（单体启动器）、`ai-work-visual`（监控、代码生成、quartz）。共享库与 DTO 位于 `ai-work-common`。前端应用位于 `ai-work-ui`（Vue 3 + TypeScript + Vite）。示例 SQL 与 Docker 构建上下文在 `db/`，基础设施编排见 `docker-compose.yml`。所有模块均采用标准的 `src/main/java` 与 `src/test/java` 布局。
 
 开源版有意不包含 workflow、app server、MP、支付、报表、BI、多租户、数据权限（data-scope）与动态网关路由管理相关代码。网关路由通过常规配置文件维护。
 
@@ -32,35 +32,3 @@
 Commit Message、工作流、分支与 Tag 命名遵循团队 Git 规约：[context/team/engineering/01-git.md](context/team/engineering/01-git.md)（`type(scope): summary` 格式，如 `fix(upms): 清理登录失败缓存`）。
 
 PR 要求：描述影响范围、列出受影响模块、关联相关 issue；UI 或 OpenAPI 响应有变化时附 curl/Postman 示例或截图；不提交生成产物；显式说明表结构 / 配置变更。
-
-## 安全与配置提示
-
-不要提交环境密钥；通过 `docker-compose.yml` 加被 Git 忽略的 `.env` 覆盖来管理配置。保持 `db/` 种子数据脱敏；端到端验证基于 `ai-work-register`（端口 8848/9848）与 `ai-work-gateway`（9999）进行，使服务发现行为与生产环境一致。
-
-## 行为准则
-
-以下四条规则适用于所有任务，优先级高于其他默认行为。
-
-### 1. 先想清楚再动手
-
-- 需求含糊时先提问，不做隐性假设
-- 存在更简单的方案时明确说出来，而不是默默选一个方向
-- 有疑惑就摆出来，不带着猜测继续推进
-
-### 2. 简单优先
-
-- 用解决当前问题所需的最少代码，不添加任何未被要求的东西
-- 不为一次性代码引入抽象，不为假想的未来需求做设计
-- 自问：资深工程师会不会觉得这是过度设计？
-
-### 3. 外科手术式修改
-
-- 只动任务要求的部分，不顺手重构相邻代码
-- 不改动与当前任务无关的风格或结构
-- 每一行改动都能直接追溯到明确的需求
-
-### 4. 目标驱动执行
-
-- 把模糊指令转化为可验证的目标，优先以测试作为成功标准
-- "修复 bug" → 先写一个能复现问题的失败测试，再让它通过
-- "添加校验" → 先为非法输入编写测试，再让它通过
