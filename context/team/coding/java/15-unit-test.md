@@ -1,6 +1,6 @@
 # 单元测试
 
-测试框架与命名遵循项目根目录 AGENTS.md：JUnit 5 + AssertJ + Mockito（spring-boot-starter-test），测试类命名 `*Tests.java`，fixture 放在 `src/test/resources`。与本章冲突时以 AGENTS.md 为准。
+测试框架与命名：JUnit 5 + AssertJ + Mockito（spring-boot-starter-test），测试类命名 `*Tests.java`，fixture 放在 `src/test/resources`。
 
 1. 【强制】好的单元测试必须遵守 AIR 原则。
 

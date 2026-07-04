@@ -23,10 +23,6 @@
 - `npm run build` 执行类型检查（vue-tsc）并构建生产包。
 - `npm run lint` / `npm run format` 执行 lint（oxlint + ESLint）与格式化（Prettier）。
 
-## 测试规范
-
-使用 `spring-boot-starter-test`（JUnit 5、AssertJ、Mockito）编写单元测试与切片测试。测试类命名为 `*Tests.java`，fixture 放在同模块的 `src/test/resources`。覆盖重点：认证、网关过滤器、用户/权限逻辑、定时任务与代码生成。提交 PR 前运行 `mvn verify` 以执行完整插件链。
-
 ## 团队开发规范（必须遵守）
 
 本项目为多语言项目，开发规范按语言划分存放于 `context/team/coding/` 目录，总索引见 [context/team/coding/README.md](context/team/coding/README.md)。编写或修改代码前，先查阅对应语言目录下的规范：
