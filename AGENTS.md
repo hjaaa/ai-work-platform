@@ -1,65 +1,66 @@
-# Repository Guidelines
+# 仓库指南
 
-## Project Structure & Module Organization
+## 项目结构与模块组织
 
-`ai-work-platform` aggregates the Spring Cloud services through the root `pom.xml`. Runtime services sit under dedicated
-folders: `ai-work-register` (Nacos), `ai-work-gateway` (edge routing), `ai-work-auth` (authorization), `ai-work-upms` (user and
-permission), `ai-work-boot` (single-service launcher), and `ai-work-visual` (monitor, codegen, quartz). Shared libraries and
-DTOs live in `ai-work-common`. Sample SQL and Docker build contexts reside in `db/`, while infra manifests live in
-`docker-compose.yml`. Every module uses the standard `src/main/java` and `src/test/java` layout.
+`ai-work-platform` 通过根 `pom.xml` 聚合各 Spring Cloud 服务。运行时服务位于独立目录：`ai-work-register`（Nacos 注册中心）、`ai-work-gateway`（边缘路由）、`ai-work-auth`（授权）、`ai-work-upms`（用户与权限）、`ai-work-boot`（单体启动器）、`ai-work-visual`（监控、代码生成、quartz）。共享库与 DTO 位于 `ai-work-common`。示例 SQL 与 Docker 构建上下文在 `db/`，基础设施编排见 `docker-compose.yml`。所有模块均采用标准的 `src/main/java` 与 `src/test/java` 布局。
 
-The open-source edition intentionally excludes workflow, app server, MP, payment, report, BI, multi-tenant, data-scope,
-and dynamic gateway route management code. Gateway routes are maintained through normal configuration files.
+开源版有意不包含 workflow、app server、MP、支付、报表、BI、多租户、数据权限（data-scope）与动态网关路由管理相关代码。网关路由通过常规配置文件维护。
 
-## Build, Test, and Development Commands
+## 构建、测试与开发命令
 
-- Run `mvn clean install -T 4 -Pcloud` from the project root to compile the full cloud edition with the managed BOM.
+- 在项目根目录执行 `mvn clean install -T 4 -Pcloud`，基于托管 BOM 编译完整 cloud 版本。
+- `docker compose build && docker compose up` 构建镜像并启动本地服务栈。
 
-- `docker compose build && docker compose up` builds images and starts the local service stack.
+## 测试规范
 
-## Testing Guidelines
+使用 `spring-boot-starter-test`（JUnit 5、AssertJ、Mockito）编写单元测试与切片测试。测试类命名为 `*Tests.java`，fixture 放在同模块的 `src/test/resources`。覆盖重点：认证、网关过滤器、用户/权限逻辑、定时任务与代码生成。提交 PR 前运行 `mvn verify` 以执行完整插件链。
 
-Use `spring-boot-starter-test` (JUnit 5, AssertJ, Mockito) for unit and slice tests. Name classes `*Tests.java` and
-colocate fixtures in `src/test/resources`. Focus coverage on authentication, gateway filters, user/permission logic,
-scheduled jobs, and code generation. Run `mvn verify` before opening a PR to exercise the full plugin stack.
+## 团队开发规范（必须遵守）
 
-## Commit & Pull Request Guidelines
+本项目为多语言项目，开发规范按语言划分存放于 `context/team/coding/` 目录，总索引见 [context/team/coding/README.md](context/team/coding/README.md)。编写或修改代码前，先查阅对应语言目录下的规范：
 
-Follow the repo’s `type(scope): summary` history, e.g. `fix(upms): clear login failure cache` or
-`feat(codegen): add template option`. Each PR must describe the impact area, list affected modules, and reference
-issues when applicable. Attach curl/Postman snippets or screenshots whenever UI or OpenAPI responses change. Avoid
-committing generated artifacts, and call out schema/config updates explicitly.
+- **Java**（各 `ai-work-*` 后端模块）→ `context/team/coding/java/`，含编程规约：命名、常量、格式、OOP、日期时间、集合、并发、控制语句、注释、前后端交互、其他（`01`~`11`）；错误码、异常与日志（`12`~`14`）；单元测试（`15`）；安全（`16`）；工程结构（`17`~`19`）；设计规约（`20`）；专有名词附录（`21`）
+- **MySQL**（`db/` 及各模块 mapper，建表 / 索引 / SQL / ORM）→ `context/team/coding/mysql/`
+- **前端**（`ai-work-ui`，Vue 3 + TypeScript）→ `context/team/coding/frontend/`，含通用、HTML、CSS、JavaScript、TypeScript 编码规约（`01`~`05`）与 Vue 组件规约（`06`）；React、Node.js 规约（`07`~`08`）本项目未使用，供其他技术栈项目复用
 
-## Security & Configuration Tips
+与语言无关的工程协作规范（Git 提交、更新日志）见 `context/team/engineering/`，索引见 [context/team/engineering/README.md](context/team/engineering/README.md)。
 
-Never commit environment secrets; rely on `docker-compose.yml` plus `.env` overrides ignored by Git. Keep `db/` seed
-data sanitized, and drive end-to-end checks against `ai-work-register` (ports 8848/9848) with `ai-work-gateway` (9999) so
-discovery behavior matches production.
+其中标注【强制】的条目不允许违反；【推荐】条目除非有充分理由并在代码评审中说明，否则应遵守。
 
-## Behavioral Guidelines
+## 提交与 Pull Request
 
-The following four rules apply to all tasks and take precedence over other default behaviors.
+Commit Message、工作流、分支与 Tag 命名遵循团队 Git 规约：[context/team/engineering/01-git.md](context/team/engineering/01-git.md)（`type(scope): summary` 格式，如 `fix(upms): 清理登录失败缓存`）。
 
-### 1. Think Before Coding
+PR 要求：描述影响范围、列出受影响模块、关联相关 issue；UI 或 OpenAPI 响应有变化时附 curl/Postman 示例或截图；不提交生成产物；显式说明表结构 / 配置变更。
 
-- When requirements are ambiguous, ask first — never make silent assumptions
-- If a simpler solution exists, say so explicitly rather than quietly picking a direction
-- When something is unclear, surface the confusion instead of pushing forward with guesswork
+## 安全与配置提示
 
-### 2. Prefer Simplicity
+不要提交环境密钥；通过 `docker-compose.yml` 加被 Git 忽略的 `.env` 覆盖来管理配置。保持 `db/` 种子数据脱敏；端到端验证基于 `ai-work-register`（端口 8848/9848）与 `ai-work-gateway`（9999）进行，使服务发现行为与生产环境一致。
 
-- Use the minimum code needed to solve the current problem; add nothing unrequested
-- Do not introduce abstractions for one-off code or design for hypothetical future needs
-- Ask yourself: would a senior engineer call this over-engineered?
+## 行为准则
 
-### 3. Surgical Changes
+以下四条规则适用于所有任务，优先级高于其他默认行为。
 
-- Only touch what the task requires; do not refactor adjacent code as a side effect
-- Do not alter style or structure unrelated to the current task
-- Every changed line must trace directly to a stated requirement
+### 1. 先想清楚再动手
 
-### 4. Goal-Driven Execution
+- 需求含糊时先提问，不做隐性假设
+- 存在更简单的方案时明确说出来，而不是默默选一个方向
+- 有疑惑就摆出来，不带着猜测继续推进
 
-- Convert vague instructions into verifiable goals — prefer tests as the success criterion
-- "Fix a bug" → write a failing test that reproduces it, then make it pass
-- "Add validation" → write tests covering invalid inputs, then make them pass
+### 2. 简单优先
+
+- 用解决当前问题所需的最少代码，不添加任何未被要求的东西
+- 不为一次性代码引入抽象，不为假想的未来需求做设计
+- 自问：资深工程师会不会觉得这是过度设计？
+
+### 3. 外科手术式修改
+
+- 只动任务要求的部分，不顺手重构相邻代码
+- 不改动与当前任务无关的风格或结构
+- 每一行改动都能直接追溯到明确的需求
+
+### 4. 目标驱动执行
+
+- 把模糊指令转化为可验证的目标，优先以测试作为成功标准
+- "修复 bug" → 先写一个能复现问题的失败测试，再让它通过
+- "添加校验" → 先为非法输入编写测试，再让它通过
