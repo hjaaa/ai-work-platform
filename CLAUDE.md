@@ -8,7 +8,7 @@
 
 - **Java**（各 `ai-work-*` 后端模块）→ `context/team/coding/java/`，含编程规约：命名、常量、格式、OOP、日期时间、集合、并发、控制语句、注释、前后端交互、其他（`01`~`11`）；错误码、异常与日志（`12`~`14`）；单元测试（`15`）；安全（`16`）；工程结构（`17`~`19`）；设计规约（`20`）；专有名词附录（`21`）
 - **MySQL**（`db/` 及各模块 mapper，建表 / 索引 / SQL / ORM）→ `context/team/coding/mysql/`
-- **前端**（`ai-work-ui`，Vue 3 + TypeScript）→ `context/team/coding/frontend/`，含通用、HTML、CSS、JavaScript、TypeScript 编码规约（`01`~`05`）与 Vue 组件规约（`06`）
+- **前端**（`ai-work-ui`，Vue 3 + TypeScript）→ `context/team/coding/frontend/`，含通用、HTML、CSS、JavaScript、TypeScript 编码规约（`01`~`05`）与 Vue 组件规约（`06`）；React、Node.js 规约（`07`~`08`）本项目未使用，供其他技术栈项目复用
 
 与语言无关的工程协作规范（Git 提交、更新日志）见 `context/team/engineering/`，索引见 [context/team/engineering/README.md](context/team/engineering/README.md)。
 

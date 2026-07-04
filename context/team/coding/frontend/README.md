@@ -1,6 +1,6 @@
 # 前端开发规范（团队规范）
 
-适用范围：Vue 3 + TypeScript + Vite 技术栈的前端工程。
+适用范围：前端及 Node.js 工程。`01`~`05` 为通用编码规约；`06`~`08` 为框架/运行时规约，按工程实际技术栈取用。
 
 约束级别（【强制】/【推荐】/【参考】）说明见 [../README.md](../README.md)。
 
@@ -14,6 +14,8 @@
 | [04-javascript.md](04-javascript.md) | JavaScript 编码规约 |
 | [05-typescript.md](05-typescript.md) | TypeScript 编码规约 |
 | [06-vue.md](06-vue.md) | Vue 组件规约（命名、Props 与通信、模板、SFC 结构、状态管理） |
+| [07-react.md](07-react.md) | React 编码规约（编码风格、语言特性、命名、Hooks、无障碍） |
+| [08-node.md](08-node.md) | Node.js 编码规约（版本支持、编码风格、安全、最佳实践） |
 
 ## 与工具链的关系
 
