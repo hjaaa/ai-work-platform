@@ -2,14 +2,26 @@
 
 ## 项目结构与模块组织
 
-`ai-work-platform` 通过根 `pom.xml` 聚合各 Spring Cloud 服务。运行时服务位于独立目录：`ai-work-register`（Nacos 注册中心）、`ai-work-gateway`（边缘路由）、`ai-work-auth`（授权）、`ai-work-upms`（用户与权限）、`ai-work-boot`（单体启动器）、`ai-work-visual`（监控、代码生成、quartz）。共享库与 DTO 位于 `ai-work-common`。前端应用位于 `ai-work-ui`（Vue 3 + TypeScript + Vite）。示例 SQL 与 Docker 构建上下文在 `db/`，基础设施编排见 `docker-compose.yml`。所有模块均采用标准的 `src/main/java` 与 `src/test/java` 布局。
+`ai-work-platform` 通过根 `pom.xml` 聚合各 Spring Cloud 服务。运行时服务位于独立目录：`ai-work-register`（Nacos 注册中心）、`ai-work-gateway`（边缘路由）、`ai-work-auth`（授权）、`ai-work-upms`（用户与权限）、`ai-work-boot`（单体启动器）、`ai-work-visual`（监控、代码生成、quartz）。共享库与 DTO 位于 `ai-work-common`。前端应用位于 `ai-work-ui`（Vue 3 + TypeScript + Vite）。示例 SQL 与 Docker 构建上下文在 `db/`，基础设施编排见 `docker-compose.yml`（微服务形态）与 `docker-compose-boot.yml`（单体形态）。所有模块均采用标准的 `src/main/java` 与 `src/test/java` 布局。
 
-开源版有意不包含 workflow、app server、MP、支付、报表、BI、多租户、数据权限（data-scope）与动态网关路由管理相关代码。网关路由通过常规配置文件维护。
+## 环境要求
+
+- 后端：JDK 17 + Maven；前端：Node `^22.22.2 || ^24.15.0 || >=26.0.0`（见 `ai-work-ui/package.json` engines）。
+- 本地运行依赖 MySQL 与 Redis（docker compose 栈已内置）。数据库初始化脚本：`db/ai_work.sql`（业务库）、`db/ai_work_config.sql`（Nacos 配置中心库）。
 
 ## 构建、测试与开发命令
 
-- 在项目根目录执行 `mvn clean install -T 4 -Pcloud`，基于托管 BOM 编译完整 cloud 版本。
-- `docker compose build && docker compose up` 构建镜像并启动本地服务栈。
+后端（项目根目录）：
+
+- `mvn clean install -T 4 -Pcloud` 编译微服务版（`cloud` 为默认激活 profile）。
+- `mvn clean install -T 4 -Pboot` 编译单体版（`ai-work-boot` 仅在 `boot` profile 下参与构建）。
+- `docker compose build && docker compose up` 构建镜像并启动微服务栈（含 MySQL、Redis；`ai-work-register` 端口 8848/9848，`ai-work-gateway` 统一入口 9999，`ai-work-monitor` 5001）。单体形态使用 `docker compose -f docker-compose-boot.yml up`。
+
+前端（`ai-work-ui` 目录内）：
+
+- `npm run dev` 启动 Vite 开发服务器。
+- `npm run build` 执行类型检查（vue-tsc）并构建生产包。
+- `npm run lint` / `npm run format` 执行 lint（oxlint + ESLint）与格式化（Prettier）。
 
 ## 测试规范
 
