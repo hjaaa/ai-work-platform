@@ -22,14 +22,14 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.pig4cloud</groupId>
-    <artifactId>pig</artifactId>
+    <groupId>com.aiwork</groupId>
+    <artifactId>ai-work-platform</artifactId>
     <version>4.0.0</version>
     <name>${project.artifactId}</name>
     <packaging>pom</packaging>
     <organization>
-        <name>pig4cloud</name>
-        <url>https://www.pig4cloud.com</url>
+        <name>aiwork</name>
+        <url>https://www.aiwork.com</url>
     </organization>
 
     <properties>
@@ -53,7 +53,7 @@
         <aws.sdk.version>2.44.14</aws.sdk.version>
         <docker.registry>registry.cn-hangzhou.aliyuncs.com</docker.registry>
         <docker.host>http://127.0.0.1:2375</docker.host>
-        <docker.namespace>pigcloudx</docker.namespace>
+        <docker.namespace>aiwork</docker.namespace>
         <docker.username>佩小格科技</docker.username>
         <docker.password>qq123456</docker.password>
         <docker.plugin.version>0.33.0</docker.plugin.version>
@@ -100,20 +100,20 @@
     </dependencies>
 
     <modules>
-        <module>pig-register</module>
-        <module>pig-gateway</module>
-        <module>pig-auth</module>
-        <module>pig-upms</module>
-        <module>pig-common</module>
-        <module>pig-visual</module>
+        <module>ai-work-register</module>
+        <module>ai-work-gateway</module>
+        <module>ai-work-auth</module>
+        <module>ai-work-upms</module>
+        <module>ai-work-common</module>
+        <module>ai-work-visual</module>
     </modules>
 
     <dependencyManagement>
         <dependencies>
-            <!--pig 公共版本定义-->
+            <!--ai-work 公共版本定义-->
             <dependency>
-                <groupId>com.pig4cloud</groupId>
-                <artifactId>pig-common-bom</artifactId>
+                <groupId>com.aiwork</groupId>
+                <artifactId>ai-work-common-bom</artifactId>
                 <version>${project.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
@@ -292,7 +292,7 @@
         <profile>
             <id>boot</id>
             <modules>
-                <module>pig-boot</module>
+                <module>ai-work-boot</module>
             </modules>
         </profile>
     </profiles>

@@ -3,33 +3,33 @@
 # 2. 启动服务: docker compose -f docker-compose-boot.yml up -d
 # 3. 静静等待服务启动
 services:
-  pig-mysql:
+  ai-work-mysql:
     build:
       context: ./db
     environment:
       MYSQL_ROOT_HOST: "%"
       MYSQL_ROOT_PASSWORD: root
     restart: always
-    container_name: pig-mysql
-    image: pig-mysql
+    container_name: ai-work-mysql
+    image: ai-work-mysql
     command: --lower_case_table_names=1
     networks:
       - spring_cloud_default
 
-  pig-redis:
-    container_name: pig-redis
+  ai-work-redis:
+    container_name: ai-work-redis
     image: registry.cn-hangzhou.aliyuncs.com/dockerhub_mirror/redis
     restart: always
     networks:
       - spring_cloud_default
 
-  # 单体的时候注意，服务名称命名为 pig-gateway 对应前端nginx 配置
-  pig-gateway:
+  # 单体的时候注意，服务名称命名为 ai-work-gateway 对应前端nginx 配置
+  ai-work-gateway:
     build:
-      context: ./pig-boot
+      context: ./ai-work-boot
     restart: always
-    container_name: pig-boot
-    image: pig-boot
+    container_name: ai-work-boot
+    image: ai-work-boot
     ports:
       - 9999:9999
     networks:

@@ -1,0 +1,10 @@
+com.aiwork.admin.api.feign.RemoteClientDetailsService
+com.aiwork.admin.api.feign.RemoteLogService
+com.aiwork.admin.api.feign.RemoteParamService
+com.aiwork.admin.api.feign.RemoteFileService
+com.aiwork.admin.api.feign.RemoteTokenService
+com.aiwork.admin.api.feign.RemoteUserService
+com.aiwork.admin.api.feign.RemoteDictService
+com.aiwork.admin.api.feign.RemoteMenuService
+com.aiwork.admin.api.feign.RemoteMessageService
+com.aiwork.admin.api.feign.RemoteApiKeyService

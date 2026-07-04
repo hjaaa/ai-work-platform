@@ -1,0 +1,10 @@
+com.aiwork.common.security.service.AiWorkDefaultUserDetailsServiceImpl
+com.aiwork.common.security.service.AiWorkMobileUserDetailServiceImpl
+com.aiwork.common.security.service.AiWorkRedisOAuth2AuthorizationService
+com.aiwork.common.security.service.AiWorkRedisOAuth2AuthorizationConsentService
+com.aiwork.common.security.component.AiWorkBootCorsProperties
+com.aiwork.common.security.component.AiWorkSecurityInnerAspect
+com.aiwork.common.security.component.AiWorkInnerHeaderRemoveFilter
+com.aiwork.common.security.component.AiWorkSecurityMessageSourceConfiguration
+com.aiwork.common.security.service.AiWorkRemoteRegisteredClientRepository
+com.aiwork.common.security.captcha.CaptchaAutoConfiguration

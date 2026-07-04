@@ -1,0 +1,5 @@
+com.aiwork.common.data.cache.RedisTemplateConfiguration
+com.aiwork.common.data.cache.RedisMessageConfiguration
+com.aiwork.common.data.cache.RedisCacheManagerConfiguration
+com.aiwork.common.data.cache.RedisCacheAutoConfiguration
+com.aiwork.common.data.mybatis.MybatisPlusConfiguration

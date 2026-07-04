@@ -1,0 +1,5 @@
+com.aiwork.common.core.config.JacksonConfiguration
+com.aiwork.common.core.config.MessageSourceConfiguration
+com.aiwork.common.core.config.WebCommonConfiguration
+com.aiwork.common.core.config.ImmutableConfiguration
+com.aiwork.common.core.util.SpringContextHolder

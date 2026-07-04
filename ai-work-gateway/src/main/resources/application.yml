@@ -1,0 +1,50 @@
+server:
+  port: 9999
+
+spring:
+  application:
+    name: @artifactId@
+  cloud:
+    nacos:
+      username: @nacos.username@
+      password: @nacos.password@
+      discovery:
+        server-addr: ${NACOS_HOST:ai-work-register}:${NACOS_PORT:8848}
+      config:
+        server-addr: ${spring.cloud.nacos.discovery.server-addr}
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: openapi
+              uri: lb://ai-work-gateway
+              predicates:
+                - Path=/v3/api-docs/**
+              filters:
+                - RewritePath=/v3/api-docs/(?<path>.*), /$\{path}/$\{path}/v3/api-docs
+            - id: ai-work-auth
+              uri: lb://ai-work-auth
+              predicates:
+                - Path=/auth/**
+            - id: ai-work-upms-biz
+              uri: lb://ai-work-upms-biz
+              predicates:
+                - Path=/admin/**
+              metadata:
+                response-timeout: 30000
+            - id: ai-work-codegen
+              uri: lb://ai-work-codegen
+              predicates:
+                - Path=/gen/**
+            - id: ai-work-quartz
+              uri: lb://ai-work-quartz
+              predicates:
+                - Path=/job/**
+            - id: ai-work-monitor
+              uri: lb://ai-work-monitor
+              predicates:
+                - Path=/monitor/**
+  config:
+    import:
+      - optional:nacos:application-@profiles.active@.yml
+      - optional:nacos:${spring.application.name}-@profiles.active@.yml
