@@ -10,4 +10,6 @@
 - **MySQL**（`db/` 及各模块 mapper，建表 / 索引 / SQL / ORM）→ `context/team/coding/mysql/`
 - **前端**（`ai-work-ui`，Vue 3 + TypeScript）→ `context/team/coding/frontend/`，含通用、HTML、CSS、JavaScript、TypeScript 编码规约（`01`~`05`）与 Vue 组件规约（`06`）
 
+与语言无关的工程协作规范（Git 提交、更新日志）见 `context/team/engineering/`，索引见 [context/team/engineering/README.md](context/team/engineering/README.md)。
+
 其中标注【强制】的条目不允许违反；【推荐】条目除非有充分理由并在代码评审中说明，否则应遵守。
