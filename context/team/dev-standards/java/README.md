@@ -28,7 +28,7 @@
 
 | 文档 | 内容 |
 |---|---|
-| [12-error-codes.md](12-error-codes.md) | 错误码 |
+| [12-error-codes.md](12-error-codes.md) | 错误码（统一响应码） |
 | [13-exception-handling.md](13-exception-handling.md) | 异常处理 |
 | [14-logging.md](14-logging.md) | 日志规约 |
 
