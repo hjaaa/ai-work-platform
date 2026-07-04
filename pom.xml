@@ -42,6 +42,7 @@
         <spring-boot-admin.version>4.1.1</spring-boot-admin.version>
         <maven.compiler.version>3.14.1</maven.compiler.version>
         <maven-enforcer.version>3.5.0</maven-enforcer.version>
+        <maven-deploy.version>3.1.2</maven-deploy.version>
         <spring.checkstyle.version>0.0.47</spring.checkstyle.version>
         <git.commit.version>9.0.2</git.commit.version>
         <lombok.version>1.18.46</lombok.version>
@@ -216,6 +217,12 @@
                             </image>
                         </images>
                     </configuration>
+                </plugin>
+                <!--deploy 插件统一版本，子模块声明时无需再写版本-->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-deploy-plugin</artifactId>
+                    <version>${maven-deploy.version}</version>
                 </plugin>
             </plugins>
         </pluginManagement>

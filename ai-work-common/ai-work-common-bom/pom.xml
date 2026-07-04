@@ -7,7 +7,7 @@
     <groupId>com.aiwork</groupId>
     <artifactId>ai-work-common-bom</artifactId>
     <packaging>pom</packaging>
-    <version>${aiwork.version}</version>
+    <version>4.0.0</version>
     <description>ai-work 公共版本控制，在此pom定义的依赖，全局业务微服务不需要指定版本。</description>
 
     <properties>
