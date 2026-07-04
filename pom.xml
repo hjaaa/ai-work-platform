@@ -41,6 +41,7 @@
         <maven.compiler.target>17</maven.compiler.target>
         <spring-boot-admin.version>4.1.1</spring-boot-admin.version>
         <maven.compiler.version>3.14.1</maven.compiler.version>
+        <maven-enforcer.version>3.5.0</maven-enforcer.version>
         <spring.checkstyle.version>0.0.47</spring.checkstyle.version>
         <git.commit.version>9.0.2</git.commit.version>
         <lombok.version>1.18.46</lombok.version>
@@ -219,6 +220,25 @@
             </plugins>
         </pluginManagement>
         <plugins>
+            <!--依赖收敛检查：禁止同一 pom 内重复声明依赖版本-->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>${maven-enforcer.version}</version>
+                <executions>
+                    <execution>
+                        <id>enforce-dependency-rules</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <banDuplicatePomDependencyVersions/>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <!--代码格式插件，默认使用spring 规则-->
             <plugin>
                 <groupId>io.spring.javaformat</groupId>

@@ -1,0 +1,21 @@
+name: pom-checks
+
+on:
+  push:
+    paths:
+      - '**/pom.xml'
+      - 'scripts/check-pom-duplicate-properties.py'
+      - '.github/workflows/pom-checks.yml'
+  pull_request:
+    paths:
+      - '**/pom.xml'
+      - 'scripts/check-pom-duplicate-properties.py'
+      - '.github/workflows/pom-checks.yml'
+
+jobs:
+  duplicate-properties:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 检查 pom 重复属性声明
+        run: python3 scripts/check-pom-duplicate-properties.py
