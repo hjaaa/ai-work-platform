@@ -6,7 +6,7 @@
 |---|---|---|
 | [java/](java/README.md) | 后端 Java 代码（各 `ai-work-*` 服务模块） | ✅ 已就绪 |
 | [mysql/](mysql/README.md) | 数据库建表、索引、SQL、ORM（`db/` 及各模块 mapper） | ✅ 已就绪 |
-| [frontend/](frontend/README.md) | 前端 Vue 3 + TypeScript 代码（`ai-work-ui`） | ✅ 编码规约已就绪（Vue 组件规约待补充） |
+| [frontend/](frontend/README.md) | 前端 Vue 3 + TypeScript 代码（`ai-work-ui`） | ✅ 已就绪 |
 
 ## 约束级别说明
 

@@ -13,13 +13,7 @@
 | [03-css.md](03-css.md) | CSS 编码规约 |
 | [04-javascript.md](04-javascript.md) | JavaScript 编码规约 |
 | [05-typescript.md](05-typescript.md) | TypeScript 编码规约 |
-
-## Vue 组件规约
-
-Vue 组件规约文档待补充，编写组件时暂按以下基线执行：
-
-- 组件与代码风格遵循 [Vue 官方风格指南](https://vuejs.org/style-guide/)（Priority A/B 必须遵守）
-- TypeScript 保持 strict 模式，不使用 `any` 规避类型检查
+| [06-vue.md](06-vue.md) | Vue 组件规约（命名、Props 与通信、模板、SFC 结构、状态管理） |
 
 ## 与工具链的关系
 
