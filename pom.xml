@@ -220,7 +220,7 @@
             </plugins>
         </pluginManagement>
         <plugins>
-            <!--依赖收敛检查：禁止同一 pom 内重复声明依赖版本-->
+            <!--重复依赖版本声明检查：禁止同一 pom 内对同一依赖重复声明版本-->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>

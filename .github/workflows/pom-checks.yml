@@ -19,3 +19,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: 检查 pom 重复属性声明
         run: python3 scripts/check-pom-duplicate-properties.py
+
+  maven-enforcer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Maven 校验（含 Enforcer 重复依赖版本声明检查）
+        run: mvn -B -ntp validate
