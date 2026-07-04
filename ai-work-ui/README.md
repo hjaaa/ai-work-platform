@@ -11,7 +11,7 @@ AI Work Platform 前端项目，基于 Vue 3 + TypeScript + Vite，参考 [pig-u
 
 ## 环境要求
 
-- Node >= 18
+- Node >= 22.18（以 package.json 的 engines 字段为准）
 
 ## 快速开始
 
