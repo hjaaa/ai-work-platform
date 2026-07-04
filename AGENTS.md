@@ -2,7 +2,7 @@
 
 ## 项目结构与模块组织
 
-`ai-work-platform` 通过根 `pom.xml` 聚合各 Spring Cloud 服务。运行时服务位于独立目录：`ai-work-register`（Nacos 注册中心）、`ai-work-gateway`（边缘路由）、`ai-work-auth`（授权）、`ai-work-upms`（用户与权限）、`ai-work-boot`（单体启动器）、`ai-work-visual`（监控、代码生成、quartz）。共享库与 DTO 位于 `ai-work-common`。前端应用位于 `ai-work-ui`（Vue 3 + TypeScript + Vite）。示例 SQL 与 Docker 构建上下文在 `db/`，基础设施编排见 `docker-compose.yml`（微服务形态）与 `docker-compose-boot.yml`（单体形态）。所有模块均采用标准的 `src/main/java` 与 `src/test/java` 布局。
+`ai-work-platform` 通过根 `pom.xml` 聚合各 Spring Cloud 服务。运行时服务位于独立目录：`ai-work-register`（Nacos 注册中心）、`ai-work-gateway`（边缘路由）、`ai-work-auth`（授权）、`ai-work-upms`（用户与权限）、`ai-work-boot`（单体启动器）、`ai-work-visual`（监控、代码生成、quartz）。共享库与 DTO 位于 `ai-work-common`。前端应用位于 `ai-work-ui`（Vue 3 + TypeScript + Vite）。示例 SQL 与 Docker 构建上下文在 `db/`，基础设施编排见 `docker-compose.yml`（微服务形态）与 `docker-compose-boot.yml`（单体形态）。团队规范文档位于 `context/team/`，构建辅助脚本位于 `scripts/`。所有模块均采用标准的 `src/main/java` 与 `src/test/java` 布局。
 
 ## 环境要求
 
@@ -22,6 +22,7 @@
 - `npm run dev` 启动 Vite 开发服务器。
 - `npm run build` 执行类型检查（vue-tsc）并构建生产包。
 - `npm run lint` / `npm run format` 执行 lint（oxlint + ESLint）与格式化（Prettier）。
+- 变更依赖后须在干净环境执行 `npm ci` 验证：macOS 上增量 `npm install` 会裁剪 `package-lock.json` 中跨平台 optional 依赖条目，导致 Linux/CI 构建失败。
 
 ## 团队开发规范（必须遵守）
 
@@ -37,6 +38,6 @@
 
 ## 提交与 Pull Request
 
-Commit Message、工作流、分支与 Tag 命名遵循团队 Git 规约：[context/team/engineering/01-git.md](context/team/engineering/01-git.md)（`type(scope): summary` 格式，如 `fix(upms): 清理登录失败缓存`）。
+分支模型：`develop` 为日常集成分支，`main` 用于发版；`develop` 为保护分支，禁止直接提交，改动一律经 feature 分支合入。Commit Message、工作流、分支与 Tag 命名遵循团队 Git 规约：[context/team/engineering/01-git.md](context/team/engineering/01-git.md)（`type(scope): summary` 格式，如 `fix(upms): 清理登录失败缓存`）。
 
 PR 描述必须按 [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md) 的结构填写（规约见 [context/team/engineering/03-pull-request.md](context/team/engineering/03-pull-request.md)）；用 `gh pr create --body` 等方式创建 PR 时模板不会自动应用，须主动按模板结构组织描述。不提交生成产物。
