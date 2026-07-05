@@ -34,8 +34,10 @@ service.interceptors.response.use(
     return response.data
   },
   (error) => {
-    // 401：登录态失效，清 token 回登录页（带回跳地址）；用 location 跳转避免依赖 router
-    if (error.response?.status === 401) {
+    // 401/424：登录态失效（424 为后端 token 失效约定状态码），清 token 回登录页（带回跳地址）；
+    // 用 location 跳转避免依赖 router
+    const status = error.response?.status
+    if (status === 401 || status === 424) {
       clearTokens()
       if (!window.location.pathname.startsWith('/login')) {
         const redirect = encodeURIComponent(window.location.pathname + window.location.search)
