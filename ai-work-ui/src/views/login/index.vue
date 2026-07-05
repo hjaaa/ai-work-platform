@@ -395,7 +395,7 @@ async function onSubmit() {
     await userStore.login(form)
     if (remember.value) localStorage.setItem(REMEMBER_KEY, form.username)
     else localStorage.removeItem(REMEMBER_KEY)
-    router.push(getSafeRedirectPath(route.query.redirect))
+    await router.push(getSafeRedirectPath(route.query.redirect))
   } catch (e) {
     // token 端点失败时优先展示后端消息（R.msg 或 OAuth2 error_description）
     const data = (e as { response?: { data?: { msg?: string; error_description?: string } } })
