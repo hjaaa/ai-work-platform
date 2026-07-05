@@ -1,0 +1,67 @@
+/**
+ * 全局主题：Element Plus 变量覆写，令牌值与 DESIGN.md 保持一致。
+ * light-N = 主色与白色按 N*10% 混合，dark-2 = 主色与黑色按 20% 混合
+ * （Element Plus 的派生色是静态变量，改主色必须同步改派生色，否则 hover/浅底仍是默认蓝）。
+ * 必须在 element-plus/dist/index.css 之后引入才能生效。
+ */
+:root {
+  /* 品牌蓝 #0091ff 及派生色 */
+  --el-color-primary: #0091ff;
+  --el-color-primary-light-3: #4db2ff;
+  --el-color-primary-light-5: #80c8ff;
+  --el-color-primary-light-7: #b3deff;
+  --el-color-primary-light-8: #cce9ff;
+  --el-color-primary-light-9: #e6f4ff;
+  --el-color-primary-dark-2: #0074cc;
+
+  /* 语义色 */
+  --el-color-success: #00885b;
+  --el-color-success-light-3: #4dac8c;
+  --el-color-success-light-5: #80c4ad;
+  --el-color-success-light-7: #b3dcce;
+  --el-color-success-light-8: #cce7e0;
+  --el-color-success-light-9: #e6f3ef;
+  --el-color-success-dark-2: #006d49;
+
+  --el-color-warning: #ff9a21;
+  --el-color-warning-light-3: #ffb864;
+  --el-color-warning-light-5: #ffcd90;
+  --el-color-warning-light-7: #ffe1bc;
+  --el-color-warning-light-8: #ffebd3;
+  --el-color-warning-light-9: #fff5e9;
+  --el-color-warning-dark-2: #cc7b1a;
+
+  --el-color-danger: #d04934;
+  --el-color-danger-light-3: #de8071;
+  --el-color-danger-light-5: #e8a49a;
+  --el-color-danger-light-7: #f1c8c2;
+  --el-color-danger-light-8: #f6dbd6;
+  --el-color-danger-light-9: #faedeb;
+  --el-color-danger-dark-2: #a63a2a;
+
+  --el-color-error: #d04934;
+  --el-color-error-light-3: #de8071;
+  --el-color-error-light-5: #e8a49a;
+  --el-color-error-light-7: #f1c8c2;
+  --el-color-error-light-8: #f6dbd6;
+  --el-color-error-light-9: #faedeb;
+  --el-color-error-dark-2: #a63a2a;
+
+  /* 文本：#262626 透明度阶梯 */
+  --el-text-color-primary: #262626;
+  --el-text-color-regular: rgba(38, 38, 38, 0.76);
+  --el-text-color-secondary: rgba(38, 38, 38, 0.6);
+  --el-text-color-placeholder: rgba(38, 38, 38, 0.4);
+  --el-text-color-disabled: rgba(38, 38, 38, 0.4);
+
+  /* 边框与表面 */
+  --el-border-color: rgba(38, 38, 38, 0.1);
+  --el-border-color-light: rgba(38, 38, 38, 0.1);
+  --el-border-color-lighter: rgba(38, 38, 38, 0.1);
+  --el-bg-color-page: #f9f9f9;
+  --el-fill-color-light: rgba(38, 38, 38, 0.03);
+
+  /* 圆角 */
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+}
