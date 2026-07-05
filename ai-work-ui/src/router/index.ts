@@ -1,5 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import type { RouteRecordRaw } from 'vue-router'
 import Layout from '@/layout/index.vue'
+import { useUserStore } from '@/stores/user'
+import type { MenuTree } from '@/api/menu'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -11,6 +14,7 @@ const router = createRouter({
     },
     {
       path: '/',
+      name: 'layout',
       component: Layout,
       redirect: '/home',
       children: [
@@ -21,8 +25,62 @@ const router = createRouter({
         },
       ],
     },
-    // 动态路由扩展点：登录鉴权接入后，在此追加按权限下发的路由
   ],
+})
+
+// 视图组件按约定映射：菜单 path=/xxx/yyy → src/views/xxx/yyy/index.vue
+const viewModules = import.meta.glob('../views/**/index.vue')
+
+// 菜单树 → 路由表：仅为能匹配到视图文件的菜单项注册路由，按钮(menuType=1)跳过
+function menusToRoutes(menus: MenuTree[]): RouteRecordRaw[] {
+  const routes: RouteRecordRaw[] = []
+  const walk = (items: MenuTree[]) => {
+    for (const item of items) {
+      if (String(item.menuType ?? '0') === '1') continue
+      if (typeof item.path === 'string' && item.path) {
+        const path = item.path.startsWith('/') ? item.path : `/${item.path}`
+        const view = viewModules[`../views${path}/index.vue`]
+        if (view && path !== '/home') {
+          routes.push({ path, name: String(item.name ?? path), component: view })
+        }
+      }
+      if (Array.isArray(item.children) && item.children.length > 0) {
+        walk(item.children)
+      }
+    }
+  }
+  walk(menus)
+  return routes
+}
+
+const WHITE_LIST = ['/login']
+
+router.beforeEach(async (to) => {
+  const userStore = useUserStore()
+  if (WHITE_LIST.includes(to.path)) {
+    // 已登录访问登录页 → 回首页
+    return userStore.isLoggedIn ? { path: '/' } : true
+  }
+  if (!userStore.isLoggedIn) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  if (!userStore.loaded) {
+    // 首次进入/刷新：拉取用户信息与菜单，注册动态路由后重进目标路由
+    try {
+      await userStore.fetchUserInfo()
+      for (const record of menusToRoutes(userStore.menus)) {
+        router.addRoute('layout', record)
+      }
+      // 兜底：菜单未实现对应页面时回首页，避免空白
+      router.addRoute({ path: '/:pathMatch(.*)*', name: 'not-found', redirect: '/home' })
+      return { ...to, replace: true }
+    } catch {
+      // token 失效或接口异常：清登录态回登录页
+      userStore.reset()
+      return { path: '/login', query: { redirect: to.fullPath } }
+    }
+  }
+  return true
 })
 
 export default router
