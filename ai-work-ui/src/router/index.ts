@@ -41,7 +41,7 @@ function menusToRoutes(menus: MenuTree[]): RouteRecordRaw[] {
         const path = item.path.startsWith('/') ? item.path : `/${item.path}`
         const view = viewModules[`../views${path}/index.vue`]
         if (view && path !== '/home') {
-          routes.push({ path, name: String(item.name ?? path), component: view })
+          routes.push({ path, name: `menu-${String(item.id)}`, component: view })
         }
       }
       if (Array.isArray(item.children) && item.children.length > 0) {
@@ -69,10 +69,14 @@ router.beforeEach(async (to) => {
     try {
       await userStore.fetchUserInfo()
       for (const record of menusToRoutes(userStore.menus)) {
-        router.addRoute('layout', record)
+        if (record.name && !router.hasRoute(record.name)) {
+          router.addRoute('layout', record)
+        }
       }
       // 兜底：菜单未实现对应页面时回首页，避免空白
-      router.addRoute({ path: '/:pathMatch(.*)*', name: 'not-found', redirect: '/home' })
+      if (!router.hasRoute('not-found')) {
+        router.addRoute({ path: '/:pathMatch(.*)*', name: 'not-found', redirect: '/home' })
+      }
       return { ...to, replace: true }
     } catch {
       // token 失效或接口异常：清登录态回登录页
