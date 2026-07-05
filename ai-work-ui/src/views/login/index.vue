@@ -381,14 +381,21 @@ async function validateForm() {
   }
 }
 
+function getSafeRedirectPath(redirect: unknown) {
+  if (typeof redirect !== 'string') return '/'
+  if (!redirect.startsWith('/') || redirect.startsWith('//')) return '/'
+  return redirect
+}
+
 async function onSubmit() {
-  if (loading.value || !(await validateForm())) return
+  if (loading.value) return
   loading.value = true
   try {
+    if (!(await validateForm())) return
     await userStore.login(form)
     if (remember.value) localStorage.setItem(REMEMBER_KEY, form.username)
     else localStorage.removeItem(REMEMBER_KEY)
-    router.push((route.query.redirect as string) || '/')
+    router.push(getSafeRedirectPath(route.query.redirect))
   } catch (e) {
     // token 端点失败时优先展示后端消息（R.msg 或 OAuth2 error_description）
     const data = (e as { response?: { data?: { msg?: string; error_description?: string } } })
@@ -662,6 +669,10 @@ async function onSubmit() {
   cursor: pointer;
   border-radius: 4px;
   border: 1px solid rgba(38, 38, 38, 0.1);
+}
+.field-captcha:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
 }
 .field-underline {
   position: absolute;
