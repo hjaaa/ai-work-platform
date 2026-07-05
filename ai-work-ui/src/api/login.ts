@@ -24,7 +24,16 @@ const BASIC_AUTH =
 
 // 认证服务路径前缀：微服务形态经网关为 /auth；单体(boot)形态 context-path 为 /admin，
 // 部署 boot 形态时通过 VITE_AUTH_PATH=/admin 覆盖
-const AUTH_BASE = import.meta.env.VITE_AUTH_PATH || '/auth'
+const AUTH_BASE = normalizePathPrefix(import.meta.env.VITE_AUTH_PATH || '/auth')
+
+function normalizePathPrefix(path: string): string {
+  const trimmed = path.replace(/^\/+|\/+$/g, '')
+  return trimmed ? `/${trimmed}` : ''
+}
+
+function joinUrlPath(baseUrl: string, ...paths: string[]): string {
+  return `${baseUrl.replace(/\/+$/g, '')}${paths.map(normalizePathPrefix).join('')}`
+}
 
 // 用独立 axios 调用绕过统一拦截器：不解包 R、不注入 Bearer、改用 Basic 客户端认证
 export async function login(form: LoginForm): Promise<TokenResponse> {
@@ -37,7 +46,7 @@ export async function login(form: LoginForm): Promise<TokenResponse> {
     randomStr: form.randomStr,
   })
   const { data } = await axios.post<TokenResponse>(
-    `${import.meta.env.VITE_API_URL}${AUTH_BASE}/oauth2/token`,
+    joinUrlPath(import.meta.env.VITE_API_URL, AUTH_BASE, '/oauth2/token'),
     params,
     { headers: { Authorization: BASIC_AUTH } },
   )
@@ -50,5 +59,5 @@ export function logout() {
 
 // 图形验证码图片地址，randomStr 为前端随机串，登录时需原样带回
 export function imageCodeUrl(randomStr: string): string {
-  return `${import.meta.env.VITE_API_URL}${AUTH_BASE}/code/image?randomStr=${randomStr}`
+  return `${joinUrlPath(import.meta.env.VITE_API_URL, AUTH_BASE, '/code/image')}?randomStr=${randomStr}`
 }
