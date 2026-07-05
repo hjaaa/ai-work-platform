@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type { AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
+import { getAccessToken, clearTokens } from '@/utils/auth'
 
 // 后端统一返回结构
 export interface R<T = unknown> {
@@ -14,8 +15,14 @@ const service = axios.create({
   timeout: 30000,
 })
 
-// 预留请求拦截：登录联调后在此注入 Authorization 头
-service.interceptors.request.use((config) => config)
+// 注入登录 token；登录接口走独立实例（见 src/api/login.ts），不经过此处
+service.interceptors.request.use((config) => {
+  const token = getAccessToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
 
 service.interceptors.response.use(
   (response) => {
@@ -27,7 +34,16 @@ service.interceptors.response.use(
     return response.data
   },
   (error) => {
-    // 401/424 等场景后端会返回含本地化 msg 的 R 结构，优先展示后端消息
+    // 401：登录态失效，清 token 回登录页（带回跳地址）；用 location 跳转避免依赖 router
+    if (error.response?.status === 401) {
+      clearTokens()
+      if (!window.location.pathname.startsWith('/login')) {
+        const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+        window.location.href = `/login?redirect=${redirect}`
+      }
+      return Promise.reject(error)
+    }
+    // 其他错误：后端会返回含本地化 msg 的 R 结构，优先展示后端消息
     const msg = (error.response?.data as R | undefined)?.msg || error.message || '网络异常'
     ElMessage.error(msg)
     return Promise.reject(error)
