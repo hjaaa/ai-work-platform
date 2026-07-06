@@ -712,6 +712,7 @@ INSERT INTO `sys_public_param` VALUES (26, '隐私提示', 'SITE_PRIVACY_TIP', '
 INSERT INTO `sys_public_param` VALUES (27, '密码过期天数', 'PASSWORD_EXPIRE_DAYS', '90', '0', NULL, 'admin', 'admin', '2026-03-28 00:00:00', NULL, '2', '0', '0');
 INSERT INTO `sys_public_param` VALUES (28, '登录失败锁定次数', 'LOGIN_ERROR_TIMES', '5', '0', NULL, 'admin', 'admin', '2026-03-28 00:00:00', NULL, '2', '0', '0');
 INSERT INTO `sys_public_param` VALUES (29, '密码规则预设', 'SITE_PASSWORD_RULE', 'letterNumber', '0', NULL, 'admin', 'admin', '2026-03-28 00:00:00', NULL, '2', '1', '0');
+INSERT INTO `sys_public_param` VALUES (30, '验证码触发失败次数', 'CAPTCHA_ERROR_TIMES', '3', '0', NULL, 'admin', 'admin', '2026-07-05 00:00:00', NULL, '2', '0', '0');
 COMMIT;
 
 -- ----------------------------
