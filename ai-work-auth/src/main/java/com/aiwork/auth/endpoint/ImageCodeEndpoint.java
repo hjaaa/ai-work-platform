@@ -3,6 +3,7 @@ package com.aiwork.auth.endpoint;
 import cn.hutool.core.lang.Validator;
 import com.anji.captcha.model.vo.CaptchaVO;
 import com.anji.captcha.service.CaptchaService;
+import com.aiwork.auth.support.core.AuthCaptchaSupport;
 import com.aiwork.common.core.constant.CacheConstants;
 import com.aiwork.common.core.constant.SecurityConstants;
 import com.aiwork.common.core.util.R;
@@ -33,6 +34,8 @@ public class ImageCodeEndpoint {
 
 	private static final Integer DEFAULT_IMAGE_HEIGHT = 40;
 
+	private final AuthCaptchaSupport authCaptchaSupport;
+
 	/**
 	 * 创建图形验证码
 	 */
@@ -51,6 +54,16 @@ public class ImageCodeEndpoint {
 		RedisUtils.set(CacheConstants.DEFAULT_CODE_KEY + randomStr, result, SecurityConstants.CODE_TIME);
 		// 转换流信息写出
 		captcha.out(response.getOutputStream());
+	}
+
+	/**
+	 * 查询账号本次登录是否需要图形验证码（密码连续错误达到阈值后需要）
+	 * @param username 登录账号
+	 * @return true 需要验证码
+	 */
+	@GetMapping("/required")
+	public R<Boolean> required(String username) {
+		return R.ok(authCaptchaSupport.isFailureTimesReached(username));
 	}
 
 	/**
