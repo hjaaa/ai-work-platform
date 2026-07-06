@@ -2,6 +2,7 @@ package com.aiwork.auth.support.filter;
 
 import com.aiwork.auth.support.core.AuthCaptchaSupport;
 import com.aiwork.auth.support.handler.FormAuthenticationFailureHandler;
+import com.aiwork.common.core.constant.SecurityConstants;
 import com.aiwork.common.core.exception.ValidateCodeException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -47,6 +48,12 @@ public class FormLoginValidateCodeFilter extends OncePerRequestFilter {
 		String authClientId = authCaptchaSupport.resolveAuthorizationClientId(request, response, true);
 
 		if (!authCaptchaSupport.isCaptchaEnabled(authClientId)) {
+			filterChain.doFilter(request, response);
+			return;
+		}
+
+		// 自适应验证码：失败次数未达阈值时跳过校验
+		if (!authCaptchaSupport.isFailureTimesReached(request.getParameter(SecurityConstants.DETAILS_USERNAME))) {
 			filterChain.doFilter(request, response);
 			return;
 		}
