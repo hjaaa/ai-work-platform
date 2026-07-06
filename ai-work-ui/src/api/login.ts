@@ -56,6 +56,22 @@ export async function login(form: LoginForm): Promise<TokenResponse> {
   return data
 }
 
+// 社交扫码登录:grant_type=mobile,mobile=TYPE@code(如 DINGTALK@{authCode});
+// 后端 ValidateCodeFilter 对非 SMS 的社交登录自动跳过图形验证码
+export async function socialLogin(type: string, code: string): Promise<TokenResponse> {
+  const params = new URLSearchParams({
+    grant_type: 'mobile',
+    scope: 'server',
+    mobile: `${type}@${code}`,
+  })
+  const { data } = await axios.post<TokenResponse>(
+    joinUrlPath(import.meta.env.VITE_API_URL, AUTH_BASE, '/oauth2/token'),
+    params,
+    { headers: { Authorization: BASIC_AUTH } },
+  )
+  return data
+}
+
 export function logout() {
   return request.delete<boolean>(`${AUTH_BASE}/token/logout`)
 }
