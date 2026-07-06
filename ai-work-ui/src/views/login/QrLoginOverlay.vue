@@ -70,7 +70,7 @@
         <div v-else class="qr-pill" :style="{ background: cfg.pillBg }">
           <span class="qr-pill-dot" :style="{ background: cfg.scanColor }"></span>
           <span class="qr-pill-text" :style="{ color: cfg.scanColor }"
-            >二维码 2 分钟内有效，请尽快扫描</span
+            >二维码过期后可点击下方刷新</span
           >
         </div>
 
