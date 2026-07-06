@@ -414,6 +414,10 @@ async function onSubmit() {
   if (loading.value) return
   loading.value = true
   try {
+    // 提交前确保预检完成：blur 预检可能未触发（密码管理器自动填充）或仍在途，
+    // 否则达到阈值的账号会漏带验证码，正确密码也被后端拒绝
+    form.username = form.username.trim()
+    await syncCaptchaRequired()
     if (!(await validateForm())) return
     await userStore.login(form)
     if (remember.value) localStorage.setItem(REMEMBER_KEY, form.username)
