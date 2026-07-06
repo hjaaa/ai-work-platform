@@ -39,7 +39,7 @@ service.interceptors.response.use(
     const status = error.response?.status
     if (status === 401 || status === 424) {
       clearTokens()
-      if (!window.location.pathname.startsWith('/login')) {
+      if (window.location.pathname !== '/login') {
         const redirect = encodeURIComponent(window.location.pathname + window.location.search)
         window.location.href = `/login?redirect=${redirect}`
       }

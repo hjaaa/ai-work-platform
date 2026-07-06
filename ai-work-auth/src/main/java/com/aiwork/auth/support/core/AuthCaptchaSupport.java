@@ -1,13 +1,17 @@
 package com.aiwork.auth.support.core;
 
+import cn.hutool.core.convert.Convert;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.aiwork.admin.api.entity.SysOauthClientDetails;
+import com.aiwork.common.core.constant.CacheConstants;
 import com.aiwork.common.core.constant.CommonConstants;
 import com.aiwork.common.core.constant.enums.CaptchaFlagTypeEnum;
 import com.aiwork.common.core.exception.ValidateCodeException;
 import com.aiwork.common.core.util.MsgUtils;
+import com.aiwork.common.data.cache.RedisUtils;
+import com.aiwork.common.data.resolver.ParamResolver;
 import com.aiwork.common.security.captcha.CaptchaResult;
 import com.aiwork.common.security.captcha.CaptchaValidator;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,6 +23,7 @@ import org.springframework.security.web.savedrequest.RequestCache;
 import org.springframework.security.web.savedrequest.SavedRequest;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 /**
@@ -71,6 +76,62 @@ public class AuthCaptchaSupport {
 
 		JSONObject information = JSONUtil.parseObj(clientDetails.getAdditionalInformation());
 		return !StrUtil.equals(CaptchaFlagTypeEnum.OFF.getType(), information.getStr(CommonConstants.CAPTCHA_FLAG));
+	}
+
+	/**
+	 * 验证码触发失败次数系统参数键
+	 */
+	private static final String CAPTCHA_ERROR_TIMES_PARAM = "CAPTCHA_ERROR_TIMES";
+
+	/**
+	 * 验证码触发失败次数默认值
+	 */
+	private static final Long DEFAULT_CAPTCHA_ERROR_TIMES = 3L;
+
+	/**
+	 * 判断账号登录失败次数是否已达验证码触发阈值
+	 * <p>
+	 * 系统参数 CAPTCHA_ERROR_TIMES {@literal <=} 0 表示关闭自适应验证码，每次登录都需校验；
+	 * 无法识别账号时按需要验证码处理。
+	 * </p>
+	 * @param username 登录账号
+	 * @return true 本次登录需要校验验证码
+	 */
+	public boolean isFailureTimesReached(String username) {
+		Long threshold = ParamResolver.getLong(CAPTCHA_ERROR_TIMES_PARAM, DEFAULT_CAPTCHA_ERROR_TIMES);
+		if (StrUtil.isBlank(username)) {
+			return true;
+		}
+		String key = String.format("%s%s:%s", CacheConstants.GLOBALLY, CacheConstants.LOGIN_ERROR_TIMES, username);
+		return isCaptchaTriggerReached(threshold, readLoginFailureTimes(key));
+	}
+
+	/**
+	 * 读取登录失败次数
+	 * <p>
+	 * 该计数由 {@link RedisUtils#increment}(Redis INCR)写入，值为纯数字字符串，
+	 * 不能用默认 JDK 反序列化的 {@link RedisUtils#get} 读取（会抛反序列化异常），
+	 * 故用原生 string 命令读原始字节再解析。
+	 * </p>
+	 * @param key 失败计数 Redis key
+	 * @return 失败次数，key 不存在时返回 null
+	 */
+	private Long readLoginFailureTimes(String key) {
+		byte[] raw = RedisUtils.execute(connection -> connection.stringCommands().get(key.getBytes(StandardCharsets.UTF_8)));
+		return raw == null ? null : Convert.toLong(new String(raw, StandardCharsets.UTF_8), null);
+	}
+
+	/**
+	 * 判断失败次数是否达到验证码触发阈值（阈值为空或 {@literal <=} 0 表示每次都校验）
+	 * @param threshold 触发阈值
+	 * @param failureTimes 当前失败次数
+	 * @return true 需要校验验证码
+	 */
+	static boolean isCaptchaTriggerReached(Long threshold, Long failureTimes) {
+		if (threshold == null || threshold <= 0) {
+			return true;
+		}
+		return failureTimes != null && failureTimes >= threshold;
 	}
 
 	/**

@@ -122,19 +122,15 @@ public class AiWorkAuthenticationFailureEventHandler implements AuthenticationFa
 	}
 
 	/**
-	 * 记录登录失败次数，超过阈值时调用接口锁定用户。
+	 * 记录登录失败次数，锁定功能开启且超过阈值时调用接口锁定用户。
 	 * <p>
-	 * 若系统参数 LOGIN_ERROR_TIMES {@literal <=} 0，则禁用锁定功能并清除已有失败计数 key。
+	 * 失败计数同时供自适应验证码阈值（CAPTCHA_ERROR_TIMES）消费，故无论锁定开关
+	 * （系统参数 LOGIN_ERROR_TIMES，{@literal <=} 0 表示禁用锁定）是否开启都要累加，开关只控制是否锁定。
 	 * </p>
 	 * @param username 用户名
 	 */
-	private void recordLoginFailureTimes(String username) {
+	void recordLoginFailureTimes(String username) {
 		String key = String.format("%s%s:%s", CacheConstants.GLOBALLY, CacheConstants.LOGIN_ERROR_TIMES, username);
-		Long deltaTimes = ParamResolver.getLong("LOGIN_ERROR_TIMES", 5L);
-		if (!isLoginFailureLockEnabled(deltaTimes)) {
-			RedisUtils.delete(key);
-			return;
-		}
 
 		// 使用 RedisUtils 执行原生 Redis 命令进行递增操作
 		Long times = RedisUtils.increment(key, 1L);// 增加登录失败次数
@@ -143,7 +139,8 @@ public class AiWorkAuthenticationFailureEventHandler implements AuthenticationFa
 		Long deltaTime = ParamResolver.getLong("DELTA_TIME", 1L);
 		RedisUtils.expire(key, deltaTime * 3600); // 转换为秒
 
-		if (deltaTimes <= times) {
+		Long deltaTimes = ParamResolver.getLong("LOGIN_ERROR_TIMES", 5L);
+		if (isLoginFailureLockEnabled(deltaTimes) && deltaTimes <= times) {
 			userService.lockUser(username);
 		}
 	}

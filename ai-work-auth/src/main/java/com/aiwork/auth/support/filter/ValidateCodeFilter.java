@@ -76,9 +76,16 @@ public class ValidateCodeFilter extends OncePerRequestFilter {
 			return;
 		}
 
+		// 密码模式自适应验证码：失败次数未达阈值时跳过校验，短信模式始终校验
+		if (SecurityConstants.PASSWORD.equals(grantType) && !authCaptchaSupport
+			.isFailureTimesReached(request.getParameter(SecurityConstants.DETAILS_USERNAME))) {
+			filterChain.doFilter(request, response);
+			return;
+		}
+
 		// 校验验证码 1. 客户端开启验证码 2. 短信模式
 		try {
-			checkCode();
+			checkCode(request);
 			filterChain.doFilter(request, response);
 		}
 		catch (ValidateCodeException validateCodeException) {
@@ -89,8 +96,8 @@ public class ValidateCodeFilter extends OncePerRequestFilter {
 	/**
 	 * 校验验证码
 	 */
-	private void checkCode() throws ValidateCodeException {
-		authCaptchaSupport.validateCode(WebUtils.getRequest());
+	private void checkCode(HttpServletRequest request) throws ValidateCodeException {
+		authCaptchaSupport.validateCode(request);
 	}
 
 	/**

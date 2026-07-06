@@ -65,8 +65,15 @@
         <div class="form-body">
           <h1 class="form-title">账号登录</h1>
 
-          <form class="form-fields" novalidate @submit.prevent="onSubmit">
-            <div class="field">
+          <el-form
+            ref="formRef"
+            :model="form"
+            :rules="rules"
+            class="form-fields"
+            hide-required-asterisk
+            @submit.prevent="onSubmit"
+          >
+            <el-form-item prop="username" class="field">
               <label class="field-label" for="login-username">账号</label>
               <div class="field-control">
                 <input
@@ -75,23 +82,21 @@
                   class="field-input"
                   placeholder="邮箱 / 手机号 / 用户名"
                   autocomplete="username"
-                  @input="errors.username = ''"
+                  @input="formRef?.clearValidate('username')"
                   @focus="focused = 'username'"
-                  @blur="focused = ''"
+                  @blur="onUsernameBlur"
                 />
                 <div class="field-underline"></div>
                 <div
                   class="field-underline-active"
                   :class="{
-                    active: focused === 'username' || errors.username,
-                    error: errors.username,
+                    active: focused === 'username',
                   }"
                 ></div>
               </div>
-              <div v-if="errors.username" class="field-error">{{ errors.username }}</div>
-            </div>
+            </el-form-item>
 
-            <div class="field">
+            <el-form-item prop="password" class="field">
               <label class="field-label" for="login-password">密码</label>
               <div class="field-control">
                 <input
@@ -101,7 +106,7 @@
                   :type="showPassword ? 'text' : 'password'"
                   placeholder="请输入密码"
                   autocomplete="current-password"
-                  @input="errors.password = ''"
+                  @input="formRef?.clearValidate('password')"
                   @focus="focused = 'password'"
                   @blur="focused = ''"
                 />
@@ -148,15 +153,13 @@
                 <div
                   class="field-underline-active"
                   :class="{
-                    active: focused === 'password' || errors.password,
-                    error: errors.password,
+                    active: focused === 'password',
                   }"
                 ></div>
               </div>
-              <div v-if="errors.password" class="field-error">{{ errors.password }}</div>
-            </div>
+            </el-form-item>
 
-            <div class="field">
+            <el-form-item v-if="captchaRequired" prop="code" class="field">
               <label class="field-label" for="login-code">验证码</label>
               <div class="field-control">
                 <input
@@ -165,7 +168,7 @@
                   class="field-input has-captcha"
                   placeholder="请输入验证码"
                   autocomplete="off"
-                  @input="errors.code = ''"
+                  @input="formRef?.clearValidate('code')"
                   @focus="focused = 'code'"
                   @blur="focused = ''"
                 />
@@ -173,16 +176,19 @@
                   :src="codeUrl"
                   alt="验证码，点击刷新"
                   class="field-captcha"
+                  role="button"
+                  tabindex="0"
                   @click="refreshCode"
+                  @keydown.enter.prevent="refreshCode"
+                  @keydown.space.prevent="refreshCode"
                 />
                 <div class="field-underline"></div>
                 <div
                   class="field-underline-active"
-                  :class="{ active: focused === 'code' || errors.code, error: errors.code }"
+                  :class="{ active: focused === 'code' }"
                 ></div>
               </div>
-              <div v-if="errors.code" class="field-error">{{ errors.code }}</div>
-            </div>
+            </el-form-item>
 
             <div class="options-row">
               <button type="button" class="remember" @click="remember = !remember">
@@ -198,7 +204,7 @@
               <span v-if="loading" class="spinner" aria-hidden="true"></span>
               {{ loading ? '登录中…' : '登 录' }}
             </button>
-          </form>
+          </el-form>
 
           <div class="alt-divider">
             <div class="alt-line"></div>
@@ -227,7 +233,8 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { imageCodeUrl } from '@/api/login'
+import type { FormInstance, FormRules } from 'element-plus'
+import { checkCaptchaRequired, imageCodeUrl } from '@/api/login'
 import { useUserStore } from '@/stores/user'
 import dingtalkMark from '@/assets/dingtalk-mark.png'
 import feishuMark from '@/assets/feishu-mark.png'
@@ -238,13 +245,19 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
+const formRef = ref<FormInstance>()
 const loading = ref(false)
 const codeUrl = ref('')
 const showPassword = ref(false)
 const remember = ref(true)
 const focused = ref('')
+const captchaRequired = ref(false)
 const form = reactive({ username: '', password: '', code: '', randomStr: '' })
-const errors = reactive({ username: '', password: '', code: '' })
+const rules = reactive<FormRules<typeof form>>({
+  username: [{ required: true, message: '请输入账号', trigger: 'submit' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'submit' }],
+  code: [{ required: true, message: '请输入验证码', trigger: 'submit' }],
+})
 
 const savedUsername = localStorage.getItem(REMEMBER_KEY)
 if (savedUsername) form.username = savedUsername
@@ -353,30 +366,73 @@ function refreshCode() {
   form.randomStr = `${Date.now()}${Math.floor(Math.random() * 1000)}`
   codeUrl.value = imageCodeUrl(form.randomStr)
   form.code = ''
+  formRef.value?.clearValidate('code')
 }
-refreshCode()
 
-function validate() {
-  errors.username = form.username.trim() ? '' : '请输入账号'
-  errors.password = form.password ? '' : '请输入密码'
-  errors.code = form.code.trim() ? '' : '请输入验证码'
-  return !errors.username && !errors.password && !errors.code
+// 按需展示验证码：后端在同账号连续失败达到阈值后才要求验证码
+async function syncCaptchaRequired() {
+  const name = form.username.trim()
+  if (!name) return
+  const required = await checkCaptchaRequired(name)
+  if (required && !captchaRequired.value) {
+    captchaRequired.value = true
+    refreshCode()
+  } else if (!required && captchaRequired.value) {
+    captchaRequired.value = false
+    form.code = ''
+    formRef.value?.clearValidate('code')
+  }
+}
+
+function onUsernameBlur() {
+  focused.value = ''
+  void syncCaptchaRequired()
+}
+
+// 记住的账号回填后立即预检（刷新页面不丢“需要验证码”状态）
+if (savedUsername) void syncCaptchaRequired()
+
+async function validateForm() {
+  form.username = form.username.trim()
+  form.code = form.code.trim()
+  if (!formRef.value) return false
+  try {
+    await formRef.value.validate()
+    return true
+  } catch {
+    return false
+  }
+}
+
+function getSafeRedirectPath(redirect: unknown) {
+  if (typeof redirect !== 'string') return '/'
+  if (!redirect.startsWith('/') || redirect.startsWith('//')) return '/'
+  return redirect
 }
 
 async function onSubmit() {
-  if (loading.value || !validate()) return
+  if (loading.value) return
   loading.value = true
   try {
+    // 提交前确保预检完成：blur 预检可能未触发（密码管理器自动填充）或仍在途，
+    // 否则达到阈值的账号会漏带验证码，正确密码也被后端拒绝
+    form.username = form.username.trim()
+    await syncCaptchaRequired()
+    if (!(await validateForm())) return
     await userStore.login(form)
     if (remember.value) localStorage.setItem(REMEMBER_KEY, form.username)
     else localStorage.removeItem(REMEMBER_KEY)
-    router.push((route.query.redirect as string) || '/')
+    await router.push(getSafeRedirectPath(route.query.redirect))
   } catch (e) {
     // token 端点失败时优先展示后端消息（R.msg 或 OAuth2 error_description）
     const data = (e as { response?: { data?: { msg?: string; error_description?: string } } })
       .response?.data
     ElMessage.error(data?.msg || data?.error_description || '登录失败')
-    refreshCode()
+    // 失败后重新预检：新触发阈值时 syncCaptchaRequired 内部会展示并刷新验证码；
+    // 已展示时这里刷新图片（旧验证码已被后端消费）
+    const wasRequired = captchaRequired.value
+    await syncCaptchaRequired()
+    if (wasRequired && captchaRequired.value) refreshCode()
   } finally {
     loading.value = false
   }
@@ -574,6 +630,17 @@ async function onSubmit() {
 .field:last-of-type {
   margin-bottom: 0;
 }
+.field :deep(.el-form-item__content) {
+  display: block;
+  line-height: normal;
+}
+.field :deep(.el-form-item__error) {
+  position: static;
+  padding-top: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-color-danger);
+}
 .field-label {
   display: block;
   font-size: 12px;
@@ -634,6 +701,10 @@ async function onSubmit() {
   border-radius: 4px;
   border: 1px solid rgba(38, 38, 38, 0.1);
 }
+.field-captcha:focus-visible {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
+}
 .field-underline {
   position: absolute;
   left: 0;
@@ -659,13 +730,9 @@ async function onSubmit() {
 .field-underline-active.active {
   transform: scaleX(1);
 }
-.field-underline-active.error {
+.field.is-error .field-underline-active {
+  transform: scaleX(1);
   background: var(--el-color-danger);
-}
-.field-error {
-  font-size: 12px;
-  color: var(--el-color-danger);
-  margin-top: 6px;
 }
 
 /* ===== 选项行 ===== */

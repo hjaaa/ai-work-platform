@@ -51,6 +51,8 @@ public class FormLoginValidateCodeFilter extends OncePerRequestFilter {
 			return;
 		}
 
+		// 表单登录失败不计入 login_error_times，且登录页始终展示验证码，
+		// 故此处不做自适应跳过，客户端开启验证码即必校验
 		try {
 			authCaptchaSupport.validateCode(request);
 			filterChain.doFilter(request, response);

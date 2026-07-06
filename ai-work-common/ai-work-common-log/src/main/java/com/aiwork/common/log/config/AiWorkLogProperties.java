@@ -49,7 +49,8 @@ public class AiWorkLogProperties {
 	 * 放行字段，password,mobile,idcard,phone
 	 */
 	@Value("${aiwork.log.exclude-fields:password,mobile,idcard,phone,accessSecret,tokenId,sign}")
-	private List<String> excludeFields;
+	private List<String> excludeFields = List.of("password", "mobile", "idcard", "phone", "accessSecret", "tokenId",
+			"sign");
 
 	/**
 	 * 请求报文最大存储长度

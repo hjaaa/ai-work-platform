@@ -5,9 +5,22 @@
         <template #title>{{ item.name }}</template>
         <MenuTreeNode :menus="item.children!" />
       </el-sub-menu>
-      <el-menu-item v-else-if="isExternal(item)" :index="String(item.id)">
-        <!-- 外链菜单：a 标签新窗口打开，click.stop 阻止 el-menu router 模式把 URL 当路由 push -->
-        <a :href="externalUrl(item)" target="_blank" rel="noopener" @click.stop>{{ item.name }}</a>
+      <el-menu-item
+        v-else-if="isExternal(item)"
+        :index="externalIndex(item)"
+        class="external-menu-item"
+        disabled
+      >
+        <a
+          class="external-menu-link"
+          :href="externalUrl(item)"
+          target="_blank"
+          rel="noopener noreferrer"
+          @click.stop
+          @keydown.space.prevent.stop="openExternal(item)"
+        >
+          {{ item.name }}
+        </a>
       </el-menu-item>
       <el-menu-item v-else-if="item.path" :index="normalize(item.path)">
         {{ item.name }}
@@ -40,7 +53,33 @@ function externalUrl(item: MenuTree): string {
   return item.meta?.isLink || String(item.path)
 }
 
+function externalIndex(item: MenuTree): string {
+  return `external-${String(item.id)}`
+}
+
+function openExternal(item: MenuTree) {
+  window.open(externalUrl(item), '_blank', 'noopener')
+}
+
 function normalize(path: string): string {
   return path.startsWith('/') ? path : `/${path}`
 }
 </script>
+
+<style scoped>
+:deep(.external-menu-item.is-disabled) {
+  opacity: 1;
+  cursor: default;
+}
+
+.external-menu-link {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: inherit;
+  color: inherit;
+  text-decoration: none;
+}
+</style>
