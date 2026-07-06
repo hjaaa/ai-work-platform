@@ -23,6 +23,7 @@ import org.springframework.security.web.savedrequest.RequestCache;
 import org.springframework.security.web.savedrequest.SavedRequest;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
 /**
@@ -102,8 +103,22 @@ public class AuthCaptchaSupport {
 			return true;
 		}
 		String key = String.format("%s%s:%s", CacheConstants.GLOBALLY, CacheConstants.LOGIN_ERROR_TIMES, username);
-		Long failureTimes = Convert.toLong(RedisUtils.get(key));
-		return isCaptchaTriggerReached(threshold, failureTimes);
+		return isCaptchaTriggerReached(threshold, readLoginFailureTimes(key));
+	}
+
+	/**
+	 * 读取登录失败次数
+	 * <p>
+	 * 该计数由 {@link RedisUtils#increment}(Redis INCR)写入，值为纯数字字符串，
+	 * 不能用默认 JDK 反序列化的 {@link RedisUtils#get} 读取（会抛反序列化异常），
+	 * 故用原生 string 命令读原始字节再解析。
+	 * </p>
+	 * @param key 失败计数 Redis key
+	 * @return 失败次数，key 不存在时返回 null
+	 */
+	private Long readLoginFailureTimes(String key) {
+		byte[] raw = RedisUtils.execute(connection -> connection.stringCommands().get(key.getBytes(StandardCharsets.UTF_8)));
+		return raw == null ? null : Convert.toLong(new String(raw, StandardCharsets.UTF_8), null);
 	}
 
 	/**
