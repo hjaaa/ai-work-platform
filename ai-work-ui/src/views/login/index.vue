@@ -212,10 +212,22 @@
             <div class="alt-line"></div>
           </div>
           <div class="alt-icons">
-            <button type="button" class="alt-btn" title="钉钉登录">
+            <button
+              ref="dingtalkBtnRef"
+              type="button"
+              class="alt-btn"
+              title="钉钉登录"
+              @click="qrProvider = 'dingtalk'"
+            >
               <img :src="dingtalkMark" alt="钉钉" />
             </button>
-            <button type="button" class="alt-btn" title="飞书登录">
+            <button
+              ref="feishuBtnRef"
+              type="button"
+              class="alt-btn"
+              title="飞书登录"
+              @click="qrProvider = 'feishu'"
+            >
               <img :src="feishuMark" alt="飞书" />
             </button>
           </div>
@@ -225,12 +237,13 @@
           </div>
         </div>
       </div>
+      <QrLoginOverlay v-if="qrProvider" :provider="qrProvider" @close="closeQr" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -238,6 +251,7 @@ import { checkCaptchaRequired, imageCodeUrl } from '@/api/login'
 import { useUserStore } from '@/stores/user'
 import dingtalkMark from '@/assets/dingtalk-mark.png'
 import feishuMark from '@/assets/feishu-mark.png'
+import QrLoginOverlay from './QrLoginOverlay.vue'
 
 const REMEMBER_KEY = 'login-remember-username'
 
@@ -252,6 +266,18 @@ const showPassword = ref(false)
 const remember = ref(true)
 const focused = ref('')
 const captchaRequired = ref(false)
+
+// 扫码浮层：记录当前 provider，关闭后焦点归还触发按钮
+const qrProvider = ref<'dingtalk' | 'feishu' | null>(null)
+const dingtalkBtnRef = ref<HTMLButtonElement | null>(null)
+const feishuBtnRef = ref<HTMLButtonElement | null>(null)
+
+function closeQr() {
+  const trigger = qrProvider.value === 'feishu' ? feishuBtnRef.value : dingtalkBtnRef.value
+  qrProvider.value = null
+  void nextTick(() => trigger?.focus())
+}
+
 const form = reactive({ username: '', password: '', code: '', randomStr: '' })
 const rules = reactive<FormRules<typeof form>>({
   username: [{ required: true, message: '请输入账号', trigger: 'submit' }],
