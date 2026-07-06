@@ -54,6 +54,10 @@ public class DingTalkLoginHandler extends AbstractLoginHandler {
 		SysSocialDetails condition = new SysSocialDetails();
 		condition.setType(LoginTypeEnum.DINGTALK.getType());
 		SysSocialDetails socialDetails = sysSocialDetailsMapper.selectOne(new QueryWrapper<>(condition));
+		if (socialDetails == null) {
+			log.warn("dingtalk social details not configured, type: {}", LoginTypeEnum.DINGTALK.getType());
+			return null;
+		}
 
 		String accessTokenResult = HttpUtil.post("https://api.dingtalk.com/v1.0/oauth2/userAccessToken",
 				JSONUtil.createObj()
