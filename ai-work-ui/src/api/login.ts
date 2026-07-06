@@ -42,9 +42,12 @@ export async function login(form: LoginForm): Promise<TokenResponse> {
     scope: 'server',
     username: form.username,
     password: encryptPassword(form.password),
-    code: form.code,
-    randomStr: form.randomStr,
   })
+  // 验证码按需携带：未展示验证码时不发送空参数
+  if (form.code) {
+    params.set('code', form.code)
+    params.set('randomStr', form.randomStr)
+  }
   const { data } = await axios.post<TokenResponse>(
     joinUrlPath(import.meta.env.VITE_API_URL, AUTH_BASE, '/oauth2/token'),
     params,
@@ -60,4 +63,18 @@ export function logout() {
 // 图形验证码图片地址，randomStr 为前端随机串，登录时需原样带回
 export function imageCodeUrl(randomStr: string): string {
   return `${joinUrlPath(import.meta.env.VITE_API_URL, AUTH_BASE, '/code/image')}?randomStr=${randomStr}`
+}
+
+// 查询账号是否需要图形验证码（连续失败达到阈值）；预检失败按不需要处理，由后端校验兜底。
+// 用独立 axios：登录页无 token，且预检失败不应触发统一拦截器的错误提示
+export async function checkCaptchaRequired(username: string): Promise<boolean> {
+  try {
+    const { data } = await axios.get<{ data?: boolean }>(
+      joinUrlPath(import.meta.env.VITE_API_URL, AUTH_BASE, '/code/required'),
+      { params: { username } },
+    )
+    return data.data === true
+  } catch {
+    return false
+  }
 }

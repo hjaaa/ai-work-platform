@@ -84,7 +84,7 @@
                   autocomplete="username"
                   @input="formRef?.clearValidate('username')"
                   @focus="focused = 'username'"
-                  @blur="focused = ''"
+                  @blur="onUsernameBlur"
                 />
                 <div class="field-underline"></div>
                 <div
@@ -159,7 +159,7 @@
               </div>
             </el-form-item>
 
-            <el-form-item prop="code" class="field">
+            <el-form-item v-if="captchaRequired" prop="code" class="field">
               <label class="field-label" for="login-code">验证码</label>
               <div class="field-control">
                 <input
@@ -234,7 +234,7 @@ import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import { imageCodeUrl } from '@/api/login'
+import { checkCaptchaRequired, imageCodeUrl } from '@/api/login'
 import { useUserStore } from '@/stores/user'
 import dingtalkMark from '@/assets/dingtalk-mark.png'
 import feishuMark from '@/assets/feishu-mark.png'
@@ -251,6 +251,7 @@ const codeUrl = ref('')
 const showPassword = ref(false)
 const remember = ref(true)
 const focused = ref('')
+const captchaRequired = ref(false)
 const form = reactive({ username: '', password: '', code: '', randomStr: '' })
 const rules = reactive<FormRules<typeof form>>({
   username: [{ required: true, message: '请输入账号', trigger: 'submit' }],
@@ -367,7 +368,29 @@ function refreshCode() {
   form.code = ''
   formRef.value?.clearValidate('code')
 }
-refreshCode()
+
+// 按需展示验证码：后端在同账号连续失败达到阈值后才要求验证码
+async function syncCaptchaRequired() {
+  const name = form.username.trim()
+  if (!name) return
+  const required = await checkCaptchaRequired(name)
+  if (required && !captchaRequired.value) {
+    captchaRequired.value = true
+    refreshCode()
+  } else if (!required && captchaRequired.value) {
+    captchaRequired.value = false
+    form.code = ''
+    formRef.value?.clearValidate('code')
+  }
+}
+
+function onUsernameBlur() {
+  focused.value = ''
+  void syncCaptchaRequired()
+}
+
+// 记住的账号回填后立即预检（刷新页面不丢“需要验证码”状态）
+if (savedUsername) void syncCaptchaRequired()
 
 async function validateForm() {
   form.username = form.username.trim()
@@ -401,7 +424,11 @@ async function onSubmit() {
     const data = (e as { response?: { data?: { msg?: string; error_description?: string } } })
       .response?.data
     ElMessage.error(data?.msg || data?.error_description || '登录失败')
-    refreshCode()
+    // 失败后重新预检：新触发阈值时 syncCaptchaRequired 内部会展示并刷新验证码；
+    // 已展示时这里刷新图片（旧验证码已被后端消费）
+    const wasRequired = captchaRequired.value
+    await syncCaptchaRequired()
+    if (wasRequired && captchaRequired.value) refreshCode()
   } finally {
     loading.value = false
   }
