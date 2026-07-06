@@ -35,8 +35,20 @@
       </div>
 
       <div class="qr-body">
-        <!-- key 变更触发二维码区域重放弹出动画（占位阶段"刷新"的视觉反馈） -->
-        <div :key="qrKey" class="qr-box">
+        <!-- 钉钉:真实内嵌扫码 iframe;飞书:静态占位保持现状,待后续接入 -->
+        <template v-if="provider === 'dingtalk'">
+          <div v-if="sdkState === 'failed'" class="qr-box qr-box-dt qr-fallback">
+            <p class="qr-fallback-text">扫码组件加载失败</p>
+            <button type="button" class="qr-retry" @click="initDingTalkQr">重试</button>
+          </div>
+          <div v-else class="qr-box qr-box-dt">
+            <div :id="DT_CONTAINER_ID" class="qr-dt-frame"></div>
+            <div v-if="sdkState === 'loading' || submitting" class="qr-dt-mask">
+              {{ submitting ? '登录中…' : '二维码加载中…' }}
+            </div>
+          </div>
+        </template>
+        <div v-else :key="qrKey" class="qr-box">
           <img :src="cfg.qr" alt="登录二维码" class="qr-img" />
           <div class="qr-center-mark">
             <img :src="cfg.mark" :alt="cfg.name" />
@@ -52,7 +64,10 @@
           打开 {{ cfg.name }} App → 扫一扫<br />扫描上方二维码即可安全登录
         </div>
 
-        <div class="qr-pill" :style="{ background: cfg.pillBg }">
+        <div v-if="errorText" class="qr-pill qr-pill-error" role="alert">
+          <span class="qr-pill-text">{{ errorText }}</span>
+        </div>
+        <div v-else class="qr-pill" :style="{ background: cfg.pillBg }">
           <span class="qr-pill-dot" :style="{ background: cfg.scanColor }"></span>
           <span class="qr-pill-text" :style="{ color: cfg.scanColor }"
             >二维码 2 分钟内有效，请尽快扫描</span
@@ -60,7 +75,7 @@
         </div>
 
         <div class="qr-actions">
-          <button type="button" class="qr-refresh" @click="qrKey++">
+          <button type="button" class="qr-refresh" @click="refreshQr">
             <svg
               width="14"
               height="14"
@@ -85,13 +100,16 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useUserStore } from '@/stores/user'
+import { loadDingTalkSdk } from '@/utils/dingtalk'
+import type { DTLoginSuccess } from '@/utils/dingtalk'
 import dingtalkMark from '@/assets/dingtalk-mark.png'
 import feishuMark from '@/assets/feishu-mark.png'
 import qrDingtalk from '@/assets/qr-dingtalk.png'
 import qrFeishu from '@/assets/qr-feishu.png'
 
 const props = defineProps<{ provider: 'dingtalk' | 'feishu' }>()
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; success: [] }>()
 
 const PROVIDERS = {
   dingtalk: {
@@ -116,8 +134,70 @@ const PROVIDERS = {
 
 const cfg = computed(() => PROVIDERS[props.provider])
 
+const userStore = useUserStore()
+
+// 钉钉内嵌扫码:SDK 加载状态 / 换 token 提交锁 / 浮层内错误提示
+const DT_CONTAINER_ID = 'dt-qr-login-frame'
+const sdkState = ref<'loading' | 'ready' | 'failed'>('loading')
+const submitting = ref(false)
+const errorText = ref('')
+
 const qrKey = ref(0)
 const closeBtnRef = ref<HTMLButtonElement | null>(null)
+
+async function initDingTalkQr() {
+  sdkState.value = 'loading'
+  try {
+    await loadDingTalkSdk()
+    const container = document.getElementById(DT_CONTAINER_ID)
+    if (!container || !window.DTFrameLogin) throw new Error('钉钉扫码组件加载失败')
+    // 二维码/authCode 一次性,重建 iframe 前清空容器
+    container.innerHTML = ''
+    window.DTFrameLogin(
+      { id: DT_CONTAINER_ID, width: 280, height: 280 },
+      {
+        redirect_uri: encodeURIComponent(`${window.location.origin}/login`),
+        client_id: import.meta.env.VITE_DINGTALK_APP_KEY,
+        scope: 'openid',
+        response_type: 'code',
+        prompt: 'consent',
+      },
+      onScanSuccess,
+      (errorMsg: string) => {
+        errorText.value = errorMsg || '二维码加载失败，请刷新重试'
+      },
+    )
+    sdkState.value = 'ready'
+  } catch {
+    sdkState.value = 'failed'
+  }
+}
+
+async function onScanSuccess(result: DTLoginSuccess) {
+  if (submitting.value) return
+  submitting.value = true
+  errorText.value = ''
+  try {
+    await userStore.socialLogin('DINGTALK', result.authCode)
+    emit('success')
+  } catch (e) {
+    // 未绑定/凭证错等,优先展示后端 OAuth2 错误描述
+    const data = (e as { response?: { data?: { msg?: string; error_description?: string } } })
+      .response?.data
+    errorText.value =
+      data?.msg || data?.error_description || '该钉钉账号未绑定平台用户，请使用账号密码登录'
+    // 旧二维码的 authCode 已被消费,自动重建供重扫
+    void initDingTalkQr()
+  } finally {
+    submitting.value = false
+  }
+}
+
+function refreshQr() {
+  errorText.value = ''
+  if (props.provider === 'dingtalk') void initDingTalkQr()
+  else qrKey.value++
+}
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') emit('close')
@@ -126,6 +206,7 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => {
   closeBtnRef.value?.focus()
   document.addEventListener('keydown', onKeydown)
+  if (props.provider === 'dingtalk') void initDingTalkQr()
 })
 
 onBeforeUnmount(() => {
@@ -290,6 +371,62 @@ onBeforeUnmount(() => {
   animation: qr-scan 2.4s ease-in-out infinite;
 }
 
+/* ===== 钉钉内嵌扫码 ===== */
+.qr-box-dt {
+  width: auto;
+  height: auto;
+  padding: 8px;
+}
+.qr-dt-frame {
+  width: 280px;
+  height: 280px;
+}
+.qr-dt-mask {
+  position: absolute;
+  inset: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 6px;
+  font-size: 13px;
+  color: rgba(38, 38, 38, 0.6);
+}
+.qr-fallback {
+  width: 296px;
+  height: 296px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.qr-fallback-text {
+  font-size: 13px;
+  color: rgba(38, 38, 38, 0.6);
+  margin: 0;
+}
+.qr-retry {
+  border: 1px solid var(--el-color-primary);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--el-color-primary);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 6px 18px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.qr-retry:hover {
+  background: rgba(26, 140, 255, 0.08);
+}
+.qr-pill-error {
+  background: rgba(245, 63, 63, 0.08);
+}
+.qr-pill-error .qr-pill-text {
+  color: #f53f3f;
+}
+
 /* ===== 文案与操作 ===== */
 .qr-tip-title {
   font-size: 15px;
@@ -364,7 +501,8 @@ onBeforeUnmount(() => {
 /* ===== 可访问性 ===== */
 .qr-close:focus-visible,
 .qr-refresh:focus-visible,
-.qr-back:focus-visible {
+.qr-back:focus-visible,
+.qr-retry:focus-visible {
   outline: 2px solid var(--el-color-primary);
   outline-offset: 2px;
 }

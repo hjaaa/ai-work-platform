@@ -237,7 +237,12 @@
           </div>
         </div>
       </div>
-      <QrLoginOverlay v-if="qrProvider" :provider="qrProvider" @close="closeQr" />
+      <QrLoginOverlay
+        v-if="qrProvider"
+        :provider="qrProvider"
+        @close="closeQr"
+        @success="onQrSuccess"
+      />
     </div>
   </div>
 </template>
@@ -276,6 +281,11 @@ function closeQr() {
   const trigger = qrProvider.value === 'feishu' ? feishuBtnRef.value : dingtalkBtnRef.value
   qrProvider.value = null
   void nextTick(() => trigger?.focus())
+}
+
+// 扫码登录成功:token 已由浮层写入 store,与账号密码登录走同一跳转规则
+async function onQrSuccess() {
+  await router.push(getSafeRedirectPath(route.query.redirect))
 }
 
 const form = reactive({ username: '', password: '', code: '', randomStr: '' })
