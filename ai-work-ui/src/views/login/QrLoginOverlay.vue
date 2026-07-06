@@ -1,6 +1,6 @@
 <template>
   <div class="qr-overlay">
-    <div class="qr-card">
+    <div class="qr-card" role="dialog" aria-modal="true" :aria-label="`${cfg.name}扫码登录`">
       <!-- 品牌头部：provider 渐变底色 -->
       <div class="qr-header" :style="{ background: cfg.headerGradient }">
         <div class="qr-header-main">
