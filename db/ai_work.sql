@@ -952,6 +952,30 @@ BEGIN;
 COMMIT;
 
 -- ----------------------------
+-- Table structure for sys_user_social
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_user_social`;
+CREATE TABLE `sys_user_social` (
+  `id` bigint(20) NOT NULL COMMENT '主键（应用层雪花ID；迁移行复用 user_id）',
+  `user_id` bigint(20) NOT NULL COMMENT '平台用户ID',
+  `type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '社交类型（DINGTALK/FEISHU）',
+  `identify` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '第三方用户标识（openId）',
+  `create_by` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT ' ' COMMENT '创建人',
+  `update_by` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT ' ' COMMENT '修改人',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uk_type_identify` (`type`,`identify`) USING BTREE,
+  UNIQUE KEY `uk_user_type` (`user_id`,`type`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户社交绑定关系表（物理删除，无 del_flag，唯一索引承载绑定唯一性）';
+
+-- ----------------------------
+-- Records of sys_user_social
+-- ----------------------------
+BEGIN;
+COMMIT;
+
+-- ----------------------------
 -- Table structure for sys_clarity_data
 -- ----------------------------
 DROP TABLE IF EXISTS `sys_clarity_data`;
