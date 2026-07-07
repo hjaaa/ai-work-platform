@@ -56,6 +56,11 @@ public enum LoginTypeEnum {
 	DINGTALK("DINGTALK", "钉钉登录"),
 
 	/**
+	 * 飞书登录
+	 */
+	FEISHU("FEISHU", "飞书登录"),
+
+	/**
 	 * 企业微信登录
 	 */
 	WEIXIN_CP("WEIXIN_CP", "企业微信登录"),
