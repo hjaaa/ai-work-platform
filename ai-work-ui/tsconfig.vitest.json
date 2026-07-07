@@ -6,8 +6,8 @@
   "exclude": [],
 
   "compilerOptions": {
-    // Vitest 运行环境与应用代码不同，按其环境调整 lib 与 types
-    "lib": [],
+    // lib 继承 tsconfig.app.json（ES2022 + DOM）：jsdom 测试环境同样具备 DOM 全局量，
+    // 不能清空，否则类型检查仅靠 @types/jsdom 内部的 reference lib 指令兜底
     "types": ["node", "jsdom"],
 
     // `vue-tsc --build` 的增量构建信息文件，避免落在根目录
