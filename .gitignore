@@ -65,6 +65,7 @@ node_modules
 
 ### claude code ###
 .claude
+.superpowers/
 docs
 docs/plans/
 
