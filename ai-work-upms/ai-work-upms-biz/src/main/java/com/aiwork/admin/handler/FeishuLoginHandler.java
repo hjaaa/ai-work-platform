@@ -70,11 +70,17 @@ public class FeishuLoginHandler extends AbstractUserSocialHandler {
 					.set("redirect_uri", socialDetails.getRedirectUrl())
 					.toString());
 		JSONObject tokenObj = JSONUtil.parseObj(tokenResult);
-		log.debug("获取飞书Token响应摘要：{}", buildTokenLogSummary(tokenObj));
+		if (log.isDebugEnabled()) {
+			log.debug("获取飞书Token响应摘要：{}", buildTokenLogSummary(tokenObj));
+		}
+		Integer tokenCode = tokenObj.getInt("code");
+		if (!Integer.valueOf(0).equals(tokenCode)) {
+			log.warn("feishu token response code invalid, code: {}", tokenCode);
+			return null;
+		}
 		String accessToken = tokenObj.getStr("access_token");
 		if (StrUtil.isBlank(accessToken)) {
-			log.warn("feishu access token missing, code: {}, error: {}", tokenObj.getStr("code"),
-					tokenObj.getStr("error_description"));
+			log.warn("feishu access token missing, code: {}", tokenCode);
 			return null;
 		}
 
@@ -83,7 +89,14 @@ public class FeishuLoginHandler extends AbstractUserSocialHandler {
 			.execute()
 			.body();
 		JSONObject userObj = JSONUtil.parseObj(userResult);
-		log.debug("获取飞书用户信息响应摘要:{}", buildUserInfoLogSummary(userObj));
+		if (log.isDebugEnabled()) {
+			log.debug("获取飞书用户信息响应摘要:{}", buildUserInfoLogSummary(userObj));
+		}
+		Integer userCode = userObj.getInt("code");
+		if (!Integer.valueOf(0).equals(userCode)) {
+			log.warn("feishu user info response code invalid, code: {}", userCode);
+			return null;
+		}
 
 		return userObj.getByPath("data.open_id", String.class);
 	}
