@@ -101,7 +101,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
-import { loadDingTalkSdk } from '@/utils/dingtalk'
+import { dtFrameLogin, loadDingTalkSdk } from '@/utils/dingtalk'
 import type { DTLoginSuccess } from '@/utils/dingtalk'
 import dingtalkMark from '@/assets/dingtalk-mark.png'
 import feishuMark from '@/assets/feishu-mark.png'
@@ -153,7 +153,7 @@ async function initDingTalkQr() {
     if (!container || !window.DTFrameLogin) throw new Error('钉钉扫码组件加载失败')
     // 二维码/authCode 一次性,重建 iframe 前清空容器
     container.innerHTML = ''
-    window.DTFrameLogin(
+    dtFrameLogin(
       { id: DT_CONTAINER_ID, width: 280, height: 280 },
       {
         redirect_uri: encodeURIComponent(`${window.location.origin}/login`),
