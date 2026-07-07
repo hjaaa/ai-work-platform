@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.app.json",
+
+  // 仅包含测试文件并清空排除项；测试引用的应用代码经模块解析自动纳入
+  "include": ["src/**/__tests__/*", "env.d.ts"],
+  "exclude": [],
+
+  "compilerOptions": {
+    // lib 继承 tsconfig.app.json（ES2022 + DOM）：jsdom 测试环境同样具备 DOM 全局量，
+    // 不能清空，否则类型检查仅靠 @types/jsdom 内部的 reference lib 指令兜底
+    "types": ["node", "jsdom"],
+
+    // `vue-tsc --build` 的增量构建信息文件，避免落在根目录
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.vitest.tsbuildinfo"
+  }
+}

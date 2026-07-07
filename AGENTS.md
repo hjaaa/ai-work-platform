@@ -21,6 +21,7 @@
 
 - `npm run dev` 启动 Vite 开发服务器。
 - `npm run build` 执行类型检查（vue-tsc）并构建生产包。
+- `npm run test:unit` 运行 Vitest 单元测试（本地为 watch 模式，单次运行加 `-- run`；测试文件位于 `src/**/__tests__/*.spec.ts`）。
 - `npm run lint` / `npm run format` 执行 lint（oxlint + ESLint）与格式化（Prettier）。
 - 变更依赖后须在干净环境执行 `npm ci` 验证：macOS 上增量 `npm install` 会裁剪 `package-lock.json` 中跨平台 optional 依赖条目，导致 Linux/CI 构建失败。
 
