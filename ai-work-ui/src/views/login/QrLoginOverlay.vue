@@ -207,6 +207,7 @@ let authIframe: HTMLIFrameElement | null = null
 let authTimeoutId: ReturnType<typeof setTimeout> | null = null
 
 async function initFeishuQr() {
+  resetFeishuSession()
   cleanupAuthIframe()
   sdkState.value = 'loading'
   try {
@@ -215,18 +216,21 @@ async function initFeishuQr() {
     if (!container) throw new Error('飞书扫码组件加载失败')
     // 二维码一次性,重建前清空容器;state 随二维码重建,旧回调自然失效
     container.innerHTML = ''
-    feishuState = randomState()
-    feishuGoto = buildGotoUrl(
+    const nextState = randomState()
+    const nextGoto = buildGotoUrl(
       import.meta.env.VITE_FEISHU_APP_ID,
       `${window.location.origin}/social-callback.html`,
-      feishuState,
+      nextState,
     )
-    feishuQrObj = createFeishuQr({
+    const nextQrObj = createFeishuQr({
       id: FEISHU_CONTAINER_ID,
-      goto: feishuGoto,
+      goto: nextGoto,
       width: '300',
       height: '300',
     })
+    feishuQrObj = nextQrObj
+    feishuGoto = nextGoto
+    feishuState = nextState
     sdkState.value = 'ready'
   } catch {
     sdkState.value = 'failed'
@@ -266,6 +270,12 @@ function cleanupAuthIframe() {
   }
   authIframe?.remove()
   authIframe = null
+}
+
+function resetFeishuSession() {
+  feishuQrObj = null
+  feishuGoto = ''
+  feishuState = ''
 }
 
 async function onFeishuCode(code: string) {
@@ -314,6 +324,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
   window.removeEventListener('message', onWindowMessage)
   cleanupAuthIframe()
+  resetFeishuSession()
 })
 </script>
 
