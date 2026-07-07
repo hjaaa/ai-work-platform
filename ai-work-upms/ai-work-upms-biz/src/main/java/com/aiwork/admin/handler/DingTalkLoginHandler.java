@@ -22,6 +22,7 @@ import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.aiwork.admin.api.constant.UpmsErrorCodes;
 import com.aiwork.admin.api.dto.UserDTO;
 import com.aiwork.admin.api.dto.UserInfo;
 import com.aiwork.admin.api.entity.SysSocialDetails;
@@ -29,6 +30,8 @@ import com.aiwork.admin.api.entity.SysUser;
 import com.aiwork.admin.mapper.SysSocialDetailsMapper;
 import com.aiwork.admin.service.SysUserService;
 import com.aiwork.common.core.constant.enums.LoginTypeEnum;
+import com.aiwork.common.core.exception.CheckedException;
+import com.aiwork.common.core.util.MsgUtils;
 import com.aiwork.common.core.util.R;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -99,9 +102,21 @@ public class DingTalkLoginHandler extends AbstractLoginHandler {
 
 	@Override
 	public Boolean bind(SysUser user, String identify) {
+		if (StrUtil.isBlank(identify)) {
+			log.warn("钉钉用户标识为空，拒绝绑定, userId: {}", user.getUserId());
+			throw dingTalkBindFailed();
+		}
 		user.setWxDingUserid(identify);
 		sysUserService.updateById(user);
 		return true;
+	}
+
+	/**
+	 * 构造钉钉绑定失败异常，供子类在测试中覆盖或统一替换错误信息。
+	 * @return 标准钉钉绑定失败异常
+	 */
+	protected CheckedException dingTalkBindFailed() {
+		return new CheckedException(MsgUtils.getMessage(UpmsErrorCodes.SYS_DINGTALK_BIND_FAILED));
 	}
 
 }

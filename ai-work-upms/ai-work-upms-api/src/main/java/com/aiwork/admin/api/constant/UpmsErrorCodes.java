@@ -89,6 +89,9 @@ public interface UpmsErrorCodes {
 	// === 小程序相关 ===
 	String SYS_MINIAPP_LOGIN_FAILED = "sys.miniapp.login.failed";
 
+	// === 钉钉相关 ===
+	String SYS_DINGTALK_BIND_FAILED = "sys.dingtalk.bind.failed";
+
 	// === 系统缓存 ===
 	String SYS_SYSTEM_CACHE_FETCH_ERROR = "sys.system.cache.fetch.error";
 
