@@ -5,8 +5,7 @@
 USE `ai_work`;
 
 -- 1. 用户社交绑定关系表（物理删除，无 del_flag：唯一索引承载绑定唯一性）
-DROP TABLE IF EXISTS `sys_user_social`;
-CREATE TABLE `sys_user_social` (
+CREATE TABLE IF NOT EXISTS `sys_user_social` (
   `id` bigint(20) NOT NULL COMMENT '主键（应用层雪花ID；迁移行复用 user_id）',
   `user_id` bigint(20) NOT NULL COMMENT '平台用户ID',
   `type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '社交类型（DINGTALK/FEISHU）',
@@ -20,11 +19,54 @@ CREATE TABLE `sys_user_social` (
   UNIQUE KEY `uk_user_type` (`user_id`,`type`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户社交绑定关系表（物理删除，无 del_flag，唯一索引承载绑定唯一性）';
 
--- 2. 存量钉钉绑定迁移（迁移行 id 直接复用 user_id：每用户每类型仅一行，业务侧雪花 ID 远大于用户 ID，无冲突）
-INSERT INTO `sys_user_social` (`id`, `user_id`, `type`, `identify`, `create_by`, `create_time`)
-SELECT `user_id`, `user_id`, 'DINGTALK', `wx_ding_userid`, ' ', NOW()
-FROM `sys_user`
-WHERE `wx_ding_userid` IS NOT NULL AND `wx_ding_userid` != '' AND `del_flag` = '0';
+-- 2. 存量钉钉绑定迁移
+-- 若旧 sys_user.wx_ding_userid 存在重复，脚本会直接终止，避免把同一个钉钉标识错误绑定到多个平台用户。
+-- 可先运行以下排查 SQL 清理脏数据，再重新执行本迁移：
+-- SELECT wx_ding_userid, COUNT(*) AS duplicate_count, GROUP_CONCAT(user_id ORDER BY user_id) AS user_ids
+-- FROM sys_user
+-- WHERE wx_ding_userid IS NOT NULL AND wx_ding_userid != '' AND del_flag = '0'
+-- GROUP BY wx_ding_userid
+-- HAVING COUNT(*) > 1;
+DROP PROCEDURE IF EXISTS `migrate_dingtalk_user_social`;
+DELIMITER $$
+CREATE PROCEDURE `migrate_dingtalk_user_social`()
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM `sys_user`
+    WHERE `wx_ding_userid` IS NOT NULL
+      AND `wx_ding_userid` != ''
+      AND `del_flag` = '0'
+    GROUP BY `wx_ding_userid`
+    HAVING COUNT(*) > 1
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Duplicate active sys_user.wx_ding_userid found. Resolve duplicates before running 20260707_feishu_qr_login.sql.';
+  END IF;
+
+  INSERT INTO `sys_user_social` (`id`, `user_id`, `type`, `identify`, `create_by`, `create_time`)
+  SELECT `u`.`user_id`, `u`.`user_id`, 'DINGTALK', `u`.`wx_ding_userid`, ' ', NOW()
+  FROM `sys_user` `u`
+  WHERE `u`.`wx_ding_userid` IS NOT NULL
+    AND `u`.`wx_ding_userid` != ''
+    AND `u`.`del_flag` = '0'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM `sys_user_social` `sus`
+      WHERE `sus`.`type` = 'DINGTALK'
+        AND `sus`.`identify` = `u`.`wx_ding_userid`
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM `sys_user_social` `sus`
+      WHERE `sus`.`user_id` = `u`.`user_id`
+        AND `sus`.`type` = 'DINGTALK'
+    );
+END$$
+DELIMITER ;
+
+CALL `migrate_dingtalk_user_social`();
+DROP PROCEDURE IF EXISTS `migrate_dingtalk_user_social`;
 
 -- 3. 飞书应用凭证模板：替换尖括号占位后手工执行；切勿将真实凭证提交到 git
 -- INSERT INTO `sys_social_details` (`id`, `type`, `remark`, `app_id`, `app_secret`, `redirect_url`)
