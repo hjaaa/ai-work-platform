@@ -183,7 +183,7 @@ public class SysUser extends Model<SysUser> implements Serializable {
 	private String wxCpUserid;
 
 	/**
-	 * 钉钉唯一标识
+	 * 钉钉userid。已废弃：绑定关系迁移至 sys_user_social，本列仅保留用于回滚，勿再读写
 	 */
 	@Schema(description = "钉钉唯一标识")
 	private String wxDingUserid;

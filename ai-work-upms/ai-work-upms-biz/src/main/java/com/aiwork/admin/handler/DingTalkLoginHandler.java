@@ -17,23 +17,18 @@
 
 package com.aiwork.admin.handler;
 
-import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.aiwork.admin.api.constant.UpmsErrorCodes;
-import com.aiwork.admin.api.dto.UserDTO;
-import com.aiwork.admin.api.dto.UserInfo;
 import com.aiwork.admin.api.entity.SysSocialDetails;
-import com.aiwork.admin.api.entity.SysUser;
 import com.aiwork.admin.mapper.SysSocialDetailsMapper;
+import com.aiwork.admin.mapper.SysUserSocialMapper;
 import com.aiwork.admin.service.SysUserService;
 import com.aiwork.common.core.constant.enums.LoginTypeEnum;
 import com.aiwork.common.core.exception.CheckedException;
 import com.aiwork.common.core.util.MsgUtils;
-import com.aiwork.common.core.util.R;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -45,12 +40,20 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component("DINGTALK")
-@RequiredArgsConstructor
-public class DingTalkLoginHandler extends AbstractLoginHandler {
-
-	private final SysUserService sysUserService;
+public class DingTalkLoginHandler extends AbstractUserSocialHandler {
 
 	private final SysSocialDetailsMapper sysSocialDetailsMapper;
+
+	public DingTalkLoginHandler(SysUserService sysUserService, SysUserSocialMapper sysUserSocialMapper,
+			SysSocialDetailsMapper sysSocialDetailsMapper) {
+		super(sysUserService, sysUserSocialMapper);
+		this.sysSocialDetailsMapper = sysSocialDetailsMapper;
+	}
+
+	@Override
+	protected LoginTypeEnum loginType() {
+		return LoginTypeEnum.DINGTALK;
+	}
 
 	@Override
 	public String identify(String code) {
@@ -82,40 +85,7 @@ public class DingTalkLoginHandler extends AbstractLoginHandler {
 	}
 
 	@Override
-	public UserInfo info(String openId) {
-		if (StrUtil.isBlank(openId)) {
-			log.warn("钉钉openId为空，无法获取用户信息");
-			return null;
-		}
-
-		UserDTO userDTO = new UserDTO();
-		userDTO.setWxDingUserid(openId);
-
-		R<UserInfo> userInfoR = sysUserService.getUserInfo(userDTO);
-		if (userInfoR.getData() == null) {
-			log.info("钉钉不存在用户:{}", openId);
-			return null;
-		}
-
-		return userInfoR.getData();
-	}
-
-	@Override
-	public Boolean bind(SysUser user, String identify) {
-		if (StrUtil.isBlank(identify)) {
-			log.warn("钉钉用户标识为空，拒绝绑定, userId: {}", user.getUserId());
-			throw dingTalkBindFailed();
-		}
-		user.setWxDingUserid(identify);
-		sysUserService.updateById(user);
-		return true;
-	}
-
-	/**
-	 * 构造钉钉绑定失败异常，供子类在测试中覆盖或统一替换错误信息。
-	 * @return 标准钉钉绑定失败异常
-	 */
-	protected CheckedException dingTalkBindFailed() {
+	protected CheckedException bindFailed() {
 		return new CheckedException(MsgUtils.getMessage(UpmsErrorCodes.SYS_DINGTALK_BIND_FAILED));
 	}
 
