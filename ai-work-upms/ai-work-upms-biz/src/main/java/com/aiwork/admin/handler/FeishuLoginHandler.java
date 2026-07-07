@@ -69,9 +69,8 @@ public class FeishuLoginHandler extends AbstractUserSocialHandler {
 					.set("code", code)
 					.set("redirect_uri", socialDetails.getRedirectUrl())
 					.toString());
-		log.debug("获取飞书Token响应报文：{}", tokenResult);
-
 		JSONObject tokenObj = JSONUtil.parseObj(tokenResult);
+		log.debug("获取飞书Token响应摘要：{}", buildTokenLogSummary(tokenObj));
 		String accessToken = tokenObj.getStr("access_token");
 		if (StrUtil.isBlank(accessToken)) {
 			log.warn("feishu access token missing, code: {}, error: {}", tokenObj.getStr("code"),
@@ -83,9 +82,20 @@ public class FeishuLoginHandler extends AbstractUserSocialHandler {
 			.header("Authorization", "Bearer " + accessToken)
 			.execute()
 			.body();
-		log.debug("获取飞书用户信息响应报文:{}", userResult);
+		JSONObject userObj = JSONUtil.parseObj(userResult);
+		log.debug("获取飞书用户信息响应摘要:{}", buildUserInfoLogSummary(userObj));
 
-		return JSONUtil.parseObj(userResult).getByPath("data.open_id", String.class);
+		return userObj.getByPath("data.open_id", String.class);
+	}
+
+	static String buildTokenLogSummary(JSONObject tokenObj) {
+		return "code=" + tokenObj.getStr("code") + ", accessTokenPresent="
+				+ StrUtil.isNotBlank(tokenObj.getStr("access_token"));
+	}
+
+	static String buildUserInfoLogSummary(JSONObject userObj) {
+		return "code=" + userObj.getStr("code") + ", openIdPresent="
+				+ StrUtil.isNotBlank(userObj.getByPath("data.open_id", String.class));
 	}
 
 	@Override

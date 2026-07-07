@@ -1,5 +1,6 @@
 package com.aiwork.admin.handler;
 
+import cn.hutool.json.JSONUtil;
 import com.aiwork.admin.api.dto.UserDTO;
 import com.aiwork.admin.api.entity.SysUser;
 import com.aiwork.admin.api.entity.SysUserSocial;
@@ -92,6 +93,43 @@ class FeishuLoginHandlerTest {
 
 		assertThrows(CheckedException.class, () -> newHandler().bind(user, "feishu-open-id"));
 		verify(sysUserSocialMapper, never()).insert(any(SysUserSocial.class));
+	}
+
+	@Test
+	void tokenLogSummaryMasksSensitiveFields() {
+		String summary = FeishuLoginHandler.buildTokenLogSummary(JSONUtil.parseObj("""
+			{
+				"code": 0,
+				"access_token": "u-test-token",
+				"open_id": "ou_test_open_id"
+			}
+			"""));
+
+		org.junit.jupiter.api.Assertions.assertAll(
+				() -> org.junit.jupiter.api.Assertions.assertTrue(summary.contains("code=0")),
+				() -> org.junit.jupiter.api.Assertions.assertTrue(summary.contains("accessTokenPresent=true")),
+				() -> org.junit.jupiter.api.Assertions.assertFalse(summary.contains("u-test-token")),
+				() -> org.junit.jupiter.api.Assertions.assertFalse(summary.contains("ou_test_open_id")),
+				() -> org.junit.jupiter.api.Assertions.assertFalse(summary.contains("access_token")),
+				() -> org.junit.jupiter.api.Assertions.assertFalse(summary.contains("open_id")));
+	}
+
+	@Test
+	void userInfoLogSummaryMasksSensitiveFields() {
+		String summary = FeishuLoginHandler.buildUserInfoLogSummary(JSONUtil.parseObj("""
+			{
+				"code": 0,
+				"data": {
+					"open_id": "ou_test_open_id"
+				}
+			}
+			"""));
+
+		org.junit.jupiter.api.Assertions.assertAll(
+				() -> org.junit.jupiter.api.Assertions.assertTrue(summary.contains("code=0")),
+				() -> org.junit.jupiter.api.Assertions.assertTrue(summary.contains("openIdPresent=true")),
+				() -> org.junit.jupiter.api.Assertions.assertFalse(summary.contains("ou_test_open_id")),
+				() -> org.junit.jupiter.api.Assertions.assertFalse(summary.contains("open_id")));
 	}
 
 }
