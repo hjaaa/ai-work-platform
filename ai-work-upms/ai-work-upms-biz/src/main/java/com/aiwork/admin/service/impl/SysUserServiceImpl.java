@@ -94,6 +94,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
 
 	private final SysDeptMapper sysDeptMapper;
 
+	private final SysUserSocialMapper sysUserSocialMapper;
+
 	/**
 	 * 保存用户信息
 	 * @param userDto DTO 对象
@@ -621,9 +623,10 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
 				.eq(SysUser::getUserId, user.getId());
 		}
 		else if (type.equals(LoginTypeEnum.DINGTALK.getType())) {
-			wrapper = Wrappers.<SysUser>lambdaUpdate()
-				.set(SysUser::getWxDingUserid, null)
-				.eq(SysUser::getUserId, user.getId());
+			sysUserSocialMapper.delete(Wrappers.<SysUserSocial>lambdaQuery()
+				.eq(SysUserSocial::getUserId, user.getId())
+				.eq(SysUserSocial::getType, LoginTypeEnum.DINGTALK.getType()));
+			return R.ok();
 			// 码云登录 （方便申请）
 		}
 		else if (type.equals(LoginTypeEnum.GITEE.getType())) {
