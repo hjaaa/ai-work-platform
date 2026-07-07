@@ -372,29 +372,32 @@ onBeforeUnmount(() => {
 }
 
 /* ===== 钉钉内嵌扫码 ===== */
+/* iframe 固定 280×280(DTFrameLogin 最小尺寸),内部二维码白卡仅占中央约 196px;
+   外层裁剪四周空白,使扫码区与飞书占位的 196×196 保持一致 */
 .qr-box-dt {
-  width: auto;
-  height: auto;
-  padding: 8px;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .qr-dt-frame {
+  flex: none;
   width: 280px;
   height: 280px;
 }
 .qr-dt-mask {
   position: absolute;
-  inset: 8px;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(255, 255, 255, 0.9);
-  border-radius: 6px;
+  border-radius: 14px;
   font-size: 13px;
   color: rgba(38, 38, 38, 0.6);
 }
 .qr-fallback {
-  width: 296px;
-  height: 296px;
   display: flex;
   flex-direction: column;
   align-items: center;
