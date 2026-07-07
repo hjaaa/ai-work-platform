@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_ENC_KEY: string
   readonly VITE_AUTH_PATH?: string
   readonly VITE_DINGTALK_APP_KEY: string
+  readonly VITE_FEISHU_APP_ID: string
 }
 
 interface ImportMeta {

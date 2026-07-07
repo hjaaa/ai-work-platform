@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>登录回调</title>
+  </head>
+  <body>
+    <script>
+      // 飞书授权在登录页的隐藏 iframe 内 302 到本页;
+      // 把 code/state 传回父页(登录页)即完成使命,source 标记与 src/utils/feishu.ts 保持一致
+      var params = new URLSearchParams(window.location.search)
+      window.parent.postMessage(
+        {
+          source: 'social-login-callback',
+          code: params.get('code') || '',
+          state: params.get('state') || '',
+        },
+        window.location.origin,
+      )
+    </script>
+  </body>
+</html>
