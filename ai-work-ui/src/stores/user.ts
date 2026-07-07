@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { login as loginApi, logout as logoutApi } from '@/api/login'
+import { login as loginApi, logout as logoutApi, socialLogin as socialLoginApi } from '@/api/login'
 import type { LoginForm } from '@/api/login'
 import { getUserInfo } from '@/api/user'
 import type { UserInfo } from '@/api/user'
@@ -22,6 +22,11 @@ export const useUserStore = defineStore('user', {
   actions: {
     async login(form: LoginForm) {
       const res = await loginApi(form)
+      this.accessToken = res.access_token
+      setTokens(res.access_token, res.refresh_token)
+    },
+    async socialLogin(type: string, code: string) {
+      const res = await socialLoginApi(type, code)
       this.accessToken = res.access_token
       setTokens(res.access_token, res.refresh_token)
     },
