@@ -440,7 +440,7 @@ onBeforeUnmount(() => {
 }
 
 /* ===== 内嵌扫码 ===== */
-/* iframe 固定大于外层扫码框,由容器裁剪四周空白,保持登录卡片视觉尺寸稳定 */
+/* 钉钉 iframe 需要裁剪外围空白;飞书二维码必须完整保留,通过等比缩放控制视觉尺寸 */
 .qr-box-dt {
   padding: 0;
   overflow: hidden;
@@ -455,8 +455,8 @@ onBeforeUnmount(() => {
 }
 .qr-box-fs {
   padding: 0;
-  width: 300px;
-  height: 300px;
+  width: 220px;
+  height: 220px;
   overflow: visible;
   display: flex;
   align-items: center;
@@ -466,6 +466,8 @@ onBeforeUnmount(() => {
   flex: none;
   width: 300px;
   height: 300px;
+  transform: scale(0.7333);
+  transform-origin: center;
 }
 .qr-dt-mask {
   position: absolute;
