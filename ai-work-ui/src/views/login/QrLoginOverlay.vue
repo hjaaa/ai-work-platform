@@ -455,7 +455,9 @@ onBeforeUnmount(() => {
 }
 .qr-box-fs {
   padding: 0;
-  overflow: hidden;
+  width: 300px;
+  height: 300px;
+  overflow: visible;
   display: flex;
   align-items: center;
   justify-content: center;
