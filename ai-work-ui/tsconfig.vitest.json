@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.app.json",
+
+  // 仅包含测试文件并清空排除项；测试引用的应用代码经模块解析自动纳入
+  "include": ["src/**/__tests__/*", "env.d.ts"],
+  "exclude": [],
+
+  "compilerOptions": {
+    // Vitest 运行环境与应用代码不同，按其环境调整 lib 与 types
+    "lib": [],
+    "types": ["node", "jsdom"],
+
+    // `vue-tsc --build` 的增量构建信息文件，避免落在根目录
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.vitest.tsbuildinfo"
+  }
+}
