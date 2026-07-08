@@ -35,7 +35,7 @@
       </div>
 
       <div class="qr-body">
-        <!-- 钉钉:真实内嵌扫码 iframe;飞书:静态占位保持现状,待后续接入 -->
+        <!-- 钉钉:DTFrameLogin 回调直返 authCode;飞书:QRLogin 扫码 → tmp_code → 隐藏 iframe 授权取 code -->
         <template v-if="provider === 'dingtalk'">
           <div v-if="sdkState === 'failed'" class="qr-box qr-box-dt qr-fallback">
             <p class="qr-fallback-text">扫码组件加载失败</p>
@@ -48,16 +48,18 @@
             </div>
           </div>
         </template>
-        <div v-else :key="qrKey" class="qr-box">
-          <img :src="cfg.qr" alt="登录二维码" class="qr-img" />
-          <div class="qr-center-mark">
-            <img :src="cfg.mark" :alt="cfg.name" />
+        <template v-else>
+          <div v-if="sdkState === 'failed'" class="qr-box qr-box-fs qr-fallback">
+            <p class="qr-fallback-text">扫码组件加载失败</p>
+            <button type="button" class="qr-retry" @click="initFeishuQr">重试</button>
           </div>
-          <div
-            class="qr-scanline"
-            :style="{ background: cfg.scanColor, boxShadow: `0 0 10px 2px ${cfg.scanGlow}` }"
-          ></div>
-        </div>
+          <div v-else class="qr-box qr-box-fs">
+            <div :id="FEISHU_CONTAINER_ID" class="qr-fs-frame"></div>
+            <div v-if="sdkState === 'loading' || submitting" class="qr-fs-mask">
+              {{ submitting ? '登录中…' : '二维码加载中…' }}
+            </div>
+          </div>
+        </template>
 
         <div class="qr-tip-title">请使用 {{ cfg.name }} 扫一扫</div>
         <div class="qr-tip-sub">
@@ -103,10 +105,16 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { dtFrameLogin, loadDingTalkSdk } from '@/utils/dingtalk'
 import type { DTLoginSuccess } from '@/utils/dingtalk'
+import {
+  buildGotoUrl,
+  createFeishuQr,
+  loadFeishuSdk,
+  parseCallbackMessage,
+  randomState,
+} from '@/utils/feishu'
+import type { FeishuQrLogin } from '@/utils/feishu'
 import dingtalkMark from '@/assets/dingtalk-mark.png'
 import feishuMark from '@/assets/feishu-mark.png'
-import qrDingtalk from '@/assets/qr-dingtalk.png'
-import qrFeishu from '@/assets/qr-feishu.png'
 
 const props = defineProps<{ provider: 'dingtalk' | 'feishu' }>()
 const emit = defineEmits<{ close: []; success: [] }>()
@@ -115,19 +123,15 @@ const PROVIDERS = {
   dingtalk: {
     name: '钉钉',
     mark: dingtalkMark,
-    qr: qrDingtalk,
     headerGradient: 'linear-gradient(135deg, #1a8cff, #37a9ff)',
     scanColor: '#1a8cff',
-    scanGlow: 'rgba(26, 140, 255, 0.5)',
     pillBg: 'rgba(26, 140, 255, 0.08)',
   },
   feishu: {
     name: '飞书',
     mark: feishuMark,
-    qr: qrFeishu,
     headerGradient: 'linear-gradient(135deg, #3370ff, #00c2b3)',
     scanColor: '#3370ff',
-    scanGlow: 'rgba(51, 112, 255, 0.5)',
     pillBg: 'rgba(51, 112, 255, 0.08)',
   },
 } as const
@@ -136,13 +140,13 @@ const cfg = computed(() => PROVIDERS[props.provider])
 
 const userStore = useUserStore()
 
-// 钉钉内嵌扫码:SDK 加载状态 / 换 token 提交锁 / 浮层内错误提示
+// 扫码组件共用状态:SDK 加载状态 / 换 token 提交锁 / 浮层内错误提示
 const DT_CONTAINER_ID = 'dt-qr-login-frame'
+const FEISHU_CONTAINER_ID = 'feishu-qr-login-frame'
 const sdkState = ref<'loading' | 'ready' | 'failed'>('loading')
 const submitting = ref(false)
 const errorText = ref('')
 
-const qrKey = ref(0)
 const closeBtnRef = ref<HTMLButtonElement | null>(null)
 
 async function initDingTalkQr() {
@@ -193,10 +197,112 @@ async function onScanSuccess(result: DTLoginSuccess) {
   }
 }
 
+// ===== 飞书:扫码 → tmp_code → 隐藏 iframe 授权 302 → 回调页 postMessage 取 code =====
+const AUTH_IFRAME_TIMEOUT_MS = 8000
+
+let feishuQrObj: FeishuQrLogin | null = null
+let feishuGoto = ''
+let feishuState = ''
+let authIframe: HTMLIFrameElement | null = null
+let authTimeoutId: ReturnType<typeof setTimeout> | null = null
+
+async function initFeishuQr() {
+  resetFeishuSession()
+  cleanupAuthIframe()
+  sdkState.value = 'loading'
+  try {
+    await loadFeishuSdk()
+    const container = document.getElementById(FEISHU_CONTAINER_ID)
+    if (!container) throw new Error('飞书扫码组件加载失败')
+    // 二维码一次性,重建前清空容器;state 随二维码重建,旧回调自然失效
+    container.innerHTML = ''
+    const nextState = randomState()
+    const nextGoto = buildGotoUrl(
+      import.meta.env.VITE_FEISHU_APP_ID,
+      `${window.location.origin}/social-callback.html`,
+      nextState,
+    )
+    const nextQrObj = createFeishuQr({
+      id: FEISHU_CONTAINER_ID,
+      goto: nextGoto,
+      width: '300',
+      height: '300',
+    })
+    feishuQrObj = nextQrObj
+    feishuGoto = nextGoto
+    feishuState = nextState
+    sdkState.value = 'ready'
+  } catch {
+    sdkState.value = 'failed'
+  }
+}
+
+function onWindowMessage(event: MessageEvent) {
+  // 飞书 SDK 消息:扫码确认后返回 tmp_code
+  if (feishuQrObj && feishuQrObj.matchOrigin(event.origin) && feishuQrObj.matchData(event.data)) {
+    const tmpCode = (event.data as { tmp_code?: string }).tmp_code
+    if (tmpCode) injectAuthIframe(`${feishuGoto}&tmp_code=${tmpCode}`)
+    return
+  }
+  // 回调页消息:授权完成带回正式 code
+  const callback = parseCallbackMessage(event, feishuState)
+  if (callback) void onFeishuCode(callback.code)
+}
+
+// 授权 302 放进隐藏 iframe 避免整页刷新;飞书未官方承诺该行为,超时兜底
+// (若未来被 frame 限制封锁,降级预案为整页跳转,见设计文档)
+function injectAuthIframe(url: string) {
+  cleanupAuthIframe()
+  authIframe = document.createElement('iframe')
+  authIframe.style.display = 'none'
+  authIframe.src = url
+  document.body.appendChild(authIframe)
+  authTimeoutId = setTimeout(() => {
+    errorText.value = '授权超时，请刷新二维码重试'
+    void initFeishuQr()
+  }, AUTH_IFRAME_TIMEOUT_MS)
+}
+
+function cleanupAuthIframe() {
+  if (authTimeoutId !== null) {
+    clearTimeout(authTimeoutId)
+    authTimeoutId = null
+  }
+  authIframe?.remove()
+  authIframe = null
+}
+
+function resetFeishuSession() {
+  feishuQrObj = null
+  feishuGoto = ''
+  feishuState = ''
+}
+
+async function onFeishuCode(code: string) {
+  cleanupAuthIframe()
+  if (submitting.value) return
+  submitting.value = true
+  errorText.value = ''
+  try {
+    await userStore.socialLogin('FEISHU', code)
+    emit('success')
+  } catch (e) {
+    // 未绑定/凭证错等,优先展示后端 OAuth2 错误描述
+    const data = (e as { response?: { data?: { msg?: string; error_description?: string } } })
+      .response?.data
+    errorText.value =
+      data?.msg || data?.error_description || '该飞书账号未绑定平台用户，请使用账号密码登录'
+    // code 一次性,自动重建供重扫
+    void initFeishuQr()
+  } finally {
+    submitting.value = false
+  }
+}
+
 function refreshQr() {
   errorText.value = ''
   if (props.provider === 'dingtalk') void initDingTalkQr()
-  else qrKey.value++
+  else void initFeishuQr()
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -206,11 +312,19 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => {
   closeBtnRef.value?.focus()
   document.addEventListener('keydown', onKeydown)
-  if (props.provider === 'dingtalk') void initDingTalkQr()
+  if (props.provider === 'dingtalk') {
+    void initDingTalkQr()
+  } else {
+    window.addEventListener('message', onWindowMessage)
+    void initFeishuQr()
+  }
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('message', onWindowMessage)
+  cleanupAuthIframe()
+  resetFeishuSession()
 })
 </script>
 
@@ -225,18 +339,6 @@ onBeforeUnmount(() => {
     transform: translateY(0) scale(1);
   }
 }
-@keyframes qr-scan {
-  0% {
-    top: 6%;
-  }
-  50% {
-    top: 88%;
-  }
-  100% {
-    top: 6%;
-  }
-}
-
 .qr-overlay {
   position: absolute;
   inset: 0;
@@ -334,46 +436,11 @@ onBeforeUnmount(() => {
     0 0 0 1px rgba(31, 34, 37, 0.08),
     0 10px 26px -14px rgba(24, 64, 130, 0.3);
   animation: qr-pop 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.qr-img {
-  width: 100%;
-  height: 100%;
-  display: block;
-  border-radius: 6px;
-}
-.qr-center-mark {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 38px;
-  height: 38px;
-  border-radius: 9px;
   background: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.15);
-}
-.qr-center-mark img {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
-  display: block;
-}
-.qr-scanline {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  top: 6%;
-  height: 2px;
-  border-radius: 2px;
-  animation: qr-scan 2.4s ease-in-out infinite;
 }
 
-/* ===== 钉钉内嵌扫码 ===== */
-/* iframe 固定 280×280(DTFrameLogin 最小尺寸),内部二维码白卡仅占中央约 196px;
-   外层裁剪四周空白,使扫码区与飞书占位的 196×196 保持一致 */
+/* ===== 内嵌扫码 ===== */
+/* 钉钉 iframe 需要裁剪外围空白;飞书二维码必须完整保留,通过等比缩放控制视觉尺寸 */
 .qr-box-dt {
   padding: 0;
   overflow: hidden;
@@ -386,7 +453,34 @@ onBeforeUnmount(() => {
   width: 280px;
   height: 280px;
 }
+.qr-box-fs {
+  padding: 0;
+  width: 220px;
+  height: 220px;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.qr-fs-frame {
+  flex: none;
+  width: 300px;
+  height: 300px;
+  transform: scale(0.7333);
+  transform-origin: center;
+}
 .qr-dt-mask {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 14px;
+  font-size: 13px;
+  color: rgba(38, 38, 38, 0.6);
+}
+.qr-fs-mask {
   position: absolute;
   inset: 0;
   display: flex;
@@ -512,8 +606,7 @@ onBeforeUnmount(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .qr-card,
-  .qr-box,
-  .qr-scanline {
+  .qr-box {
     animation: none;
   }
 }

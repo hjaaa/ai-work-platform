@@ -94,6 +94,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
 
 	private final SysDeptMapper sysDeptMapper;
 
+	private final SysUserSocialMapper sysUserSocialMapper;
+
 	/**
 	 * 保存用户信息
 	 * @param userDto DTO 对象
@@ -231,6 +233,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
 		sysUserRoleMapper.delete(Wrappers.<SysUserRole>lambdaQuery().in(SysUserRole::getUserId, userIds));
 		sysUserDeptMapper.delete(Wrappers.<SysUserDept>lambdaQuery().in(SysUserDept::getUserId, userIds));
 		sysUserPostMapper.delete(Wrappers.<SysUserPost>lambdaQuery().in(SysUserPost::getUserId, userIds));
+		// 清理社交绑定行:唯一索引下残留会让该三方账号永远无法绑定新用户
+		sysUserSocialMapper.delete(Wrappers.<SysUserSocial>lambdaQuery().in(SysUserSocial::getUserId, userIds));
 		this.removeBatchByIds(userIds);
 		return Boolean.TRUE;
 	}
@@ -620,10 +624,12 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
 				.set(SysUser::getWxCpUserid, null)
 				.eq(SysUser::getUserId, user.getId());
 		}
-		else if (type.equals(LoginTypeEnum.DINGTALK.getType())) {
-			wrapper = Wrappers.<SysUser>lambdaUpdate()
-				.set(SysUser::getWxDingUserid, null)
-				.eq(SysUser::getUserId, user.getId());
+		// 走 sys_user_social 绑定表的类型（钉钉/飞书），解绑即物理删除绑定行
+		else if (type.equals(LoginTypeEnum.DINGTALK.getType()) || type.equals(LoginTypeEnum.FEISHU.getType())) {
+			sysUserSocialMapper.delete(Wrappers.<SysUserSocial>lambdaQuery()
+				.eq(SysUserSocial::getUserId, user.getId())
+				.eq(SysUserSocial::getType, type));
+			return R.ok();
 			// 码云登录 （方便申请）
 		}
 		else if (type.equals(LoginTypeEnum.GITEE.getType())) {

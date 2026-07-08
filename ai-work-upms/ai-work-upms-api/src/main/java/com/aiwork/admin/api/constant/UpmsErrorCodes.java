@@ -92,6 +92,12 @@ public interface UpmsErrorCodes {
 	// === 钉钉相关 ===
 	String SYS_DINGTALK_BIND_FAILED = "sys.dingtalk.bind.failed";
 
+	// === 飞书相关 ===
+	String SYS_FEISHU_BIND_FAILED = "sys.feishu.bind.failed";
+
+	// === 社交绑定通用 ===
+	String SYS_SOCIAL_ALREADY_BOUND = "sys.social.already.bound";
+
 	// === 系统缓存 ===
 	String SYS_SYSTEM_CACHE_FETCH_ERROR = "sys.system.cache.fetch.error";
 
