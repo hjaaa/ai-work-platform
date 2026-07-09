@@ -37,7 +37,7 @@ export const MODULES: HomeModule[] = [
   { name: '数据集', icon: 'datasets', desc: '42 个', path: '/datasets' },
   { name: '标注管理', icon: 'label', desc: '2 进行中', path: '/label' },
   { name: '成员管理', icon: 'members', desc: '28 人', path: '/members' },
-  { name: '操作日志', icon: 'logs', desc: '今日 96', path: '/logs' },
+  { name: '操作日志', icon: 'logs', desc: '今日 96', path: '/admin/log/index' },
 ]
 
 export const ACTIVITIES: Activity[] = [
