@@ -1,7 +1,7 @@
 <template>
   <header class="topbar">
     <button type="button" class="icon-btn" :aria-label="sidebarToggleLabel" @click="emit('toggle')">
-      <DcIcon name="panel" :size="18" />
+      <DcIcon name="panel" :size="20" />
     </button>
     <div class="crumb">
       <span class="crumb-root">AI 工作平台</span>
@@ -11,41 +11,48 @@
     <div class="spacer"></div>
 
     <div class="search">
-      <DcIcon name="search" :size="16" />
+      <DcIcon name="search" :size="18" />
       <span class="search-ph">搜索模块、成员、任务…</span>
     </div>
 
     <button type="button" class="icon-btn bell" aria-label="通知" @click="soon">
-      <DcIcon name="bell" :size="18" />
+      <DcIcon name="bell" :size="20" />
       <span class="dot"></span>
     </button>
 
-    <el-dropdown trigger="click" @command="onCommand">
-      <button type="button" class="user">
+    <div class="user-menu">
+      <button type="button" class="user" :aria-expanded="menuOpen" @click="toggleMenu">
         <div class="avatar">{{ initial }}</div>
         <span class="user-name">{{ displayName }}</span>
-        <DcIcon name="chevron" :size="16" />
+        <DcIcon name="chevron" :size="18" />
       </button>
-      <template #dropdown>
-        <el-dropdown-menu>
-          <el-dropdown-item disabled>
-            <div class="user-head">
-              <span class="user-head-name">{{ displayName }}</span>
-              <span class="user-head-sub">{{ roleText }}</span>
+
+      <template v-if="menuOpen">
+        <div class="user-menu-overlay" @click="closeMenu"></div>
+        <div class="user-menu-panel">
+          <div class="user-menu-head">
+            <div class="user-menu-avatar">{{ initial }}</div>
+            <div class="user-menu-head-text">
+              <span class="user-menu-head-name">{{ displayName }}</span>
+              <span class="user-menu-head-sub">{{ roleText }}</span>
             </div>
-          </el-dropdown-item>
-          <el-dropdown-item command="profile" divided>个人设置</el-dropdown-item>
-          <el-dropdown-item command="team">切换团队</el-dropdown-item>
-          <el-dropdown-item command="notify">通知设置</el-dropdown-item>
-          <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
-        </el-dropdown-menu>
+          </div>
+          <div class="user-menu-divider top"></div>
+          <button type="button" class="user-menu-item" @click="select('profile')">个人设置</button>
+          <button type="button" class="user-menu-item" @click="select('team')">切换团队</button>
+          <button type="button" class="user-menu-item" @click="select('notify')">通知设置</button>
+          <div class="user-menu-divider"></div>
+          <button type="button" class="user-menu-item danger" @click="select('logout')">
+            退出登录
+          </button>
+        </div>
       </template>
-    </el-dropdown>
+    </div>
   </header>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
@@ -91,7 +98,18 @@ const roleText = computed(() => {
   return role ? `${role}` : '成员'
 })
 
-function onCommand(command: string) {
+const menuOpen = ref(false)
+
+function toggleMenu() {
+  menuOpen.value = !menuOpen.value
+}
+
+function closeMenu() {
+  menuOpen.value = false
+}
+
+function select(command: string) {
+  closeMenu()
   if (command === 'logout') {
     userStore.logout()
     return
@@ -107,21 +125,21 @@ function soon() {
 
 <style scoped>
 .topbar {
-  height: 56px;
+  height: 72px;
   flex: none;
   background: var(--dc-surface);
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 16px;
+  gap: 14px;
+  padding: 0 20px;
   box-shadow: inset 0 -1px 0 var(--dc-hairline);
   position: relative;
   z-index: 10;
 }
 
 .icon-btn {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   flex: none;
   border: none;
   border-radius: 8px;
@@ -143,7 +161,7 @@ function soon() {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .crumb-root {
@@ -166,16 +184,16 @@ function soon() {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 36px;
-  padding: 0 12px;
+  height: 44px;
+  padding: 0 14px;
   border-radius: 8px;
   background: var(--dc-fill-1);
-  width: 260px;
+  width: 300px;
   color: var(--dc-ink-disabled);
 }
 
 .search-ph {
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .bell {
@@ -184,19 +202,24 @@ function soon() {
 
 .dot {
   position: absolute;
-  top: 8px;
-  right: 9px;
+  top: 9px;
+  right: 10px;
   width: 6px;
   height: 6px;
   border-radius: 9999px;
   background: var(--dc-error);
 }
 
+.user-menu {
+  position: relative;
+  flex: none;
+}
+
 .user {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 36px;
+  height: 44px;
   padding: 0 8px 0 4px;
   border: none;
   border-radius: 8px;
@@ -212,8 +235,8 @@ function soon() {
 }
 
 .avatar {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 9999px;
   background: var(--el-color-primary);
   color: #fff;
@@ -224,23 +247,99 @@ function soon() {
 }
 
 .user-name {
+  font-size: 15px;
+}
+
+.user-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.user-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 41;
+  width: 212px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--dc-surface);
+  box-shadow:
+    0 0 0 1px var(--dc-ring),
+    0 24px 48px rgba(0, 0, 0, 0.04),
+    0 4px 16px rgba(0, 0, 0, 0.02);
+}
+
+.user-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 10px;
+}
+
+.user-menu-avatar {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 9999px;
+  background: var(--el-color-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 14px;
 }
 
-.user-head {
+.user-menu-head-text {
   display: flex;
   flex-direction: column;
-  line-height: 1.4;
+  min-width: 0;
 }
 
-.user-head-name {
+.user-menu-head-name {
   font-size: 14px;
   font-weight: 500;
   color: var(--dc-ink);
 }
 
-.user-head-sub {
+.user-menu-head-sub {
   font-size: 12px;
   color: var(--dc-ink-subtle);
+}
+
+.user-menu-divider {
+  height: 1px;
+  background: var(--dc-hairline);
+  margin: 6px 0;
+}
+
+.user-menu-divider.top {
+  margin: 2px 0 6px;
+}
+
+.user-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dc-ink);
+  font-family: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.user-menu-item:hover {
+  background: var(--dc-fill-1);
+}
+
+.user-menu-item.danger {
+  color: var(--dc-error);
 }
 </style>

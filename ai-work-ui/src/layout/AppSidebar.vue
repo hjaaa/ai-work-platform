@@ -1,7 +1,7 @@
 <template>
   <aside v-if="!collapsed" class="sidebar sidebar-expanded">
     <div class="brand">
-      <BrandLogo :size="28" :svg-size="20" :radius="8" />
+      <BrandLogo :size="32" :svg-size="22" :radius="8" />
       <span class="brand-text">AI 工作平台</span>
     </div>
     <div class="nav">
@@ -56,7 +56,7 @@
 
   <aside v-else class="sidebar sidebar-rail">
     <div class="rail-brand">
-      <BrandLogo :size="30" :svg-size="22" :radius="8" />
+      <BrandLogo :size="34" :svg-size="24" :radius="8" />
     </div>
     <div class="rail-nav">
       <button
@@ -150,13 +150,13 @@ function clickItem(item: SidebarItem) {
   flex: none;
   align-items: center;
   gap: 10px;
-  height: 56px;
+  height: 72px;
   padding: 0 14px;
 }
 
 .brand-text {
   color: var(--dc-ink);
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 500;
 }
 
@@ -249,7 +249,7 @@ function clickItem(item: SidebarItem) {
   flex: none;
   align-items: center;
   justify-content: center;
-  height: 56px;
+  height: 72px;
 }
 
 .rail-nav {
