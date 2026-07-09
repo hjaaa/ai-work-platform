@@ -39,11 +39,15 @@ function toSidebarItem(item: MenuTree): SidebarItem {
   return {
     id: String(item.id),
     name: item.name,
-    icon: item.icon || item.meta?.icon || '',
+    icon: item.icon ?? '',
     external,
     path: external ? '' : normalizePath(rawPath),
     url: external ? String(item.meta?.isLink || rawPath) : '',
   }
+}
+
+function isNavigable(item: MenuTree): boolean {
+  return typeof item.path === 'string' && item.path.length > 0
 }
 
 export function buildSidebarModel(menus: MenuTree[]): SidebarModel {
@@ -55,18 +59,20 @@ export function buildSidebarModel(menus: MenuTree[]): SidebarModel {
       continue
     }
 
-    const visibleChildren = Array.isArray(menu.children) ? menu.children.filter(isVisible) : []
+    const navigableChildren = Array.isArray(menu.children)
+      ? menu.children.filter((item) => isVisible(item) && isNavigable(item))
+      : []
 
-    if (visibleChildren.length > 0) {
+    if (navigableChildren.length > 0) {
       groups.push({
         id: String(menu.id),
         name: menu.name,
-        items: visibleChildren.map(toSidebarItem),
+        items: navigableChildren.map(toSidebarItem),
       })
       continue
     }
 
-    if (typeof menu.path === 'string' && menu.path) {
+    if (isNavigable(menu)) {
       looseItems.push(toSidebarItem(menu))
     }
   }

@@ -59,4 +59,36 @@ describe('buildSidebarModel', () => {
     const model = buildSidebarModel(MENUS)
     expect(flattenItems(model).map((i) => i.id)).toEqual(['2', '11', '14'])
   })
+
+  it('图标仅使用 item.icon，不会回退 meta.icon', () => {
+    const menus: MenuTree[] = [
+      { id: 101, parentId: 0, name: '图标测试', path: '/icon', icon: '', menuType: '0', meta: { icon: 'meta-icon' } },
+      { id: 102, parentId: 0, name: '图标测试2', path: '/icon2', menuType: '0', meta: { icon: 'meta-icon-2' } },
+    ]
+    const model = buildSidebarModel(menus)
+    expect(model.looseItems.map((item) => item.icon)).toEqual(['', ''])
+  })
+
+  it('缺少 path 的可见节点不会进入 groups.items 或 looseItems', () => {
+    const menus: MenuTree[] = [
+      {
+        id: 201,
+        parentId: 0,
+        name: '有缺失子节点',
+        menuType: '0',
+        children: [
+          { id: 211, parentId: 201, name: '可见但缺 path', menuType: '0', meta: { isHide: false } },
+          { id: 212, parentId: 201, name: '有路径子项', path: 'child', menuType: '0' },
+          { id: 213, parentId: 201, name: '外链子项', path: 'https://example.com', menuType: '0', meta: { isLink: 'https://example.com' } },
+        ],
+      },
+      { id: 202, parentId: 0, name: '缺少 path 的顶级', menuType: '0' },
+      { id: 203, parentId: 0, name: '有路径的顶级', path: '/ok', menuType: '0' },
+    ]
+
+    const model = buildSidebarModel(menus)
+    const group = model.groups.find((item) => item.id === '201')!
+    expect(group.items.map((item) => item.id)).toEqual(['212', '213'])
+    expect(model.looseItems.map((item) => item.id)).toEqual(['203'])
+  })
 })

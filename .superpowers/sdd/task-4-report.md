@@ -28,3 +28,17 @@
 
 ## 问题或疑虑
 - 当前仅按 brief 验证了 `menuNav` 转换逻辑，尚未额外跑整个前端类型检查或全量测试；若后续 `AppSidebar` 接入时有接口约束变化，需要再补集成层验证。
+
+## Task 4 修复追加（menuNav 重要问题修复）
+- 修复内容：
+  - 将 `SidebarItem.icon` 的回退策略改为仅使用 `item.icon ?? ''`，移除 `meta.icon` 兜底；保证“空字符串表示无 icon”契约不被破坏。
+  - 新增可导航判断 `isNavigable`，仅允许 `typeof path === 'string' && path.length > 0` 的节点参与子项或叶子项输出；避免缺 path 节点生成 `/` 和错误假导航项。
+  - 子节点在分组前同时经过可见性与可导航性过滤后再生成 `groups.items`，并保留顶级叶子 `looseItems` 的同样条件。
+- 验证命令与结果：
+  - 命令：`cd /Users/richardhuang/workspace/ai-work-platform/ai-work-ui && npm run test:unit -- run src/layout/menuNav.spec.ts`
+  - 结果：通过，`1 passed`，`7 passed`。
+- 变更文件：
+  - `ai-work-ui/src/layout/menuNav.ts`
+  - `ai-work-ui/src/layout/menuNav.spec.ts`
+- 自审结论：
+  - 改动严格限定到 Task 4 指定文件，未触及其他逻辑；新增/调整用例直接覆盖两个重要问题（icon 回退与缺 path 过滤）；不影响现有可见性规则与外链行为。
