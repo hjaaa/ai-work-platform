@@ -96,6 +96,21 @@ describe('路由守卫', () => {
     expect(mocks.getUserInfo).toHaveBeenCalledTimes(1)
   })
 
+  it('已登录首次加载后访问 /members 应走静态路由且不重复拉取用户信息', async () => {
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'token-1')
+    const router = await freshRouter()
+    await router.push('/members')
+    expect(router.currentRoute.value.path).toBe('/members')
+    expect(router.currentRoute.value.matched.some((r) => r.name === 'members')).toBe(true)
+    expect(mocks.getUserInfo).toHaveBeenCalledTimes(1)
+    expect(mocks.getUserMenu).toHaveBeenCalledTimes(1)
+
+    // 后续导航不应再次触发用户信息拉取
+    await router.push('/report')
+    expect(router.currentRoute.value.path).toBe('/report')
+    expect(mocks.getUserInfo).toHaveBeenCalledTimes(1)
+  })
+
   it('拉取用户信息失败时清登录态,回登录页并携带回跳地址', async () => {
     localStorage.setItem(ACCESS_TOKEN_KEY, 'token-1')
     mocks.getUserInfo.mockRejectedValue(new Error('token expired'))
