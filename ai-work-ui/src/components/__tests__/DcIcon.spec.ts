@@ -2,7 +2,12 @@ import { createApp, h } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
 import DcIcon from '@/components/DcIcon.vue'
 
-function mount(props: Record<string, unknown>) {
+type DcIconProps = {
+  name: string
+  size?: number
+}
+
+function mount(props: DcIconProps) {
   const host = document.createElement('div')
   document.body.appendChild(host)
   const app = createApp({ render: () => h(DcIcon, props) })

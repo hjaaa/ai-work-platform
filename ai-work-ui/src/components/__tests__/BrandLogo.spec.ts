@@ -2,7 +2,13 @@ import { createApp, h } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import BrandLogo from '@/components/BrandLogo.vue'
 
-function mount(props: Record<string, unknown> = {}) {
+type BrandLogoProps = {
+  size?: number
+  svgSize?: number
+  radius?: number
+}
+
+function mount(props: BrandLogoProps = {}) {
   const host = document.createElement('div')
   document.body.appendChild(host)
   const app = createApp({ render: () => h(BrandLogo, props) })
