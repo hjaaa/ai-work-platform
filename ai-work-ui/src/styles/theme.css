@@ -65,3 +65,47 @@
   --el-border-radius-base: 8px;
   --el-border-radius-small: 6px;
 }
+
+/* ===== 设计令牌（DESIGN.md，--el-* 未覆盖部分）===== */
+:root {
+  --dc-ink: #262626;
+  --dc-ink-muted: rgba(38, 38, 38, 0.76);
+  --dc-ink-subtle: rgba(38, 38, 38, 0.6);
+  --dc-ink-disabled: rgba(38, 38, 38, 0.4);
+  --dc-canvas: #f9f9f9;
+  --dc-surface: #ffffff;
+  --dc-fill-1: rgba(38, 38, 38, 0.03);
+  --dc-fill-2: rgba(38, 38, 38, 0.06);
+  --dc-hairline: rgba(38, 38, 38, 0.1);
+  --dc-ring: rgba(31, 34, 37, 0.08);
+  --dc-accent-purple: #a1a4d9;
+  --dc-success: #00885b;
+  --dc-success-tint: rgba(0, 136, 91, 0.1);
+  --dc-warning: #ff9a21;
+  --dc-warning-tint: rgba(255, 154, 33, 0.1);
+  --dc-error: #d04934;
+  --dc-error-tint: rgba(208, 73, 52, 0.1);
+}
+
+/* ===== 卡片与悬停工具类（环形投影替代硬描边，alpha ≤ 0.08）===== */
+.dc-card {
+  background: var(--dc-surface);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px var(--dc-ring),
+    0 1px 4px 0 rgba(0, 0, 0, 0.04);
+}
+.dc-card-raised {
+  background: var(--dc-surface);
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 1px var(--dc-ring),
+    0 8px 16px -2px rgba(0, 0, 0, 0.04),
+    0 2px 8px 0 rgba(0, 0, 0, 0.04);
+}
+.dc-hover-fill {
+  transition: background 0.15s;
+}
+.dc-hover-fill:hover {
+  background: var(--dc-fill-1);
+}
