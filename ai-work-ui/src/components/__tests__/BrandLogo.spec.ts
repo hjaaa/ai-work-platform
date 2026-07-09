@@ -20,13 +20,13 @@ function mount(props: BrandLogoProps = {}) {
 }
 
 let cleanup: (() => void) | null = null
-let originalMatchMedia: typeof window.matchMedia | undefined
+let originalMatchMedia: Window['matchMedia'] | undefined
 let hadMatchMedia = false
 
 beforeEach(() => {
   hadMatchMedia = 'matchMedia' in window
   originalMatchMedia = window.matchMedia
-  window.matchMedia = vi.fn().mockImplementation(() => ({
+  const mediaQueryList = {
     matches: false,
     media: '(prefers-reduced-motion: reduce)',
     onchange: null,
@@ -35,14 +35,20 @@ beforeEach(() => {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
     dispatchEvent: vi.fn(),
+  }
+  window.matchMedia = vi.fn().mockImplementation(() => ({
+    ...mediaQueryList,
   }))
 })
 
 afterEach(() => {
   cleanup?.()
   cleanup = null
-  if (hadMatchMedia && originalMatchMedia) window.matchMedia = originalMatchMedia
-  else window.matchMedia = vi.fn() as typeof window.matchMedia
+  if (hadMatchMedia && originalMatchMedia) {
+    window.matchMedia = originalMatchMedia
+  } else {
+    Reflect.deleteProperty(window, 'matchMedia')
+  }
 })
 
 describe('BrandLogo', () => {

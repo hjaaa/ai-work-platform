@@ -85,6 +85,10 @@
   --dc-warning-tint: rgba(255, 154, 33, 0.1);
   --dc-error: #d04934;
   --dc-error-tint: rgba(208, 73, 52, 0.1);
+  --dc-logo-gradient-end: #37a9ff;
+  --dc-logo-light: #dff0ff;
+  --dc-logo-pulse: #dff0ff;
+  --dc-logo-shadow: rgba(0, 145, 255, 0.55);
 }
 
 /* ===== 卡片与悬停工具类（环形投影替代硬描边，alpha ≤ 0.08）===== */

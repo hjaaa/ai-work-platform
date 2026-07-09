@@ -1,7 +1,7 @@
 <template>
   <div class="brand-logo" :style="containerStyle" aria-hidden="true">
     <svg ref="logoSvg" viewBox="0 0 100 100" :width="svgSize" :height="svgSize">
-      <g stroke="#ffffff" stroke-width="2" stroke-linecap="round" opacity="0.42">
+      <g stroke="var(--dc-surface)" stroke-width="2" stroke-linecap="round" opacity="0.42">
         <line data-edge="0-1" x1="28" y1="30" x2="72" y2="28" />
         <line data-edge="1-2" x1="72" y1="28" x2="52" y2="56" />
         <line data-edge="2-3" x1="52" y1="56" x2="74" y2="74" />
@@ -9,15 +9,15 @@
         <line data-edge="0-2" x1="28" y1="30" x2="52" y2="56" />
       </g>
       <g>
-        <circle data-pulse="0-1" r="2.6" fill="#ffffff" cx="28" cy="30" opacity="0" />
-        <circle data-pulse="1-2" r="2.6" fill="#ffffff" cx="72" cy="28" opacity="0" />
-        <circle data-pulse="2-3" r="2.6" fill="#dff0ff" cx="52" cy="56" opacity="0" />
+        <circle data-pulse="0-1" r="2.6" fill="var(--dc-surface)" cx="28" cy="30" opacity="0" />
+        <circle data-pulse="1-2" r="2.6" fill="var(--dc-surface)" cx="72" cy="28" opacity="0" />
+        <circle data-pulse="2-3" r="2.6" :fill="`var(--dc-logo-pulse)`" cx="52" cy="56" opacity="0" />
       </g>
       <g>
-        <circle data-node="0" cx="28" cy="30" r="6.5" fill="#ffffff" />
-        <circle data-node="1" cx="72" cy="28" r="6" fill="#dff0ff" />
-        <circle data-node="2" cx="52" cy="56" r="7.5" fill="#ffffff" />
-        <circle data-node="3" cx="74" cy="74" r="6" fill="#dff0ff" />
+        <circle data-node="0" cx="28" cy="30" r="6.5" fill="var(--dc-surface)" />
+        <circle data-node="1" cx="72" cy="28" r="6" fill="var(--dc-logo-light)" />
+        <circle data-node="2" cx="52" cy="56" r="7.5" fill="var(--dc-surface)" />
+        <circle data-node="3" cx="74" cy="74" r="6" fill="var(--dc-logo-light)" />
       </g>
     </svg>
   </div>
@@ -122,8 +122,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .brand-logo {
   overflow: hidden;
-  background: linear-gradient(150deg, var(--el-color-primary), #37a9ff);
-  box-shadow: 0 12px 26px -8px rgba(0, 145, 255, 0.55);
+  background: linear-gradient(150deg, var(--el-color-primary), var(--dc-logo-gradient-end));
+  box-shadow: 0 12px 26px -8px var(--dc-logo-shadow);
   flex-shrink: 0;
   display: flex;
   align-items: center;
