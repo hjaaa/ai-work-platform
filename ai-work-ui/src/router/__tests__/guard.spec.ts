@@ -17,6 +17,12 @@ vi.mock('@/api/login', () => ({ login: vi.fn(), logout: vi.fn(), socialLogin: vi
 vi.mock('@/layout/index.vue', () => ({ default: { name: 'LayoutStub', render: () => null } }))
 vi.mock('@/views/login/index.vue', () => ({ default: { name: 'LoginStub', render: () => null } }))
 vi.mock('@/views/home/index.vue', () => ({ default: { name: 'HomeStub', render: () => null } }))
+vi.mock('@/views/placeholder/index.vue', () => ({
+  default: { name: 'PlaceholderStub', render: () => null },
+}))
+vi.mock('@/views/members/index.vue', () => ({
+  default: { name: 'MembersStub', render: () => null },
+}))
 
 const ACCESS_TOKEN_KEY = 'ai-work-access-token'
 
@@ -83,9 +89,10 @@ describe('路由守卫', () => {
     expect(mocks.getUserMenu).toHaveBeenCalledTimes(1)
     expect(router.hasRoute('not-found')).toBe(true)
 
-    // 菜单未实现对应页面时走 not-found 兜底回首页,且不重复拉取用户信息
+    // 菜单未实现对应页面时命中 not-found 占位页,停在目标路径且不重复拉取用户信息
     await router.push('/report')
-    expect(router.currentRoute.value.path).toBe('/home')
+    expect(router.currentRoute.value.path).toBe('/report')
+    expect(router.currentRoute.value.matched.some((r) => r.name === 'not-found')).toBe(true)
     expect(mocks.getUserInfo).toHaveBeenCalledTimes(1)
   })
 

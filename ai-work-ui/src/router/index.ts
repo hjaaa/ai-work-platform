@@ -23,6 +23,12 @@ const router = createRouter({
           name: 'home',
           component: () => import('@/views/home/index.vue'),
         },
+        {
+          path: 'members',
+          name: 'members',
+          component: () => import('@/views/members/index.vue'),
+          meta: { title: '成员管理' },
+        },
       ],
     },
   ],
@@ -73,9 +79,13 @@ router.beforeEach(async (to) => {
           router.addRoute('layout', record)
         }
       }
-      // 兜底：菜单未实现对应页面时回首页，避免空白
+      // 兜底：菜单未实现对应页面时显示占位页
       if (!router.hasRoute('not-found')) {
-        router.addRoute({ path: '/:pathMatch(.*)*', name: 'not-found', redirect: '/home' })
+        router.addRoute({
+          path: '/:pathMatch(.*)*',
+          name: 'not-found',
+          component: () => import('@/views/placeholder/index.vue'),
+        })
       }
       return { ...to, replace: true }
     } catch {
