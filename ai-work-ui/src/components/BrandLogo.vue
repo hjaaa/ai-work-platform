@@ -36,6 +36,10 @@ const containerStyle = computed(() => ({
   width: `${props.size}px`,
   height: `${props.size}px`,
   borderRadius: `${props.radius}px`,
+  boxShadow:
+    props.size < 40
+      ? '0 4px 10px -4px var(--dc-logo-shadow)'
+      : '0 12px 26px -8px var(--dc-logo-shadow)',
 }))
 
 // 品牌 logo 动效：4 个节点在多套阵型间平滑换位，连线跟随、脉冲沿边流动
@@ -123,7 +127,6 @@ onBeforeUnmount(() => {
 .brand-logo {
   overflow: hidden;
   background: linear-gradient(150deg, var(--el-color-primary), var(--dc-logo-gradient-end));
-  box-shadow: 0 12px 26px -8px var(--dc-logo-shadow);
   flex-shrink: 0;
   display: flex;
   align-items: center;

@@ -1,6 +1,6 @@
 <template>
   <header class="topbar">
-    <button type="button" class="icon-btn" aria-label="切换侧边栏" @click="emit('toggle')">
+    <button type="button" class="icon-btn" :aria-label="sidebarToggleLabel" @click="emit('toggle')">
       <DcIcon name="panel" :size="18" />
     </button>
     <div class="crumb">
@@ -51,11 +51,13 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import DcIcon from '@/components/DcIcon.vue'
 
-defineProps<{ collapsed: boolean }>()
+const props = defineProps<{ collapsed: boolean }>()
 const emit = defineEmits<{ toggle: [] }>()
 
 const route = useRoute()
 const userStore = useUserStore()
+
+const sidebarToggleLabel = computed(() => (props.collapsed ? '展开侧边栏' : '收起侧边栏'))
 
 const title = computed(() => {
   const metaTitle = route.meta?.title

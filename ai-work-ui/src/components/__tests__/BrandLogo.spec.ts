@@ -83,4 +83,15 @@ describe('BrandLogo', () => {
     expect(svg?.getAttribute('width')).toBe('48')
     expect(svg?.getAttribute('height')).toBe('48')
   })
+
+  it('小尺寸 logo 使用更弱的投影', () => {
+    const { host, unmount } = mount({ size: 30, svgSize: 22, radius: 8 })
+    cleanup = unmount
+
+    const container = host.querySelector('.brand-logo') as HTMLElement | null
+
+    expect(container?.getAttribute('style')).toContain(
+      'box-shadow: 0 4px 10px -4px var(--dc-logo-shadow)',
+    )
+  })
 })

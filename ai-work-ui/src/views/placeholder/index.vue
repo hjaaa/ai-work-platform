@@ -6,7 +6,7 @@
       该模块的骨架位已就位。在此接入「{{ title }}」页面即可——推荐套用「搜索卡 + 表格卡 +
       弹窗」三件套。
     </div>
-    <el-button type="primary" @click="goMembers">查看成员管理示例</el-button>
+    <el-button type="primary" @click="goMembers">查看成员示例</el-button>
   </div>
 </template>
 
