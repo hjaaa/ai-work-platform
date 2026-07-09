@@ -93,6 +93,7 @@ describe('路由守卫', () => {
     await router.push('/report')
     expect(router.currentRoute.value.path).toBe('/report')
     expect(router.currentRoute.value.matched.some((r) => r.name === 'not-found')).toBe(true)
+    expect(router.currentRoute.value.matched.map((r) => r.name)).toEqual(['layout', 'not-found'])
     expect(mocks.getUserInfo).toHaveBeenCalledTimes(1)
   })
 
@@ -108,6 +109,7 @@ describe('路由守卫', () => {
     // 后续导航不应再次触发用户信息拉取
     await router.push('/report')
     expect(router.currentRoute.value.path).toBe('/report')
+    expect(router.currentRoute.value.matched.map((r) => r.name)).toEqual(['layout', 'not-found'])
     expect(mocks.getUserInfo).toHaveBeenCalledTimes(1)
   })
 

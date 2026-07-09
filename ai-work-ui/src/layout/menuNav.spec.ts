@@ -62,13 +62,37 @@ describe('buildSidebarModel', () => {
     expect(flattenItems(model).map((i) => i.id)).toEqual(['2', '11', '14'])
   })
 
-  it('图标仅使用 item.icon，不会回退 meta.icon', () => {
+  it('图标优先使用 item.icon，缺失时回退 meta.icon，并兼容旧 iconfont 名称', () => {
     const menus: MenuTree[] = [
-      { id: 101, parentId: 0, name: '图标测试', path: '/icon', icon: '', menuType: '0', meta: { icon: 'meta-icon' } },
-      { id: 102, parentId: 0, name: '图标测试2', path: '/icon2', menuType: '0', meta: { icon: 'meta-icon-2' } },
+      {
+        id: 101,
+        parentId: 0,
+        name: '用户管理',
+        path: '/admin/system/user/index',
+        icon: '',
+        menuType: '0',
+        meta: { icon: 'iconfont icon-yonghuguanli' },
+      },
+      {
+        id: 102,
+        parentId: 0,
+        name: '操作日志',
+        path: '/admin/log/index',
+        icon: 'iconfont icon-xitongrizhi',
+        menuType: '0',
+        meta: { icon: 'iconfont icon-yonghuguanli' },
+      },
+      {
+        id: 103,
+        parentId: 0,
+        name: '未知图标',
+        path: '/unknown-icon',
+        menuType: '0',
+        meta: { icon: 'iconfont icon-unknown' },
+      },
     ]
     const model = buildSidebarModel(menus)
-    expect(model.looseItems.map((item) => item.icon)).toEqual(['', ''])
+    expect(model.looseItems.map((item) => item.icon)).toEqual(['members', 'logs', 'apps'])
   })
 
   it('缺少 path 的可见节点不会进入 groups.items 或 looseItems', () => {

@@ -32,6 +32,39 @@ function normalizePath(path: string): string {
   return path.startsWith('/') ? path : `/${path}`
 }
 
+const LEGACY_ICON_MAP: Record<string, string> = {
+  'icon-yonghuguanli': 'members',
+  'icon-bumenguanli': 'members',
+  'icon-jiaoseguanli': 'roles',
+  'icon-xitongrizhi': 'logs',
+  'icon-jinridaiban': 'logs',
+  'icon-caidan': 'apps',
+  'icon-xitongguanli': 'settings',
+  'icon-quanxianguanli': 'settings',
+  'icon-zidianguanli': 'settings',
+  'icon-canshuguanli': 'settings',
+  'icon-gongju': 'settings',
+  'icon-daimashengcheng': 'apps',
+  'icon-shuju': 'datasets',
+  'icon-shujuyuanguanli': 'datasets',
+  'icon-shujubiaoguanli1': 'datasets',
+  'icon-wendangguanli': 'kb',
+  'icon-sensitiveword': 'label',
+  'icon-lingpai': 'roles',
+  'icon-anquanjiance': 'roles',
+}
+
+export function resolveMenuIcon(item: MenuTree): string {
+  const rawIcon = (typeof item.icon === 'string' && item.icon.trim()) || item.meta?.icon || ''
+  if (typeof rawIcon !== 'string' || !rawIcon.trim()) {
+    return 'apps'
+  }
+
+  const parts = rawIcon.trim().split(/\s+/)
+  const legacyKey = parts.find((part) => part.startsWith('icon-'))
+  return legacyKey ? (LEGACY_ICON_MAP[legacyKey] ?? 'apps') : rawIcon.trim()
+}
+
 function toSidebarItem(item: MenuTree): SidebarItem {
   const rawPath = typeof item.path === 'string' ? item.path : ''
   const external = isExternal(item)
@@ -39,7 +72,7 @@ function toSidebarItem(item: MenuTree): SidebarItem {
   return {
     id: String(item.id),
     name: item.name,
-    icon: item.icon ?? '',
+    icon: resolveMenuIcon(item),
     external,
     path: external ? '' : normalizePath(rawPath),
     url: external ? String(item.meta?.isLink || rawPath) : '',

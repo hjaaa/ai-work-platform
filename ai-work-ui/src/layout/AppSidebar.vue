@@ -5,24 +5,30 @@
       <span class="brand-text">AI 工作平台</span>
     </div>
     <div class="nav">
-      <div class="nav-item" :class="{ active: isActive('/home') }" @click="go('/home')">
+      <button type="button" class="nav-item" :class="{ active: isActive('/home') }" @click="go('/home')">
         <DcIcon name="home" :size="18" />
         <span class="nav-item-label">工作台</span>
-      </div>
+      </button>
 
-      <div
+      <button
         v-for="item in model.looseItems"
         :key="item.id"
+        type="button"
         class="nav-item"
         :class="{ active: isActive(item.path) }"
         @click="clickItem(item)"
       >
         <DcIcon :name="item.icon" :size="18" />
         <span class="nav-item-label">{{ item.name }}</span>
-      </div>
+      </button>
 
       <div v-for="group in model.groups" :key="group.id" class="group">
-        <div class="group-head" @click="toggle(group.id)">
+        <button
+          type="button"
+          class="group-head"
+          :aria-expanded="openMap[group.id] !== false"
+          @click="toggle(group.id)"
+        >
           <span class="group-label">{{ group.name }}</span>
           <span
             class="group-chev"
@@ -30,18 +36,19 @@
           >
             <DcIcon name="chevron" :size="14" />
           </span>
-        </div>
+        </button>
         <div v-show="openMap[group.id] !== false" class="group-items">
-          <div
+          <button
             v-for="item in group.items"
             :key="item.id"
+            type="button"
             class="nav-item"
             :class="{ active: isActive(item.path) }"
             @click="clickItem(item)"
           >
             <DcIcon :name="item.icon" :size="18" />
             <span class="nav-item-label">{{ item.name }}</span>
-          </div>
+          </button>
         </div>
       </div>
     </div>
@@ -52,24 +59,28 @@
       <BrandLogo :size="30" :svg-size="22" :radius="8" />
     </div>
     <div class="rail-nav">
-      <div
+      <button
+        type="button"
         class="rail-item"
         :class="{ active: isActive('/home') }"
         title="工作台"
+        aria-label="工作台"
         @click="go('/home')"
       >
         <DcIcon name="home" :size="20" />
-      </div>
-      <div
+      </button>
+      <button
         v-for="item in flat"
         :key="item.id"
+        type="button"
         class="rail-item"
         :class="{ active: isActive(item.path) }"
         :title="item.name"
+        :aria-label="item.name"
         @click="clickItem(item)"
       >
         <DcIcon :name="item.icon" :size="20" />
-      </div>
+      </button>
     </div>
   </aside>
 </template>
@@ -162,12 +173,17 @@ function clickItem(item: SidebarItem) {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   height: 36px;
   padding: 0 10px;
+  border: none;
   border-radius: 6px;
+  background: transparent;
   color: var(--dc-ink-muted);
   cursor: pointer;
+  font-family: inherit;
   font-size: 14px;
+  text-align: left;
   transition: background 0.15s;
 }
 
@@ -198,11 +214,16 @@ function clickItem(item: SidebarItem) {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
   height: 28px;
   padding: 0 10px;
+  border: none;
+  background: transparent;
   color: var(--dc-ink-disabled);
   cursor: pointer;
+  font-family: inherit;
   font-size: 12px;
+  text-align: left;
   user-select: none;
 }
 
@@ -247,9 +268,12 @@ function clickItem(item: SidebarItem) {
   width: 40px;
   height: 40px;
   margin: 0 auto;
+  border: none;
   border-radius: 8px;
+  background: transparent;
   color: var(--dc-ink-muted);
   cursor: pointer;
+  font-family: inherit;
   transition: background 0.15s;
 }
 

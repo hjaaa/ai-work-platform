@@ -25,21 +25,21 @@
       <div class="dc-card panel">
         <div class="panel-head">
           <span class="panel-title">常用模块</span>
-          <span class="link" @click="soon">管理</span>
+          <button type="button" class="link" @click="soon">管理</button>
         </div>
         <div class="modules">
-          <div v-for="m in modules" :key="m.name" class="module dc-hover-fill" @click="go(m.path)">
+          <button v-for="m in modules" :key="m.name" type="button" class="module dc-hover-fill" @click="go(m.path)">
             <div class="module-icon"><DcIcon :name="m.icon" :size="20" /></div>
             <div class="module-name">{{ m.name }}</div>
             <div class="module-desc">{{ m.desc }}</div>
-          </div>
+          </button>
         </div>
       </div>
 
       <div class="dc-card panel">
         <div class="panel-head tight">
           <span class="panel-title">最近动态</span>
-          <span class="link" @click="soon">全部</span>
+          <button type="button" class="link" @click="soon">全部</button>
         </div>
         <div v-for="(a, i) in activities" :key="i" class="activity">
           <div class="activity-av" :style="{ background: a.color }">{{ a.av }}</div>
@@ -232,9 +232,13 @@ function soon() {
 }
 
 .link {
+  padding: 0;
+  border: none;
+  background: transparent;
   font-size: 14px;
   color: var(--el-color-primary);
   cursor: pointer;
+  font-family: inherit;
 }
 
 .modules {
@@ -248,9 +252,12 @@ function soon() {
   flex-direction: column;
   gap: 10px;
   padding: 14px;
+  border: none;
   border-radius: 10px;
   background: var(--dc-fill-1);
   cursor: pointer;
+  font-family: inherit;
+  text-align: left;
 }
 
 .module-icon {

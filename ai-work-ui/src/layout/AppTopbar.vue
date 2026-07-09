@@ -1,8 +1,8 @@
 <template>
   <header class="topbar">
-    <div class="icon-btn" @click="emit('toggle')">
+    <button type="button" class="icon-btn" aria-label="切换侧边栏" @click="emit('toggle')">
       <DcIcon name="panel" :size="18" />
-    </div>
+    </button>
     <div class="crumb">
       <span class="crumb-root">AI 工作平台</span>
       <span class="crumb-sep">/</span>
@@ -15,17 +15,17 @@
       <span class="search-ph">搜索模块、成员、任务…</span>
     </div>
 
-    <div class="icon-btn bell">
+    <button type="button" class="icon-btn bell" aria-label="通知" @click="soon">
       <DcIcon name="bell" :size="18" />
       <span class="dot"></span>
-    </div>
+    </button>
 
     <el-dropdown trigger="click" @command="onCommand">
-      <div class="user">
+      <button type="button" class="user">
         <div class="avatar">{{ initial }}</div>
         <span class="user-name">{{ displayName }}</span>
         <DcIcon name="chevron" :size="16" />
-      </div>
+      </button>
       <template #dropdown>
         <el-dropdown-menu>
           <el-dropdown-item disabled>
@@ -95,6 +95,10 @@ function onCommand(command: string) {
     return
   }
 
+  soon()
+}
+
+function soon() {
   ElMessage.info('该功能敬请期待')
 }
 </script>
@@ -117,12 +121,15 @@ function onCommand(command: string) {
   width: 36px;
   height: 36px;
   flex: none;
+  border: none;
   border-radius: 8px;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   color: var(--dc-ink-subtle);
+  font-family: inherit;
   transition: background 0.15s;
 }
 
@@ -189,9 +196,12 @@ function onCommand(command: string) {
   gap: 8px;
   height: 36px;
   padding: 0 8px 0 4px;
+  border: none;
   border-radius: 8px;
+  background: transparent;
   cursor: pointer;
   color: var(--dc-ink);
+  font-family: inherit;
   transition: background 0.15s;
 }
 

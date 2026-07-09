@@ -87,8 +87,8 @@ router.beforeEach(async (to) => {
       }
       // 兜底：菜单未实现对应页面时显示占位页
       if (!router.hasRoute('not-found')) {
-        router.addRoute({
-          path: '/:pathMatch(.*)*',
+        router.addRoute('layout', {
+          path: ':pathMatch(.*)*',
           name: 'not-found',
           component: () => import('@/views/placeholder/index.vue'),
         })

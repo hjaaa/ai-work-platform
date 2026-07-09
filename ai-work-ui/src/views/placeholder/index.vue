@@ -1,6 +1,6 @@
 <template>
   <div class="placeholder">
-    <div class="ph-icon"><DcIcon name="apps" :size="28" /></div>
+    <div class="ph-icon"><DcIcon :name="icon" :size="28" /></div>
     <div class="ph-title">{{ title }}</div>
     <div class="ph-desc">
       该模块的骨架位已就位。在此接入「{{ title }}」页面即可——推荐套用「搜索卡 + 表格卡 +
@@ -15,26 +15,35 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import DcIcon from '@/components/DcIcon.vue'
+import { resolveMenuIcon } from '@/layout/menuNav'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-const title = computed(() => {
-  const metaTitle = route.meta?.title
-  if (typeof metaTitle === 'string' && metaTitle) return metaTitle
-  const walk = (list: typeof userStore.menus): string => {
+const currentMenu = computed(() => {
+  const walk = (list: typeof userStore.menus): (typeof userStore.menus)[number] | undefined => {
     for (const m of list) {
       const p = typeof m.path === 'string' ? (m.path.startsWith('/') ? m.path : `/${m.path}`) : ''
-      if (p && p === route.path) return m.name
+      if (p && p === route.path) return m
       if (Array.isArray(m.children)) {
         const found = walk(m.children)
         if (found) return found
       }
     }
-    return ''
+    return undefined
   }
-  return walk(userStore.menus) || '未命名模块'
+  return walk(userStore.menus)
+})
+
+const title = computed(() => {
+  const metaTitle = route.meta?.title
+  if (typeof metaTitle === 'string' && metaTitle) return metaTitle
+  return currentMenu.value?.name || '未命名模块'
+})
+
+const icon = computed(() => {
+  return currentMenu.value ? resolveMenuIcon(currentMenu.value) : 'apps'
 })
 
 function goMembers() {
