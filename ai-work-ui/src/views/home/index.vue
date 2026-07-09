@@ -3,11 +3,11 @@
     <div class="hero">
       <div class="hero-text">
         <div class="hero-title">{{ greeting }}，{{ name }}</div>
-        <div class="hero-sub">{{ today }} · 今天有 8 个任务待处理</div>
+        <div class="hero-sub">{{ today }} · 今天有 {{ pendingTaskCount }} 个任务待处理</div>
       </div>
       <div class="hero-actions">
-        <button class="btn btn-default" @click="soon">自定义面板</button>
-        <button class="btn btn-primary" @click="soon">＋ 新建智能体</button>
+        <el-button @click="soon">自定义面板</el-button>
+        <el-button type="primary" @click="soon">＋ 新建智能体</el-button>
       </div>
     </div>
 
@@ -25,10 +25,16 @@
       <div class="dc-card panel">
         <div class="panel-head">
           <span class="panel-title">常用模块</span>
-          <button type="button" class="link" @click="soon">管理</button>
+          <el-button link type="primary" @click="soon">管理</el-button>
         </div>
         <div class="modules">
-          <button v-for="m in modules" :key="m.name" type="button" class="module dc-hover-fill" @click="go(m.path)">
+          <button
+            v-for="m in modules"
+            :key="m.name"
+            type="button"
+            class="module dc-hover-fill"
+            @click="go(m.path)"
+          >
             <div class="module-icon"><DcIcon :name="m.icon" :size="20" /></div>
             <div class="module-name">{{ m.name }}</div>
             <div class="module-desc">{{ m.desc }}</div>
@@ -39,12 +45,14 @@
       <div class="dc-card panel">
         <div class="panel-head tight">
           <span class="panel-title">最近动态</span>
-          <button type="button" class="link" @click="soon">全部</button>
+          <el-button link type="primary" @click="soon">全部</el-button>
         </div>
-        <div v-for="(a, i) in activities" :key="i" class="activity">
+        <div v-for="a in activities" :key="`${a.who}-${a.target}-${a.time}`" class="activity">
           <div class="activity-av" :style="{ background: a.color }">{{ a.av }}</div>
           <div class="activity-body">
-            <div class="activity-line"><span class="activity-who">{{ a.who }}</span> {{ a.action }}</div>
+            <div class="activity-line">
+              <span class="activity-who">{{ a.who }}</span> {{ a.action }}
+            </div>
             <div class="activity-target">{{ a.target }}</div>
             <div class="activity-time">{{ a.time }}</div>
           </div>
@@ -67,10 +75,15 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const now = new Date()
-const greeting = computed(() => greetingForHour(now.getHours()))
-const today = computed(() => formatToday(now))
+const greeting = greetingForHour(now.getHours())
+const today = formatToday(now)
+const pendingTaskCount = kpis.find((kpi) => kpi.label === '待处理任务')?.value ?? '0'
 const name = computed(
-  () => userStore.userInfo?.nickname || userStore.userInfo?.name || userStore.userInfo?.username || '用户',
+  () =>
+    userStore.userInfo?.nickname ||
+    userStore.userInfo?.name ||
+    userStore.userInfo?.username ||
+    '用户',
 )
 
 function go(path: string) {
@@ -119,42 +132,6 @@ function soon() {
   display: flex;
   gap: 8px;
   flex: none;
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 36px;
-  padding: 0 14px;
-  border-radius: 8px;
-  border: none;
-  font-size: 14px;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background 0.15s;
-}
-
-.btn-default {
-  background: var(--dc-surface);
-  color: var(--dc-ink);
-  box-shadow:
-    0 0 0 1px var(--dc-ring),
-    0 2px 4px -2px rgba(0, 0, 0, 0.04),
-    0 2px 8px -2px rgba(0, 0, 0, 0.04);
-}
-
-.btn-default:hover {
-  background: var(--dc-fill-1);
-}
-
-.btn-primary {
-  background: var(--el-color-primary);
-  color: #fff;
-}
-
-.btn-primary:hover {
-  background: var(--el-color-primary-dark-2);
 }
 
 .kpis {
@@ -229,16 +206,6 @@ function soon() {
   font-size: 16px;
   font-weight: 500;
   color: var(--dc-ink);
-}
-
-.link {
-  padding: 0;
-  border: none;
-  background: transparent;
-  font-size: 14px;
-  color: var(--el-color-primary);
-  cursor: pointer;
-  font-family: inherit;
 }
 
 .modules {
