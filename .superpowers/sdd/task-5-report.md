@@ -54,3 +54,28 @@ npm run type-check
 
 - 当前仓库的 `npm run type-check` 因既有测试文件 `ai-work-ui/src/layout/menuNav.spec.ts` 的空值检查失败而未通过，这会影响 Task 5 的整体类型检查验收。
 - 本次按“只做 Task 5 brief 要求的改动”约束，没有顺手修改该既有测试文件。
+
+## Task 5 后续修复记录（补充）
+
+### 根因
+- `menuNav.spec.ts` 在 `noUncheckedIndexedAccess` 下直接读取 `model.looseItems[0].path`，数组索引返回值可能为 `undefined`，触发 `TS2532`。
+
+### 修复内容
+- 文件：`ai-work-ui/src/layout/menuNav.spec.ts`
+- 将直接索引改为先保存首项再校验：
+  - `const firstLooseItem = model.looseItems[0]`
+  - `expect(firstLooseItem).toBeDefined()`
+  - `expect(firstLooseItem?.path).toBe('/reports')`
+- 测试语义保持不变（仍校验首项 id 为 `2` 且 path 归一化为 `/reports`）。
+
+### 验证命令与结果
+- `npm run test:unit -- run src/layout/menuNav.spec.ts`：通过（1 个文件，7 个用例通过）。
+- `npm run type-check`：通过（无报错）。
+
+### 变更文件
+- `ai-work-ui/src/layout/menuNav.spec.ts`
+- `.superpowers/sdd/task-5-report.md`
+
+### 自审结论
+- 本次修改仅限既有测试文件的类型安全修复，未改业务代码/组件逻辑。
+- 修复对现有断言和语义无影响，且满足 `noUncheckedIndexedAccess` 下的 TS 类型要求。

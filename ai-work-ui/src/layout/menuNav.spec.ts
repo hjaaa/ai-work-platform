@@ -47,7 +47,9 @@ describe('buildSidebarModel', () => {
   it('顶级叶子 → looseItem，path 补前导斜杠', () => {
     const model = buildSidebarModel(MENUS)
     expect(model.looseItems.map((i) => i.id)).toEqual(['2'])
-    expect(model.looseItems[0].path).toBe('/reports')
+    const firstLooseItem = model.looseItems[0]
+    expect(firstLooseItem).toBeDefined()
+    expect(firstLooseItem?.path).toBe('/reports')
   })
 
   it('全部子项不可见的组不产出', () => {
