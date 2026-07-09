@@ -3,6 +3,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import Layout from '@/layout/index.vue'
 import { useUserStore } from '@/stores/user'
 import type { MenuTree } from '@/api/menu'
+import { EXCLUDED_MENU_PATHS, normalizeMenuPath } from './menuPaths'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -36,12 +37,6 @@ const router = createRouter({
 
 // 视图组件按约定映射：菜单 path=/xxx/yyy → src/views/xxx/yyy/index.vue
 const viewModules = import.meta.glob('../views/**/index.vue')
-const EXCLUDED_MENU_PATHS = new Set(['/home', '/members'])
-
-function normalizeMenuPath(itemPath: string): string {
-  const path = itemPath.startsWith('/') ? itemPath : `/${itemPath}`
-  return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path
-}
 
 // 菜单树 → 路由表：仅为能匹配到视图文件的菜单项注册路由，按钮(menuType=1)跳过
 function menusToRoutes(menus: MenuTree[]): RouteRecordRaw[] {

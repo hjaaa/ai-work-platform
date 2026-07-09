@@ -1,4 +1,5 @@
 import type { MenuTree } from '@/api/menu'
+import { EXCLUDED_MENU_PATHS, normalizeMenuPath } from '@/router/menuPaths'
 
 export interface SidebarItem {
   id: string
@@ -26,10 +27,6 @@ function isVisible(item: MenuTree): boolean {
 
 function isExternal(item: MenuTree): boolean {
   return typeof item.path === 'string' && /^https?:\/\//.test(item.path)
-}
-
-function normalizePath(path: string): string {
-  return path.startsWith('/') ? path : `/${path}`
 }
 
 const LEGACY_ICON_MAP: Record<string, string> = {
@@ -74,13 +71,21 @@ function toSidebarItem(item: MenuTree): SidebarItem {
     name: item.name,
     icon: resolveMenuIcon(item),
     external,
-    path: external ? '' : normalizePath(rawPath),
+    path: external ? '' : normalizeMenuPath(rawPath),
     url: external ? String(item.meta?.isLink || rawPath) : '',
   }
 }
 
 function isNavigable(item: MenuTree): boolean {
   return typeof item.path === 'string' && item.path.length > 0
+}
+
+function isExcludedStaticMenu(item: MenuTree): boolean {
+  return (
+    typeof item.path === 'string' &&
+    !isExternal(item) &&
+    EXCLUDED_MENU_PATHS.has(normalizeMenuPath(item.path))
+  )
 }
 
 export function buildSidebarModel(menus: MenuTree[]): SidebarModel {
@@ -93,7 +98,9 @@ export function buildSidebarModel(menus: MenuTree[]): SidebarModel {
     }
 
     const navigableChildren = Array.isArray(menu.children)
-      ? menu.children.filter((item) => isVisible(item) && isNavigable(item))
+      ? menu.children.filter(
+          (item) => isVisible(item) && isNavigable(item) && !isExcludedStaticMenu(item),
+        )
       : []
 
     if (navigableChildren.length > 0) {
@@ -105,7 +112,7 @@ export function buildSidebarModel(menus: MenuTree[]): SidebarModel {
       continue
     }
 
-    if (isNavigable(menu)) {
+    if (isNavigable(menu) && !isExcludedStaticMenu(menu)) {
       looseItems.push(toSidebarItem(menu))
     }
   }

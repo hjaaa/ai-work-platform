@@ -52,6 +52,17 @@ describe('buildSidebarModel', () => {
     expect(firstLooseItem?.path).toBe('/reports')
   })
 
+  it('过滤已由静态路由硬编码渲染的首页与成员管理菜单', () => {
+    const menus: MenuTree[] = [
+      { id: 301, parentId: 0, name: '首页', path: '/home', menuType: '0' },
+      { id: 302, parentId: 0, name: '成员管理', path: 'members/', menuType: '0' },
+      { id: 303, parentId: 0, name: '报表', path: '/reports', menuType: '0' },
+    ]
+
+    const model = buildSidebarModel(menus)
+    expect(model.looseItems.map((item) => item.path)).toEqual(['/reports'])
+  })
+
   it('全部子项不可见的组不产出', () => {
     const model = buildSidebarModel(MENUS)
     expect(model.groups.some((g) => g.id === '3')).toBe(false)
