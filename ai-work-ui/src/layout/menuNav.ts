@@ -1,5 +1,5 @@
 import type { MenuTree } from '@/api/menu'
-import { EXCLUDED_MENU_PATHS, normalizeMenuPath } from '@/router/menuPaths'
+import { SIDEBAR_HIDDEN_PATHS, normalizeMenuPath } from '@/router/menuPaths'
 
 export interface SidebarItem {
   id: string
@@ -80,11 +80,11 @@ function isNavigable(item: MenuTree): boolean {
   return typeof item.path === 'string' && item.path.length > 0
 }
 
-function isExcludedStaticMenu(item: MenuTree): boolean {
+function isSidebarHidden(item: MenuTree): boolean {
   return (
     typeof item.path === 'string' &&
     !isExternal(item) &&
-    EXCLUDED_MENU_PATHS.has(normalizeMenuPath(item.path))
+    SIDEBAR_HIDDEN_PATHS.has(normalizeMenuPath(item.path))
   )
 }
 
@@ -99,7 +99,7 @@ export function buildSidebarModel(menus: MenuTree[]): SidebarModel {
 
     const navigableChildren = Array.isArray(menu.children)
       ? menu.children.filter(
-          (item) => isVisible(item) && isNavigable(item) && !isExcludedStaticMenu(item),
+          (item) => isVisible(item) && isNavigable(item) && !isSidebarHidden(item),
         )
       : []
 
@@ -112,7 +112,7 @@ export function buildSidebarModel(menus: MenuTree[]): SidebarModel {
       continue
     }
 
-    if (isNavigable(menu) && !isExcludedStaticMenu(menu)) {
+    if (isNavigable(menu) && !isSidebarHidden(menu)) {
       looseItems.push(toSidebarItem(menu))
     }
   }

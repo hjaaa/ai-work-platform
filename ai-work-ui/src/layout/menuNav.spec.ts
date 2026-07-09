@@ -52,7 +52,7 @@ describe('buildSidebarModel', () => {
     expect(firstLooseItem?.path).toBe('/reports')
   })
 
-  it('过滤已由静态路由硬编码渲染的首页与成员管理菜单', () => {
+  it('过滤首页(/home)，但成员管理(/members)正常显示', () => {
     const menus: MenuTree[] = [
       { id: 301, parentId: 0, name: '首页', path: '/home', menuType: '0' },
       { id: 302, parentId: 0, name: '成员管理', path: 'members/', menuType: '0' },
@@ -60,7 +60,23 @@ describe('buildSidebarModel', () => {
     ]
 
     const model = buildSidebarModel(menus)
-    expect(model.looseItems.map((item) => item.path)).toEqual(['/reports'])
+    expect(model.looseItems.map((item) => item.path)).toEqual(['/members', '/reports'])
+  })
+
+  it('成员管理作为分组子项时同样显示', () => {
+    const menus: MenuTree[] = [
+      {
+        id: 320,
+        parentId: 0,
+        name: '协作',
+        menuType: '0',
+        children: [{ id: 321, parentId: 320, name: '成员管理', path: '/members', menuType: '0' }],
+      },
+    ]
+
+    const model = buildSidebarModel(menus)
+    const group = model.groups.find((g) => g.id === '320')!
+    expect(group.items.map((i) => i.path)).toEqual(['/members'])
   })
 
   it('全部子项不可见的组不产出', () => {
