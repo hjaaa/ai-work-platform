@@ -44,17 +44,23 @@ export function buildGotoUrl(appId: string, redirectUri: string, state: string):
   return `${AUTHORIZE_URL}?${params.toString()}`
 }
 
+export function resolveRedirectUri(configuredRedirectUri?: string): string {
+  const redirectUri = configuredRedirectUri?.trim()
+  return redirectUri || `${window.location.origin}/social-callback.html`
+}
+
 export function createFeishuQr(config: QrLoginConfig): FeishuQrLogin {
   if (!window.QRLogin) throw new Error('飞书扫码组件加载失败')
   return window.QRLogin(config)
 }
 
-// 判断消息是否为回调页发回的合法 code:同源 + source 标记 + state 一致(防 CSRF/伪造)
+// 判断消息是否为回调页发回的合法 code:回调来源 + source 标记 + state 一致(防 CSRF/伪造)
 export function parseCallbackMessage(
   event: MessageEvent,
   expectedState: string,
+  expectedOrigin = window.location.origin,
 ): SocialCallbackMessage | null {
-  if (event.origin !== window.location.origin) return null
+  if (event.origin !== expectedOrigin) return null
   const data = event.data as Partial<SocialCallbackMessage> | null
   if (!data || data.source !== CALLBACK_SOURCE) return null
   if (!data.code || data.state !== expectedState) return null

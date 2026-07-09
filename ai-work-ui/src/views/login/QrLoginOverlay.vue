@@ -111,6 +111,7 @@ import {
   loadFeishuSdk,
   parseCallbackMessage,
   randomState,
+  resolveRedirectUri,
 } from '@/utils/feishu'
 import type { FeishuQrLogin } from '@/utils/feishu'
 import dingtalkMark from '@/assets/dingtalk-mark.png'
@@ -203,6 +204,7 @@ const AUTH_IFRAME_TIMEOUT_MS = 8000
 let feishuQrObj: FeishuQrLogin | null = null
 let feishuGoto = ''
 let feishuState = ''
+let feishuCallbackOrigin = ''
 let authIframe: HTMLIFrameElement | null = null
 let authTimeoutId: ReturnType<typeof setTimeout> | null = null
 
@@ -217,11 +219,9 @@ async function initFeishuQr() {
     // 二维码一次性,重建前清空容器;state 随二维码重建,旧回调自然失效
     container.innerHTML = ''
     const nextState = randomState()
-    const nextGoto = buildGotoUrl(
-      import.meta.env.VITE_FEISHU_APP_ID,
-      `${window.location.origin}/social-callback.html`,
-      nextState,
-    )
+    const redirectUri = resolveRedirectUri(import.meta.env.VITE_FEISHU_REDIRECT_URI)
+    const nextGoto = buildGotoUrl(import.meta.env.VITE_FEISHU_APP_ID, redirectUri, nextState)
+    const nextCallbackOrigin = new URL(redirectUri).origin
     const nextQrObj = createFeishuQr({
       id: FEISHU_CONTAINER_ID,
       goto: nextGoto,
@@ -231,6 +231,7 @@ async function initFeishuQr() {
     feishuQrObj = nextQrObj
     feishuGoto = nextGoto
     feishuState = nextState
+    feishuCallbackOrigin = nextCallbackOrigin
     sdkState.value = 'ready'
   } catch {
     sdkState.value = 'failed'
@@ -245,7 +246,11 @@ function onWindowMessage(event: MessageEvent) {
     return
   }
   // 回调页消息:授权完成带回正式 code
-  const callback = parseCallbackMessage(event, feishuState)
+  const callback = parseCallbackMessage(
+    event,
+    feishuState,
+    feishuCallbackOrigin || window.location.origin,
+  )
   if (callback) void onFeishuCode(callback.code)
 }
 
@@ -276,6 +281,7 @@ function resetFeishuSession() {
   feishuQrObj = null
   feishuGoto = ''
   feishuState = ''
+  feishuCallbackOrigin = ''
 }
 
 async function onFeishuCode(code: string) {
