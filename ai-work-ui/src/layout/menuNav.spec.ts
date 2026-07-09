@@ -44,6 +44,28 @@ describe('buildSidebarModel', () => {
     expect(link.url).toBe('https://x.com')
   })
 
+  it('展示后端返回的菜单名', () => {
+    const menus: MenuTree[] = [
+      {
+        id: 401,
+        parentId: 0,
+        name: '系统',
+        menuType: '0',
+        children: [
+          { id: 411, parentId: 401, name: '用户管理', path: '/admin/system/user/index', menuType: '0' },
+          { id: 412, parentId: 401, name: '生成页面', path: '/gen/gener/index', menuType: '0' },
+        ],
+      },
+      { id: 402, parentId: 0, name: '模型管理', path: '/models', menuType: '0' },
+    ]
+
+    const model = buildSidebarModel(menus)
+    expect(model.looseItems.map((item) => item.name)).toEqual(['模型管理'])
+    const group = model.groups.find((item) => item.id === '401')!
+    expect(group.name).toBe('系统')
+    expect(group.items.map((item) => item.name)).toEqual(['用户管理', '生成页面'])
+  })
+
   it('顶级叶子 → looseItem，path 补前导斜杠', () => {
     const model = buildSidebarModel(MENUS)
     expect(model.looseItems.map((i) => i.id)).toEqual(['2'])

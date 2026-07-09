@@ -29,12 +29,10 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.aiwork.admin.api.constant.UpmsErrorCodes;
 import com.aiwork.admin.api.dto.SysMenuSortDTO;
-import com.aiwork.admin.api.entity.SysI18nEntity;
 import com.aiwork.admin.api.entity.SysMenu;
 import com.aiwork.admin.api.entity.SysRoleMenu;
 import com.aiwork.admin.mapper.SysMenuMapper;
 import com.aiwork.admin.mapper.SysRoleMenuMapper;
-import com.aiwork.admin.service.SysI18nService;
 import com.aiwork.admin.service.SysMenuService;
 import com.aiwork.common.core.constant.CacheConstants;
 import com.aiwork.common.core.constant.CommonConstants;
@@ -69,8 +67,6 @@ import java.util.stream.Collectors;
 public class SysMenuServiceImpl extends ServiceImpl<SysMenuMapper, SysMenu> implements SysMenuService {
 
 	private final SysRoleMenuMapper sysRoleMenuMapper;
-
-	private final SysI18nService sysI18nService;
 
 	@Override
 	@Cacheable(value = CacheConstants.MENU_DETAILS, key = "#roleId", unless = "#result.isEmpty()")
@@ -197,11 +193,7 @@ public class SysMenuServiceImpl extends ServiceImpl<SysMenuMapper, SysMenu> impl
 	 */
 	@Override
 	public List<Tree<Long>> filterMenu(Set<SysMenu> all, String type, Long parentId) {
-		List<SysI18nEntity> list = sysI18nService.list();
-		List<TreeNode<Long>> collect = all.stream().filter(menuTypePredicate(type)).peek(item -> {
-			Optional<SysI18nEntity> first = list.stream().filter(it -> it.getZhCn().equals(item.getName())).findFirst();
-			first.ifPresent(sysI18nEntity -> item.setName(sysI18nEntity.getName()));
-		}).map(getNodeFunction()).toList();
+		List<TreeNode<Long>> collect = all.stream().filter(menuTypePredicate(type)).map(getNodeFunction()).toList();
 
 		Long parent = parentId == null ? CommonConstants.MENU_TREE_ROOT_ID : parentId;
 		return TreeUtil.build(collect, parent);
