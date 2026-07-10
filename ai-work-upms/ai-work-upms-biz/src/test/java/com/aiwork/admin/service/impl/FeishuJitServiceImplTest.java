@@ -2,18 +2,26 @@ package com.aiwork.admin.service.impl;
 
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
+import com.aiwork.admin.api.dto.FeishuDeptInfo;
 import com.aiwork.admin.api.dto.FeishuUserInfo;
+import com.aiwork.admin.api.dto.UserDTO;
+import com.aiwork.admin.api.entity.SysDept;
 import com.aiwork.admin.api.entity.SysSocialDetails;
+import com.aiwork.admin.api.entity.SysUser;
+import com.aiwork.admin.api.entity.SysUserSocial;
 import com.aiwork.admin.mapper.SysDeptMapper;
 import com.aiwork.admin.mapper.SysSocialDetailsMapper;
 import com.aiwork.admin.mapper.SysUserSocialMapper;
 import com.aiwork.admin.service.SysUserService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,8 +33,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -75,6 +85,116 @@ class FeishuJitServiceImplTest {
 		when(tokenRequest.execute()).thenReturn(tokenResponse);
 		when(tokenResponse.body()).thenReturn(responseBody);
 		return tokenRequest;
+	}
+
+	private FeishuUserInfo jitUser(String mobile) {
+		FeishuUserInfo info = new FeishuUserInfo();
+		info.setOpenId("ou_test");
+		info.setName("张三");
+		info.setMobile(mobile);
+		info.setTenantUserId("emp_1001");
+		info.setDeptOpenIds(List.of());
+		info.setDeptChain(List.of());
+		return info;
+	}
+
+	@Test
+	void provisionReturnsTrueWhenBindingAlreadyExists() {
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(new SysUserSocial());
+
+		assertTrue(feishuJitService.provision(jitUser("13800138000")));
+		verify(sysUserService, never()).saveUser(any());
+		verify(sysUserSocialMapper, never()).insert(any(SysUserSocial.class));
+	}
+
+	@Test
+	void provisionBindsExistingUserByPhone() {
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
+		SysUser existing = new SysUser();
+		existing.setUserId(5L);
+		when(sysUserService.getOne(any(), eq(false))).thenReturn(existing);
+
+		assertTrue(feishuJitService.provision(jitUser("+8613800138000")));
+
+		verify(sysUserService, never()).saveUser(any());
+		ArgumentCaptor<SysUserSocial> captor = ArgumentCaptor.forClass(SysUserSocial.class);
+		verify(sysUserSocialMapper).insert(captor.capture());
+		assertEquals(5L, captor.getValue().getUserId());
+		assertEquals("ou_test", captor.getValue().getIdentify());
+		assertEquals("emp_1001", captor.getValue().getTenantUserId());
+	}
+
+	@Test
+	void provisionCreatesUserWithNormalizedPhoneAsUsername() {
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
+		SysUser created = new SysUser();
+		created.setUserId(7L);
+		// 第一次按 phone 查:无;建号后按 username 查:有
+		when(sysUserService.getOne(any(), eq(false))).thenReturn(null, created);
+		when(sysUserService.saveUser(any(UserDTO.class))).thenReturn(Boolean.TRUE);
+
+		assertTrue(feishuJitService.provision(jitUser("+8613800138000")));
+
+		ArgumentCaptor<UserDTO> userCaptor = ArgumentCaptor.forClass(UserDTO.class);
+		verify(sysUserService).saveUser(userCaptor.capture());
+		UserDTO saved = userCaptor.getValue();
+		// +86 前缀被去掉
+		assertEquals("13800138000", saved.getUsername());
+		assertEquals("13800138000", saved.getPhone());
+		assertEquals("张三", saved.getName());
+		assertEquals("张三", saved.getNickname());
+		assertNotNull(saved.getPassword());
+		assertTrue(saved.getPassword().length() >= 32);
+		assertNull(saved.getRole());
+		assertNull(saved.getDeptIds());
+
+		ArgumentCaptor<SysUserSocial> socialCaptor = ArgumentCaptor.forClass(SysUserSocial.class);
+		verify(sysUserSocialMapper).insert(socialCaptor.capture());
+		assertEquals(7L, socialCaptor.getValue().getUserId());
+	}
+
+	@Test
+	void provisionCreatesMissingDeptChainParentFirst() {
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
+		SysUser created = new SysUser();
+		created.setUserId(7L);
+		when(sysUserService.getOne(any(), eq(false))).thenReturn(null, created);
+		when(sysUserService.saveUser(any(UserDTO.class))).thenReturn(Boolean.TRUE);
+		// 本地均无映射
+		when(sysDeptMapper.selectOne(any())).thenReturn(null);
+		// 模拟 MyBatis-Plus 回填雪花 ID
+		doAnswer(invocation -> {
+			SysDept dept = invocation.getArgument(0);
+			dept.setDeptId("od-parent".equals(dept.getFeishuDeptId()) ? 100L : 101L);
+			return 1;
+		}).when(sysDeptMapper).insert(any(SysDept.class));
+
+		FeishuUserInfo info = jitUser("13800138000");
+		FeishuDeptInfo parent = new FeishuDeptInfo();
+		parent.setOpenDeptId("od-parent");
+		parent.setName("技术中心");
+		parent.setParentOpenDeptId("0");
+		FeishuDeptInfo child = new FeishuDeptInfo();
+		child.setOpenDeptId("od-child");
+		child.setName("后端组");
+		child.setParentOpenDeptId("od-parent");
+		info.setDeptOpenIds(List.of("od-child"));
+		info.setDeptChain(List.of(parent, child));
+
+		assertTrue(feishuJitService.provision(info));
+
+		ArgumentCaptor<SysDept> deptCaptor = ArgumentCaptor.forClass(SysDept.class);
+		verify(sysDeptMapper, org.mockito.Mockito.times(2)).insert(deptCaptor.capture());
+		List<SysDept> inserted = deptCaptor.getAllValues();
+		assertEquals("od-parent", inserted.get(0).getFeishuDeptId());
+		assertEquals(0L, inserted.get(0).getParentId());
+		assertEquals("od-child", inserted.get(1).getFeishuDeptId());
+		assertEquals(100L, inserted.get(1).getParentId());
+
+		ArgumentCaptor<UserDTO> userCaptor = ArgumentCaptor.forClass(UserDTO.class);
+		verify(sysUserService).saveUser(userCaptor.capture());
+		// 用户挂到直属部门(od-child 的本地 ID)
+		assertEquals(List.of(101L), userCaptor.getValue().getDeptIds());
 	}
 
 	@Test

@@ -1,29 +1,41 @@
 package com.aiwork.admin.service.impl;
 
+import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.aiwork.admin.api.dto.FeishuDeptInfo;
 import com.aiwork.admin.api.dto.FeishuUserInfo;
+import com.aiwork.admin.api.dto.UserDTO;
+import com.aiwork.admin.api.entity.SysDept;
 import com.aiwork.admin.api.entity.SysSocialDetails;
+import com.aiwork.admin.api.entity.SysUser;
+import com.aiwork.admin.api.entity.SysUserSocial;
 import com.aiwork.admin.mapper.SysDeptMapper;
 import com.aiwork.admin.mapper.SysSocialDetailsMapper;
 import com.aiwork.admin.mapper.SysUserSocialMapper;
 import com.aiwork.admin.service.FeishuJitService;
 import com.aiwork.admin.service.SysUserService;
 import com.aiwork.common.core.constant.enums.LoginTypeEnum;
+import com.aiwork.common.core.exception.CheckedException;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * 飞书 JIT 自动建号:通讯录调用走应用身份(tenant_access_token)
@@ -117,8 +129,91 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 	}
 
 	@Override
+	@Transactional(rollbackFor = Exception.class)
 	public Boolean provision(FeishuUserInfo feishuUser) {
-		throw new UnsupportedOperationException("implemented in next task");
+		// 并发扫码下绑定可能已被先到的请求建立
+		SysUserSocial condition = new SysUserSocial();
+		condition.setType(LoginTypeEnum.FEISHU.getType());
+		condition.setIdentify(feishuUser.getOpenId());
+		if (sysUserSocialMapper.selectOne(new QueryWrapper<>(condition)) != null) {
+			return Boolean.TRUE;
+		}
+
+		String phone = normalizeMobile(feishuUser.getMobile());
+		SysUser sysUser = sysUserService
+			.getOne(Wrappers.<SysUser>lambdaQuery().eq(SysUser::getPhone, phone), false);
+		if (sysUser == null) {
+			sysUser = createUser(feishuUser, phone);
+		}
+
+		SysUserSocial social = new SysUserSocial();
+		social.setUserId(sysUser.getUserId());
+		social.setType(LoginTypeEnum.FEISHU.getType());
+		social.setIdentify(feishuUser.getOpenId());
+		social.setTenantUserId(feishuUser.getTenantUserId());
+		sysUserSocialMapper.insert(social);
+		return Boolean.TRUE;
+	}
+
+	private SysUser createUser(FeishuUserInfo feishuUser, String phone) {
+		UserDTO userDTO = new UserDTO();
+		userDTO.setUsername(phone);
+		// 随机密码仅为满足字段必填,JIT 用户走扫码登录,需要密码时走找回密码
+		userDTO.setPassword(RandomUtil.randomString(32));
+		userDTO.setPhone(phone);
+		userDTO.setName(feishuUser.getName());
+		userDTO.setNickname(feishuUser.getName());
+		userDTO.setAvatar(feishuUser.getAvatar());
+		List<Long> deptIds = syncDeptChain(feishuUser);
+		if (CollUtil.isNotEmpty(deptIds)) {
+			userDTO.setDeptIds(deptIds);
+		}
+		sysUserService.saveUser(userDTO);
+
+		SysUser created = sysUserService
+			.getOne(Wrappers.<SysUser>lambdaQuery().eq(SysUser::getUsername, phone), false);
+		if (created == null) {
+			throw new CheckedException("feishu jit create user failed");
+		}
+		return created;
+	}
+
+	/**
+	 * 按父在前的部门链只创建本地缺失节点,返回用户直属部门的本地 ID
+	 */
+	private List<Long> syncDeptChain(FeishuUserInfo feishuUser) {
+		List<FeishuDeptInfo> chain = feishuUser.getDeptChain();
+		if (CollUtil.isEmpty(chain)) {
+			return Collections.emptyList();
+		}
+		Map<String, Long> localIds = new HashMap<>();
+		for (FeishuDeptInfo dept : chain) {
+			SysDept existing = sysDeptMapper
+				.selectOne(Wrappers.<SysDept>lambdaQuery().eq(SysDept::getFeishuDeptId, dept.getOpenDeptId()));
+			if (existing != null) {
+				localIds.put(dept.getOpenDeptId(), existing.getDeptId());
+				continue;
+			}
+			SysDept created = new SysDept();
+			created.setName(dept.getName());
+			Long parentLocalId = ROOT_DEPT_ID.equals(dept.getParentOpenDeptId()) ? 0L
+					: localIds.get(dept.getParentOpenDeptId());
+			// 父链缺失(超深度截断等)时挂到根
+			created.setParentId(parentLocalId == null ? 0L : parentLocalId);
+			created.setSortOrder(0);
+			created.setFeishuDeptId(dept.getOpenDeptId());
+			sysDeptMapper.insert(created);
+			localIds.put(dept.getOpenDeptId(), created.getDeptId());
+		}
+		return feishuUser.getDeptOpenIds()
+			.stream()
+			.map(localIds::get)
+			.filter(Objects::nonNull)
+			.collect(Collectors.toList());
+	}
+
+	private String normalizeMobile(String mobile) {
+		return StrUtil.removePrefix(StrUtil.trimToEmpty(mobile), "+86");
 	}
 
 	private String fetchTenantToken(SysSocialDetails socialDetails) {
