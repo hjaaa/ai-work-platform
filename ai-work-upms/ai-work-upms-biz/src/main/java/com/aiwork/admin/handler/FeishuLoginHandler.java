@@ -7,13 +7,18 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.aiwork.admin.api.constant.UpmsErrorCodes;
+import com.aiwork.admin.api.dto.FeishuUserInfo;
+import com.aiwork.admin.api.dto.UserInfo;
 import com.aiwork.admin.api.entity.SysSocialDetails;
 import com.aiwork.admin.mapper.SysSocialDetailsMapper;
 import com.aiwork.admin.mapper.SysUserSocialMapper;
+import com.aiwork.admin.service.FeishuJitService;
 import com.aiwork.admin.service.SysUserService;
 import com.aiwork.common.core.constant.enums.LoginTypeEnum;
+import com.aiwork.common.core.constant.enums.YesNoEnum;
 import com.aiwork.common.core.exception.CheckedException;
 import com.aiwork.common.core.util.MsgUtils;
+import com.aiwork.common.data.resolver.ParamResolver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -40,10 +45,43 @@ public class FeishuLoginHandler extends AbstractUserSocialHandler {
 
 	private final SysSocialDetailsMapper sysSocialDetailsMapper;
 
+	private final FeishuJitService feishuJitService;
+
 	public FeishuLoginHandler(SysUserService sysUserService, SysUserSocialMapper sysUserSocialMapper,
-			SysSocialDetailsMapper sysSocialDetailsMapper) {
+			SysSocialDetailsMapper sysSocialDetailsMapper, FeishuJitService feishuJitService) {
 		super(sysUserService, sysUserSocialMapper);
 		this.sysSocialDetailsMapper = sysSocialDetailsMapper;
+		this.feishuJitService = feishuJitService;
+	}
+
+	/**
+	 * 覆写模板:查无绑定且 JIT 开关开启时,自动建号/绑定后重查,走统一登录出口
+	 */
+	@Override
+	public UserInfo handle(String code) {
+		String openId = identify(code);
+		UserInfo userInfo = info(openId);
+		if (userInfo != null || StrUtil.isBlank(openId) || !jitEnabled()) {
+			return userInfo;
+		}
+		try {
+			FeishuUserInfo feishuUser = feishuJitService.fetchUser(openId);
+			if (feishuUser == null || StrUtil.isBlank(feishuUser.getMobile())) {
+				log.warn("feishu jit aborted, user info incomplete, mobilePresent={}",
+						feishuUser != null && StrUtil.isNotBlank(feishuUser.getMobile()));
+				return null;
+			}
+			feishuJitService.provision(feishuUser);
+			return info(openId);
+		}
+		catch (Exception e) {
+			log.warn("feishu jit provision failed, exceptionType={}", e.getClass().getSimpleName());
+			return null;
+		}
+	}
+
+	private boolean jitEnabled() {
+		return YesNoEnum.YES.getCode().equals(ParamResolver.getStr("FEISHU_JIT_ENABLE", YesNoEnum.NO.getCode()));
 	}
 
 	@Override
