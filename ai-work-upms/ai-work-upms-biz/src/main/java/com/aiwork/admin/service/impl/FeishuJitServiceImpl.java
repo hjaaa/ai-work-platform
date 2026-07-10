@@ -61,6 +61,8 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 	 */
 	private static final String ROOT_DEPT_ID = "0";
 
+	private static final String DELETED_FLAG = "1";
+
 	/**
 	 * 部门父链最大深度,防脏数据成环
 	 */
@@ -146,6 +148,16 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 			sysUser = createUser(feishuUser, phone);
 		}
 
+		SysUserSocial userCondition = new SysUserSocial();
+		userCondition.setUserId(sysUser.getUserId());
+		userCondition.setType(LoginTypeEnum.FEISHU.getType());
+		SysUserSocial existingBinding = sysUserSocialMapper.selectOne(new QueryWrapper<>(userCondition));
+		if (existingBinding != null) {
+			existingBinding.setIdentify(feishuUser.getOpenId());
+			sysUserSocialMapper.updateById(existingBinding);
+			return Boolean.TRUE;
+		}
+
 		SysUserSocial social = new SysUserSocial();
 		social.setUserId(sysUser.getUserId());
 		social.setType(LoginTypeEnum.FEISHU.getType());
@@ -186,10 +198,21 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 		if (CollUtil.isEmpty(chain)) {
 			return Collections.emptyList();
 		}
+		Map<String, SysDept> existingDepts = new HashMap<>();
+		for (FeishuDeptInfo dept : chain) {
+			SysDept existing = sysDeptMapper.selectIncludingDeletedByFeishuDeptId(dept.getOpenDeptId());
+			if (existing != null) {
+				if (DELETED_FLAG.equals(existing.getDelFlag())) {
+					log.warn("feishu jit department mapping deleted, degrade to no dept");
+					return Collections.emptyList();
+				}
+				existingDepts.put(dept.getOpenDeptId(), existing);
+			}
+		}
+
 		Map<String, Long> localIds = new HashMap<>();
 		for (FeishuDeptInfo dept : chain) {
-			SysDept existing = sysDeptMapper
-				.selectOne(Wrappers.<SysDept>lambdaQuery().eq(SysDept::getFeishuDeptId, dept.getOpenDeptId()));
+			SysDept existing = existingDepts.get(dept.getOpenDeptId());
 			if (existing != null) {
 				localIds.put(dept.getOpenDeptId(), existing.getDeptId());
 				continue;

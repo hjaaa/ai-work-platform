@@ -125,6 +125,30 @@ class FeishuJitServiceImplTest {
 	}
 
 	@Test
+	void provisionUpdatesExistingFeishuBindingForExistingUser() {
+		SysUserSocial existingBinding = new SysUserSocial();
+		existingBinding.setId(9L);
+		existingBinding.setUserId(5L);
+		existingBinding.setType("FEISHU");
+		existingBinding.setIdentify("ou_previous");
+		existingBinding.setTenantUserId("emp_previous");
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(null, existingBinding);
+		SysUser existing = new SysUser();
+		existing.setUserId(5L);
+		when(sysUserService.getOne(any(), eq(false))).thenReturn(existing);
+
+		assertTrue(feishuJitService.provision(jitUser("13800138000")));
+
+		ArgumentCaptor<SysUserSocial> captor = ArgumentCaptor.forClass(SysUserSocial.class);
+		verify(sysUserSocialMapper).updateById(captor.capture());
+		assertEquals(9L, captor.getValue().getId());
+		assertEquals("ou_test", captor.getValue().getIdentify());
+		assertEquals("emp_previous", captor.getValue().getTenantUserId());
+		verify(sysUserSocialMapper, never()).insert(any(SysUserSocial.class));
+		verify(sysUserService, never()).saveUser(any());
+	}
+
+	@Test
 	void provisionCreatesUserWithNormalizedPhoneAsUsername() {
 		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
 		SysUser created = new SysUser();
@@ -161,7 +185,7 @@ class FeishuJitServiceImplTest {
 		when(sysUserService.getOne(any(), eq(false))).thenReturn(null, created);
 		when(sysUserService.saveUser(any(UserDTO.class))).thenReturn(Boolean.TRUE);
 		// 本地均无映射
-		when(sysDeptMapper.selectOne(any())).thenReturn(null);
+		when(sysDeptMapper.selectIncludingDeletedByFeishuDeptId(any())).thenReturn(null);
 		// 模拟 MyBatis-Plus 回填雪花 ID
 		doAnswer(invocation -> {
 			SysDept dept = invocation.getArgument(0);
@@ -195,6 +219,38 @@ class FeishuJitServiceImplTest {
 		verify(sysUserService).saveUser(userCaptor.capture());
 		// 用户挂到直属部门(od-child 的本地 ID)
 		assertEquals(List.of(101L), userCaptor.getValue().getDeptIds());
+	}
+
+	@Test
+	void provisionCreatesUserWithoutDeptWhenDeptMappingIsLogicallyDeleted() {
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
+		SysUser created = new SysUser();
+		created.setUserId(7L);
+		when(sysUserService.getOne(any(), eq(false))).thenReturn(null, created);
+		when(sysUserService.saveUser(any(UserDTO.class))).thenReturn(Boolean.TRUE);
+		SysDept deletedDept = new SysDept();
+		deletedDept.setDelFlag("1");
+		when(sysDeptMapper.selectIncludingDeletedByFeishuDeptId("od-parent")).thenReturn(null);
+		when(sysDeptMapper.selectIncludingDeletedByFeishuDeptId("od-child")).thenReturn(deletedDept);
+
+		FeishuUserInfo info = jitUser("13800138000");
+		FeishuDeptInfo parent = new FeishuDeptInfo();
+		parent.setOpenDeptId("od-parent");
+		parent.setName("技术中心");
+		parent.setParentOpenDeptId("0");
+		FeishuDeptInfo child = new FeishuDeptInfo();
+		child.setOpenDeptId("od-child");
+		child.setName("后端组");
+		child.setParentOpenDeptId("od-parent");
+		info.setDeptOpenIds(List.of("od-child"));
+		info.setDeptChain(List.of(parent, child));
+
+		assertTrue(feishuJitService.provision(info));
+
+		ArgumentCaptor<UserDTO> userCaptor = ArgumentCaptor.forClass(UserDTO.class);
+		verify(sysUserService).saveUser(userCaptor.capture());
+		assertNull(userCaptor.getValue().getDeptIds());
+		verify(sysDeptMapper, never()).insert(any(SysDept.class));
 	}
 
 	@Test

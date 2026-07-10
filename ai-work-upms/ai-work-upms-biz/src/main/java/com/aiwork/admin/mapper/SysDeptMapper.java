@@ -23,6 +23,7 @@ import com.aiwork.admin.api.entity.SysDept;
 import com.github.yulichang.base.MPJBaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
@@ -41,5 +42,13 @@ public interface SysDeptMapper extends MPJBaseMapper<SysDept> {
 	 * @return 部门列表
 	 */
 	List<SysDept> listDeptsByUserId(@Param("userId") Long userId);
+
+	/**
+	 * 根据飞书部门 ID 查询部门映射,包含逻辑删除记录
+	 * @param feishuDeptId 飞书 open_department_id
+	 * @return 部门映射
+	 */
+	@Select("SELECT * FROM sys_dept WHERE feishu_dept_id = #{feishuDeptId} LIMIT 1")
+	SysDept selectIncludingDeletedByFeishuDeptId(@Param("feishuDeptId") String feishuDeptId);
 
 }
