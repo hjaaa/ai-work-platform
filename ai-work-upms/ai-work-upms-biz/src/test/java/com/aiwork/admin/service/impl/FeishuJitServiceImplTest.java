@@ -14,9 +14,11 @@ import com.aiwork.admin.mapper.SysSocialDetailsMapper;
 import com.aiwork.admin.mapper.SysUserSocialMapper;
 import com.aiwork.admin.service.SysUserService;
 import com.aiwork.common.core.exception.CheckedException;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
@@ -89,6 +91,10 @@ class FeishuJitServiceImplTest {
 		return tokenRequest;
 	}
 
+	private void mockPhoneMatches(List<SysUser> users) {
+		when(sysUserService.list(ArgumentMatchers.<Wrapper<SysUser>>any())).thenReturn(users);
+	}
+
 	private FeishuUserInfo jitUser(String mobile) {
 		FeishuUserInfo info = new FeishuUserInfo();
 		info.setOpenId("ou_test");
@@ -114,7 +120,7 @@ class FeishuJitServiceImplTest {
 		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
 		SysUser existing = new SysUser();
 		existing.setUserId(5L);
-		when(sysUserService.getOne(any(), eq(false))).thenReturn(existing);
+		mockPhoneMatches(List.of(existing));
 
 		assertTrue(feishuJitService.provision(jitUser("+8613800138000")));
 
@@ -137,7 +143,7 @@ class FeishuJitServiceImplTest {
 		when(sysUserSocialMapper.selectOne(any())).thenReturn(null, existingBinding);
 		SysUser existing = new SysUser();
 		existing.setUserId(5L);
-		when(sysUserService.getOne(any(), eq(false))).thenReturn(existing);
+		mockPhoneMatches(List.of(existing));
 
 		assertTrue(feishuJitService.provision(jitUser("13800138000")));
 
@@ -153,12 +159,28 @@ class FeishuJitServiceImplTest {
 	@Test
 	void provisionFailsWhenUsernameAlreadyExistsBeforeCreate() {
 		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
-		when(sysUserService.getOne(any(), eq(false))).thenReturn(null);
+		mockPhoneMatches(List.of());
 		when(sysUserService.exists(any())).thenReturn(true);
 
 		assertThrows(CheckedException.class, () -> feishuJitService.provision(jitUser("13800138000")));
 
 		verify(sysUserService, never()).saveUser(any());
+	}
+
+	@Test
+	void provisionFailsWhenPhoneMatchesMultipleUsers() {
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
+		SysUser first = new SysUser();
+		first.setUserId(5L);
+		SysUser second = new SysUser();
+		second.setUserId(6L);
+		mockPhoneMatches(List.of(first, second));
+
+		assertThrows(CheckedException.class, () -> feishuJitService.provision(jitUser("13800138000")));
+
+		verify(sysUserService, never()).saveUser(any());
+		verify(sysUserSocialMapper, never()).insert(any(SysUserSocial.class));
+		verify(sysUserSocialMapper, never()).updateById(any(SysUserSocial.class));
 	}
 
 	@Test
@@ -173,8 +195,9 @@ class FeishuJitServiceImplTest {
 		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
 		SysUser created = new SysUser();
 		created.setUserId(7L);
-		// 第一次按 phone 查:无;建号后按 username 查:有
-		when(sysUserService.getOne(any(), eq(false))).thenReturn(null, created);
+		// 按 phone 查:无;建号后按 username 查:有
+		mockPhoneMatches(List.of());
+		when(sysUserService.getOne(any(), eq(false))).thenReturn(created);
 		when(sysUserService.saveUser(any(UserDTO.class))).thenReturn(Boolean.TRUE);
 
 		assertTrue(feishuJitService.provision(jitUser("+8613800138000")));
@@ -202,7 +225,8 @@ class FeishuJitServiceImplTest {
 		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
 		SysUser created = new SysUser();
 		created.setUserId(7L);
-		when(sysUserService.getOne(any(), eq(false))).thenReturn(null, created);
+		mockPhoneMatches(List.of());
+		when(sysUserService.getOne(any(), eq(false))).thenReturn(created);
 		when(sysUserService.saveUser(any(UserDTO.class))).thenReturn(Boolean.TRUE);
 		// 本地均无映射
 		when(sysDeptMapper.selectIncludingDeletedByFeishuDeptId(any())).thenReturn(null);
@@ -246,7 +270,8 @@ class FeishuJitServiceImplTest {
 		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
 		SysUser created = new SysUser();
 		created.setUserId(7L);
-		when(sysUserService.getOne(any(), eq(false))).thenReturn(null, created);
+		mockPhoneMatches(List.of());
+		when(sysUserService.getOne(any(), eq(false))).thenReturn(created);
 		when(sysUserService.saveUser(any(UserDTO.class))).thenReturn(Boolean.TRUE);
 		SysDept deletedDept = new SysDept();
 		deletedDept.setDelFlag("1");

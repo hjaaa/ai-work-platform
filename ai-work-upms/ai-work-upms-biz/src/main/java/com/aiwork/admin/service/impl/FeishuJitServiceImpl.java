@@ -149,11 +149,13 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 		}
 
 		String phone = normalizeMobile(feishuUser.getMobile());
-		SysUser sysUser = sysUserService
-			.getOne(Wrappers.<SysUser>lambdaQuery().eq(SysUser::getPhone, phone), false);
-		if (sysUser == null) {
-			sysUser = createUser(feishuUser, phone);
+		List<SysUser> phoneMatches = sysUserService.list(Wrappers.<SysUser>lambdaQuery().eq(SysUser::getPhone, phone));
+		if (phoneMatches.size() > 1) {
+			// 手机号命中多个用户时无法判定归属,拒绝自动绑定,交人工处理
+			log.warn("feishu jit phone matches multiple users, phone: {}", DesensitizedUtil.mobilePhone(phone));
+			throw new CheckedException("feishu jit phone matches multiple users");
 		}
+		SysUser sysUser = phoneMatches.isEmpty() ? createUser(feishuUser, phone) : phoneMatches.get(0);
 
 		SysUserSocial userCondition = new SysUserSocial();
 		userCondition.setUserId(sysUser.getUserId());
