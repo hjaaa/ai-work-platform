@@ -68,8 +68,9 @@ import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import DcIcon from '@/components/DcIcon.vue'
 import { useUserStore } from '@/stores/user'
+import { collectMenuPaths } from '@/router/menuPaths'
 import { formatToday, greetingForHour } from './greeting'
-import { ACTIVITIES as activities, KPIS as kpis, MODULES as modules } from './mock'
+import { ACTIVITIES as activities, KPIS as kpis, MODULES } from './mock'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -78,6 +79,11 @@ const now = new Date()
 const greeting = greetingForHour(now.getHours())
 const today = formatToday(now)
 const pendingTaskCount = kpis.find((kpi) => kpi.label === '待处理任务')?.value ?? '0'
+// 快捷卡按当前角色的菜单授权过滤，避免出现点击后落入无匹配菜单占位页的死卡片
+const modules = computed(() => {
+  const granted = collectMenuPaths(userStore.menus)
+  return MODULES.filter((m) => granted.has(m.path))
+})
 const name = computed(
   () =>
     userStore.userInfo?.nickname ||
