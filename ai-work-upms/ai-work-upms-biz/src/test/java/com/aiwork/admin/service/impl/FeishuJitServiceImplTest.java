@@ -2,7 +2,6 @@ package com.aiwork.admin.service.impl;
 
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
-import cn.hutool.http.HttpUtil;
 import com.aiwork.admin.api.dto.FeishuUserInfo;
 import com.aiwork.admin.api.entity.SysSocialDetails;
 import com.aiwork.admin.mapper.SysDeptMapper;
@@ -16,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -60,6 +61,22 @@ class FeishuJitServiceImplTest {
 		return socialDetails;
 	}
 
+	private HttpRequest tokenRequest() {
+		HttpRequest tokenRequest = mock(HttpRequest.class);
+		when(tokenRequest.header(eq("Content-Type"), anyString())).thenReturn(tokenRequest);
+		when(tokenRequest.body(anyString())).thenReturn(tokenRequest);
+		when(tokenRequest.timeout(5000)).thenReturn(tokenRequest);
+		return tokenRequest;
+	}
+
+	private HttpRequest tokenRequest(String responseBody) {
+		HttpRequest tokenRequest = tokenRequest();
+		HttpResponse tokenResponse = mock(HttpResponse.class);
+		when(tokenRequest.execute()).thenReturn(tokenResponse);
+		when(tokenResponse.body()).thenReturn(responseBody);
+		return tokenRequest;
+	}
+
 	@Test
 	void fetchUserReturnsNullWhenSocialDetailsMissing() {
 		when(sysSocialDetailsMapper.selectOne(any())).thenReturn(null);
@@ -70,17 +87,17 @@ class FeishuJitServiceImplTest {
 	@Test
 	void fetchUserReturnsNullWhenTenantTokenFails() {
 		when(sysSocialDetailsMapper.selectOne(any())).thenReturn(feishuSocialDetails());
+		HttpRequest tokenRequest = tokenRequest("""
+			{
+				"code": 10003,
+				"msg": "invalid app_secret"
+			}
+			""");
 
-		try (MockedStatic<HttpUtil> mockedHttpUtil = mockStatic(HttpUtil.class)) {
-			mockedHttpUtil
-				.when(() -> HttpUtil.post(
-						eq("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"), anyString()))
-				.thenReturn("""
-					{
-						"code": 10003,
-						"msg": "invalid app_secret"
-					}
-					""");
+		try (MockedStatic<HttpRequest> mockedHttpRequest = mockStatic(HttpRequest.class)) {
+			mockedHttpRequest
+				.when(() -> HttpRequest.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"))
+				.thenReturn(tokenRequest);
 
 			assertNull(feishuJitService.fetchUser("ou_test"));
 		}
@@ -89,12 +106,13 @@ class FeishuJitServiceImplTest {
 	@Test
 	void fetchUserReturnsNullWhenTenantTokenRequestThrows() {
 		when(sysSocialDetailsMapper.selectOne(any())).thenReturn(feishuSocialDetails());
+		HttpRequest tokenRequest = tokenRequest();
+		when(tokenRequest.execute()).thenThrow(new IllegalStateException("request failed"));
 
-		try (MockedStatic<HttpUtil> mockedHttpUtil = mockStatic(HttpUtil.class)) {
-			mockedHttpUtil
-				.when(() -> HttpUtil.post(
-						eq("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"), anyString()))
-				.thenThrow(new IllegalStateException("request failed"));
+		try (MockedStatic<HttpRequest> mockedHttpRequest = mockStatic(HttpRequest.class)) {
+			mockedHttpRequest
+				.when(() -> HttpRequest.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"))
+				.thenReturn(tokenRequest);
 
 			assertNull(assertDoesNotThrow(() -> feishuJitService.fetchUser("ou_test")));
 		}
@@ -103,21 +121,21 @@ class FeishuJitServiceImplTest {
 	@Test
 	void fetchUserReturnsNullWhenContactRequestThrows() {
 		when(sysSocialDetailsMapper.selectOne(any())).thenReturn(feishuSocialDetails());
+		HttpRequest tokenRequest = tokenRequest("""
+			{
+				"code": 0,
+				"tenant_access_token": "t-test-token"
+			}
+			""");
 		HttpRequest userRequest = mock(HttpRequest.class);
 		when(userRequest.header(eq("Authorization"), anyString())).thenReturn(userRequest);
+		when(userRequest.timeout(5000)).thenReturn(userRequest);
 		when(userRequest.execute()).thenThrow(new IllegalStateException("request failed"));
 
-		try (MockedStatic<HttpUtil> mockedHttpUtil = mockStatic(HttpUtil.class);
-				MockedStatic<HttpRequest> mockedHttpRequest = mockStatic(HttpRequest.class)) {
-			mockedHttpUtil
-				.when(() -> HttpUtil.post(
-						eq("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"), anyString()))
-				.thenReturn("""
-					{
-						"code": 0,
-						"tenant_access_token": "t-test-token"
-					}
-					""");
+		try (MockedStatic<HttpRequest> mockedHttpRequest = mockStatic(HttpRequest.class)) {
+			mockedHttpRequest
+				.when(() -> HttpRequest.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"))
+				.thenReturn(tokenRequest);
 			mockedHttpRequest
 				.when(() -> HttpRequest.get(startsWith("https://open.feishu.cn/open-apis/contact/v3/users/")))
 				.thenReturn(userRequest);
@@ -127,15 +145,87 @@ class FeishuJitServiceImplTest {
 	}
 
 	@Test
-	void fetchUserParsesContactFieldsAndDegradesDeptOnFailure() {
+	void fetchUserAppliesTimeoutToEveryFeishuRequest() {
 		when(sysSocialDetailsMapper.selectOne(any())).thenReturn(feishuSocialDetails());
+		HttpRequest tokenRequest = mock(HttpRequest.class);
+		HttpResponse tokenResponse = mock(HttpResponse.class);
+		when(tokenRequest.header(eq("Content-Type"), anyString())).thenReturn(tokenRequest);
+		when(tokenRequest.body(anyString())).thenReturn(tokenRequest);
+		when(tokenRequest.timeout(5000)).thenReturn(tokenRequest);
+		when(tokenRequest.execute()).thenReturn(tokenResponse);
+		String tokenResponseBody = """
+			{
+				"code": 0,
+				"tenant_access_token": "t-test-token"
+			}
+			""";
+		when(tokenResponse.body()).thenReturn(tokenResponseBody);
 		HttpRequest userRequest = mock(HttpRequest.class);
 		HttpResponse userResponse = mock(HttpResponse.class);
 		when(userRequest.header(eq("Authorization"), anyString())).thenReturn(userRequest);
+		when(userRequest.timeout(5000)).thenReturn(userRequest);
+		when(userRequest.execute()).thenReturn(userResponse);
+		when(userResponse.body()).thenReturn("""
+			{
+				"code": 0,
+				"data": {
+					"user": {
+						"name": "张三",
+						"mobile": "13800138000",
+						"department_ids": ["od-child"]
+					}
+				}
+			}
+			""");
+		HttpRequest deptRequest = mock(HttpRequest.class);
+		HttpResponse deptResponse = mock(HttpResponse.class);
+		when(deptRequest.header(eq("Authorization"), anyString())).thenReturn(deptRequest);
+		when(deptRequest.timeout(5000)).thenReturn(deptRequest);
+		when(deptRequest.execute()).thenReturn(deptResponse);
+		when(deptResponse.body()).thenReturn("""
+			{
+				"code": 0,
+				"data": { "department": { "name": "后端组", "parent_department_id": "0" } }
+			}
+			""");
+
+		try (MockedStatic<HttpRequest> mockedHttpRequest = mockStatic(HttpRequest.class)) {
+			mockedHttpRequest
+				.when(() -> HttpRequest.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"))
+				.thenReturn(tokenRequest);
+			mockedHttpRequest
+				.when(() -> HttpRequest.get(startsWith("https://open.feishu.cn/open-apis/contact/v3/users/")))
+				.thenReturn(userRequest);
+			mockedHttpRequest
+				.when(() -> HttpRequest.get(startsWith("https://open.feishu.cn/open-apis/contact/v3/departments/")))
+				.thenReturn(deptRequest);
+
+			assertNotNull(feishuJitService.fetchUser("ou_test"));
+			assertAll(
+					() -> verify(tokenRequest).timeout(5000),
+					() -> verify(userRequest).timeout(5000),
+					() -> verify(deptRequest).timeout(5000));
+		}
+	}
+
+	@Test
+	void fetchUserParsesContactFieldsAndDegradesDeptOnFailure() {
+		when(sysSocialDetailsMapper.selectOne(any())).thenReturn(feishuSocialDetails());
+		HttpRequest tokenRequest = tokenRequest("""
+			{
+				"code": 0,
+				"tenant_access_token": "t-test-token"
+			}
+			""");
+		HttpRequest userRequest = mock(HttpRequest.class);
+		HttpResponse userResponse = mock(HttpResponse.class);
+		when(userRequest.header(eq("Authorization"), anyString())).thenReturn(userRequest);
+		when(userRequest.timeout(5000)).thenReturn(userRequest);
 		when(userRequest.execute()).thenReturn(userResponse);
 		HttpRequest deptRequest = mock(HttpRequest.class);
 		HttpResponse deptResponse = mock(HttpResponse.class);
 		when(deptRequest.header(eq("Authorization"), anyString())).thenReturn(deptRequest);
+		when(deptRequest.timeout(5000)).thenReturn(deptRequest);
 		when(deptRequest.execute()).thenReturn(deptResponse);
 		when(userResponse.body()).thenReturn("""
 			{
@@ -159,17 +249,10 @@ class FeishuJitServiceImplTest {
 			}
 			""");
 
-		try (MockedStatic<HttpUtil> mockedHttpUtil = mockStatic(HttpUtil.class);
-				MockedStatic<HttpRequest> mockedHttpRequest = mockStatic(HttpRequest.class)) {
-			mockedHttpUtil
-				.when(() -> HttpUtil.post(
-						eq("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"), anyString()))
-				.thenReturn("""
-					{
-						"code": 0,
-						"tenant_access_token": "t-test-token"
-					}
-					""");
+		try (MockedStatic<HttpRequest> mockedHttpRequest = mockStatic(HttpRequest.class)) {
+			mockedHttpRequest
+				.when(() -> HttpRequest.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"))
+				.thenReturn(tokenRequest);
 			mockedHttpRequest
 				.when(() -> HttpRequest.get(startsWith("https://open.feishu.cn/open-apis/contact/v3/users/")))
 				.thenReturn(userRequest);
@@ -192,9 +275,16 @@ class FeishuJitServiceImplTest {
 	@Test
 	void fetchUserWalksDeptChainParentFirst() {
 		when(sysSocialDetailsMapper.selectOne(any())).thenReturn(feishuSocialDetails());
+		HttpRequest tokenRequest = tokenRequest("""
+			{
+				"code": 0,
+				"tenant_access_token": "t-test-token"
+			}
+			""");
 		HttpRequest userRequest = mock(HttpRequest.class);
 		HttpResponse userResponse = mock(HttpResponse.class);
 		when(userRequest.header(eq("Authorization"), anyString())).thenReturn(userRequest);
+		when(userRequest.timeout(5000)).thenReturn(userRequest);
 		when(userRequest.execute()).thenReturn(userResponse);
 		when(userResponse.body()).thenReturn("""
 			{
@@ -211,6 +301,7 @@ class FeishuJitServiceImplTest {
 		HttpRequest childRequest = mock(HttpRequest.class);
 		HttpResponse childResponse = mock(HttpResponse.class);
 		when(childRequest.header(eq("Authorization"), anyString())).thenReturn(childRequest);
+		when(childRequest.timeout(5000)).thenReturn(childRequest);
 		when(childRequest.execute()).thenReturn(childResponse);
 		when(childResponse.body()).thenReturn("""
 			{
@@ -221,6 +312,7 @@ class FeishuJitServiceImplTest {
 		HttpRequest parentRequest = mock(HttpRequest.class);
 		HttpResponse parentResponse = mock(HttpResponse.class);
 		when(parentRequest.header(eq("Authorization"), anyString())).thenReturn(parentRequest);
+		when(parentRequest.timeout(5000)).thenReturn(parentRequest);
 		when(parentRequest.execute()).thenReturn(parentResponse);
 		when(parentResponse.body()).thenReturn("""
 			{
@@ -229,17 +321,10 @@ class FeishuJitServiceImplTest {
 			}
 			""");
 
-		try (MockedStatic<HttpUtil> mockedHttpUtil = mockStatic(HttpUtil.class);
-				MockedStatic<HttpRequest> mockedHttpRequest = mockStatic(HttpRequest.class)) {
-			mockedHttpUtil
-				.when(() -> HttpUtil.post(
-						eq("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"), anyString()))
-				.thenReturn("""
-					{
-						"code": 0,
-						"tenant_access_token": "t-test-token"
-					}
-					""");
+		try (MockedStatic<HttpRequest> mockedHttpRequest = mockStatic(HttpRequest.class)) {
+			mockedHttpRequest
+				.when(() -> HttpRequest.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"))
+				.thenReturn(tokenRequest);
 			mockedHttpRequest
 				.when(() -> HttpRequest.get(startsWith("https://open.feishu.cn/open-apis/contact/v3/users/")))
 				.thenReturn(userRequest);

@@ -2,7 +2,6 @@ package com.aiwork.admin.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpRequest;
-import cn.hutool.http.HttpUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -42,6 +41,8 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 	private static final String CONTACT_USER_URL = "https://open.feishu.cn/open-apis/contact/v3/users/";
 
 	private static final String CONTACT_DEPT_URL = "https://open.feishu.cn/open-apis/contact/v3/departments/";
+
+	private static final int HTTP_TIMEOUT_MILLIS = 5000;
 
 	/**
 	 * 飞书根部门 ID
@@ -83,6 +84,7 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 			String userResult = HttpRequest
 				.get(CONTACT_USER_URL + openId + "?user_id_type=open_id&department_id_type=open_department_id")
 				.header("Authorization", "Bearer " + tenantToken)
+				.timeout(HTTP_TIMEOUT_MILLIS)
 				.execute()
 				.body();
 			JSONObject userObj = JSONUtil.parseObj(userResult);
@@ -121,11 +123,15 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 
 	private String fetchTenantToken(SysSocialDetails socialDetails) {
 		try {
-			String tokenResult = HttpUtil.post(TENANT_TOKEN_URL,
-					JSONUtil.createObj()
-						.set("app_id", socialDetails.getAppId())
-						.set("app_secret", socialDetails.getAppSecret())
-						.toString());
+			String tokenResult = HttpRequest.post(TENANT_TOKEN_URL)
+				.header("Content-Type", "application/json")
+				.body(JSONUtil.createObj()
+					.set("app_id", socialDetails.getAppId())
+					.set("app_secret", socialDetails.getAppSecret())
+					.toString())
+				.timeout(HTTP_TIMEOUT_MILLIS)
+				.execute()
+				.body();
 			JSONObject tokenObj = JSONUtil.parseObj(tokenResult);
 			if (!Integer.valueOf(0).equals(tokenObj.getInt("code"))) {
 				log.warn("feishu tenant token response code invalid, code: {}", tokenObj.getInt("code"));
@@ -172,6 +178,7 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 	private FeishuDeptInfo fetchDept(String openDeptId, String tenantToken) {
 		String result = HttpRequest.get(CONTACT_DEPT_URL + openDeptId + "?department_id_type=open_department_id")
 			.header("Authorization", "Bearer " + tenantToken)
+			.timeout(HTTP_TIMEOUT_MILLIS)
 			.execute()
 			.body();
 		JSONObject obj = JSONUtil.parseObj(result);
