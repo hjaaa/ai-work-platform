@@ -13,6 +13,7 @@ import com.aiwork.admin.mapper.SysDeptMapper;
 import com.aiwork.admin.mapper.SysSocialDetailsMapper;
 import com.aiwork.admin.mapper.SysUserSocialMapper;
 import com.aiwork.admin.service.SysUserService;
+import com.aiwork.common.core.exception.CheckedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -28,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -143,9 +145,27 @@ class FeishuJitServiceImplTest {
 		verify(sysUserSocialMapper).updateById(captor.capture());
 		assertEquals(9L, captor.getValue().getId());
 		assertEquals("ou_test", captor.getValue().getIdentify());
-		assertEquals("emp_previous", captor.getValue().getTenantUserId());
+		assertEquals("emp_1001", captor.getValue().getTenantUserId());
 		verify(sysUserSocialMapper, never()).insert(any(SysUserSocial.class));
 		verify(sysUserService, never()).saveUser(any());
+	}
+
+	@Test
+	void provisionFailsWhenUsernameAlreadyExistsBeforeCreate() {
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
+		when(sysUserService.getOne(any(), eq(false))).thenReturn(null);
+		when(sysUserService.exists(any())).thenReturn(true);
+
+		assertThrows(CheckedException.class, () -> feishuJitService.provision(jitUser("13800138000")));
+
+		verify(sysUserService, never()).saveUser(any());
+	}
+
+	@Test
+	void generateRandomPasswordReturnsAlphaNumericWithFixedLength() {
+		String password = FeishuJitServiceImpl.generateRandomPassword();
+
+		assertTrue(password.matches("[A-Za-z0-9]{32}"));
 	}
 
 	@Test

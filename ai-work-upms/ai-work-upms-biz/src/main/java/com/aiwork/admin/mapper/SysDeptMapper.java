@@ -48,7 +48,8 @@ public interface SysDeptMapper extends MPJBaseMapper<SysDept> {
 	 * @param feishuDeptId 飞书 open_department_id
 	 * @return 部门映射
 	 */
-	@Select("SELECT * FROM sys_dept WHERE feishu_dept_id = #{feishuDeptId} LIMIT 1")
+	@Select("SELECT dept_id, name, sort_order, create_by, update_by, create_time, update_time, parent_id, del_flag, "
+			+ "feishu_dept_id FROM sys_dept WHERE feishu_dept_id = #{feishuDeptId} LIMIT 1")
 	SysDept selectIncludingDeletedByFeishuDeptId(@Param("feishuDeptId") String feishuDeptId);
 
 }

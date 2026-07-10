@@ -1,7 +1,7 @@
 package com.aiwork.admin.service.impl;
 
 import cn.hutool.core.collection.CollUtil;
-import cn.hutool.core.util.RandomUtil;
+import cn.hutool.core.util.DesensitizedUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.json.JSONObject;
@@ -27,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -55,6 +56,12 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 	private static final String CONTACT_DEPT_URL = "https://open.feishu.cn/open-apis/contact/v3/departments/";
 
 	private static final int HTTP_TIMEOUT_MILLIS = 5000;
+
+	private static final int RANDOM_PASSWORD_LENGTH = 32;
+
+	private static final String PASSWORD_CHARACTERS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+	private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
 	/**
 	 * 飞书根部门 ID
@@ -125,7 +132,7 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 			return info;
 		}
 		catch (Exception e) {
-			log.warn("feishu contact user request failed, exception type: {}", e.getClass().getSimpleName());
+			log.warn("feishu contact user request failed", e);
 			return null;
 		}
 	}
@@ -154,6 +161,7 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 		SysUserSocial existingBinding = sysUserSocialMapper.selectOne(new QueryWrapper<>(userCondition));
 		if (existingBinding != null) {
 			existingBinding.setIdentify(feishuUser.getOpenId());
+			existingBinding.setTenantUserId(feishuUser.getTenantUserId());
 			sysUserSocialMapper.updateById(existingBinding);
 			return Boolean.TRUE;
 		}
@@ -168,10 +176,14 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 	}
 
 	private SysUser createUser(FeishuUserInfo feishuUser, String phone) {
+		if (sysUserService.exists(Wrappers.<SysUser>lambdaQuery().eq(SysUser::getUsername, phone))) {
+			log.warn("feishu jit username already exists, phone: {}", DesensitizedUtil.mobilePhone(phone));
+			throw new CheckedException("feishu jit username already exists");
+		}
 		UserDTO userDTO = new UserDTO();
 		userDTO.setUsername(phone);
 		// 随机密码仅为满足字段必填,JIT 用户走扫码登录,需要密码时走找回密码
-		userDTO.setPassword(RandomUtil.randomString(32));
+		userDTO.setPassword(generateRandomPassword());
 		userDTO.setPhone(phone);
 		userDTO.setName(feishuUser.getName());
 		userDTO.setNickname(feishuUser.getName());
@@ -239,6 +251,14 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 		return StrUtil.removePrefix(StrUtil.trimToEmpty(mobile), "+86");
 	}
 
+	static String generateRandomPassword() {
+		StringBuilder password = new StringBuilder(RANDOM_PASSWORD_LENGTH);
+		for (int index = 0; index < RANDOM_PASSWORD_LENGTH; index++) {
+			password.append(PASSWORD_CHARACTERS.charAt(SECURE_RANDOM.nextInt(PASSWORD_CHARACTERS.length())));
+		}
+		return password.toString();
+	}
+
 	private String fetchTenantToken(SysSocialDetails socialDetails) {
 		try {
 			String tokenResult = HttpRequest.post(TENANT_TOKEN_URL)
@@ -258,7 +278,7 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 			return tokenObj.getStr("tenant_access_token");
 		}
 		catch (Exception e) {
-			log.warn("feishu tenant token request failed, exception type: {}", e.getClass().getSimpleName());
+			log.warn("feishu tenant token request failed", e);
 			return null;
 		}
 	}

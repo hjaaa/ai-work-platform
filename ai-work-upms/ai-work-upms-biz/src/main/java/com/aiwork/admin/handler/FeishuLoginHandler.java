@@ -75,7 +75,7 @@ public class FeishuLoginHandler extends AbstractUserSocialHandler {
 			return info(openId);
 		}
 		catch (Exception e) {
-			log.warn("feishu jit provision failed, exceptionType={}", e.getClass().getSimpleName());
+			log.warn("feishu jit provision failed", e);
 			return null;
 		}
 	}
