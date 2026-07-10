@@ -3,6 +3,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import Layout from '@/layout/index.vue'
 import { useUserStore } from '@/stores/user'
 import type { MenuTree } from '@/api/menu'
+import { EXCLUDED_MENU_PATHS, normalizeMenuPath } from './menuPaths'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -23,6 +24,12 @@ const router = createRouter({
           name: 'home',
           component: () => import('@/views/home/index.vue'),
         },
+        {
+          path: 'members',
+          name: 'members',
+          component: () => import('@/views/members/index.vue'),
+          meta: { title: '成员管理' },
+        },
       ],
     },
   ],
@@ -38,9 +45,9 @@ function menusToRoutes(menus: MenuTree[]): RouteRecordRaw[] {
     for (const item of items) {
       if (String(item.menuType ?? '0') === '1') continue
       if (typeof item.path === 'string' && item.path) {
-        const path = item.path.startsWith('/') ? item.path : `/${item.path}`
+        const path = normalizeMenuPath(item.path)
         const view = viewModules[`../views${path}/index.vue`]
-        if (view && path !== '/home') {
+        if (view && !EXCLUDED_MENU_PATHS.has(path)) {
           routes.push({ path, name: `menu-${String(item.id)}`, component: view })
         }
       }
@@ -73,9 +80,13 @@ router.beforeEach(async (to) => {
           router.addRoute('layout', record)
         }
       }
-      // 兜底：菜单未实现对应页面时回首页，避免空白
+      // 兜底：菜单未实现对应页面时显示占位页
       if (!router.hasRoute('not-found')) {
-        router.addRoute({ path: '/:pathMatch(.*)*', name: 'not-found', redirect: '/home' })
+        router.addRoute('layout', {
+          path: ':pathMatch(.*)*',
+          name: 'not-found',
+          component: () => import('@/views/placeholder/index.vue'),
+        })
       }
       return { ...to, replace: true }
     } catch {

@@ -27,6 +27,20 @@ describe('buildGotoUrl', () => {
   })
 })
 
+describe('resolveRedirectUri', () => {
+  it('配置了飞书回调地址时优先使用配置值', async () => {
+    const { resolveRedirectUri } = await importFresh()
+    expect(resolveRedirectUri(' http://localhost:5173/social-callback.html ')).toBe(
+      'http://localhost:5173/social-callback.html',
+    )
+  })
+
+  it('未配置飞书回调地址时使用当前页面来源', async () => {
+    const { resolveRedirectUri } = await importFresh()
+    expect(resolveRedirectUri(undefined)).toBe(`${window.location.origin}/social-callback.html`)
+  })
+})
+
 describe('createFeishuQr', () => {
   it('SDK 未加载时直接抛错', async () => {
     const { createFeishuQr } = await importFresh()
@@ -67,6 +81,19 @@ describe('parseCallbackMessage', () => {
     const { parseCallbackMessage } = await importFresh()
     const event = new MessageEvent('message', { ...VALID, origin: 'https://evil.example.com' })
     expect(parseCallbackMessage(event, 'expected')).toBeNull()
+  })
+
+  it('配置了回调来源时接受该来源消息', async () => {
+    const { parseCallbackMessage } = await importFresh()
+    const event = new MessageEvent('message', {
+      ...VALID,
+      origin: 'http://localhost:5173',
+    })
+    expect(parseCallbackMessage(event, 'expected', 'http://localhost:5173')).toEqual({
+      source: 'social-login-callback',
+      code: 'auth-code',
+      state: 'expected',
+    })
   })
 
   it('source 标记不符丢弃', async () => {

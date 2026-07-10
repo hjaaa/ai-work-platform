@@ -8,6 +8,7 @@ const loadFeishuSdk = vi.fn()
 const createFeishuQr = vi.fn()
 const buildGotoUrl = vi.fn()
 const parseCallbackMessage = vi.fn()
+const resolveRedirectUri = vi.fn()
 const randomState = vi.fn()
 
 function createDeferred<T>() {
@@ -34,6 +35,7 @@ vi.mock('@/utils/feishu', () => ({
   createFeishuQr,
   buildGotoUrl,
   parseCallbackMessage,
+  resolveRedirectUri,
   randomState,
   CALLBACK_SOURCE: 'social-login-callback',
 }))
@@ -77,22 +79,29 @@ beforeEach(async () => {
     (_appId: string, _redirectUri: string, state: string) =>
       `https://passport.feishu.cn/auth?state=${state}`,
   )
+  resolveRedirectUri.mockImplementation(
+    (redirectUri?: string) => redirectUri || `${window.location.origin}/social-callback.html`,
+  )
   createFeishuQr.mockReturnValue({
-    matchOrigin: vi.fn().mockImplementation((origin: string) => origin === 'https://passport.feishu.cn'),
+    matchOrigin: vi
+      .fn()
+      .mockImplementation((origin: string) => origin === 'https://passport.feishu.cn'),
     matchData: vi.fn().mockImplementation((data: unknown) => {
       return Boolean((data as { tmp_code?: string } | null)?.tmp_code)
     }),
   })
-  parseCallbackMessage.mockImplementation((event: MessageEvent, expectedState: string) => {
-    const data = event.data as
-      | { source?: string; code?: string; state?: string }
-      | null
-      | undefined
-    if (event.origin !== window.location.origin) return null
-    if (data?.source !== 'social-login-callback') return null
-    if (!data.code || data.state !== expectedState) return null
-    return { code: data.code, state: data.state }
-  })
+  parseCallbackMessage.mockImplementation(
+    (event: MessageEvent, expectedState: string, expectedOrigin = window.location.origin) => {
+      const data = event.data as
+        | { source?: string; code?: string; state?: string }
+        | null
+        | undefined
+      if (event.origin !== expectedOrigin) return null
+      if (data?.source !== 'social-login-callback') return null
+      if (!data.code || data.state !== expectedState) return null
+      return { code: data.code, state: data.state }
+    },
+  )
   vi.stubEnv('VITE_FEISHU_APP_ID', 'cli_test')
   cleanupMountedOverlays = []
   QrLoginOverlay = (await import('../QrLoginOverlay.vue')).default
@@ -115,6 +124,7 @@ describe('QrLoginOverlay 飞书扫码', () => {
 
     expect(loadFeishuSdk).toHaveBeenCalledOnce()
     expect(randomState).toHaveBeenCalledOnce()
+    expect(resolveRedirectUri).toHaveBeenCalledWith(undefined)
     expect(buildGotoUrl).toHaveBeenCalledWith(
       'cli_test',
       `${window.location.origin}/social-callback.html`,
@@ -126,6 +136,35 @@ describe('QrLoginOverlay 飞书扫码', () => {
       width: '300',
       height: '300',
     })
+  })
+
+  it('配置飞书回调地址时使用配置值并接收该来源回调', async () => {
+    vi.stubEnv('VITE_FEISHU_REDIRECT_URI', 'http://localhost:5173/social-callback.html')
+    const overlay = await mountOverlay()
+    cleanupMountedOverlays.push(overlay.unmount)
+
+    expect(resolveRedirectUri).toHaveBeenCalledWith('http://localhost:5173/social-callback.html')
+    expect(buildGotoUrl).toHaveBeenCalledWith(
+      'cli_test',
+      'http://localhost:5173/social-callback.html',
+      'state-123',
+    )
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: 'http://localhost:5173',
+        data: { source: 'social-login-callback', code: 'auth-code', state: 'state-123' },
+      }),
+    )
+    await Promise.resolve()
+    await nextTick()
+
+    expect(parseCallbackMessage).toHaveBeenLastCalledWith(
+      expect.any(MessageEvent),
+      'state-123',
+      'http://localhost:5173',
+    )
+    expect(socialLogin).toHaveBeenCalledWith('FEISHU', 'auth-code')
   })
 
   it('只接受合法回调消息并完成登录', async () => {

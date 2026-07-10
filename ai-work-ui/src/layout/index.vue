@@ -1,43 +1,50 @@
 <template>
-  <el-container class="h-screen">
-    <el-aside width="200px" class="border-r border-gray-200">
-      <div class="flex h-14 items-center justify-center text-lg font-bold">AI Work</div>
-      <el-menu :default-active="$route.path" router>
-        <el-menu-item index="/home">首页</el-menu-item>
-        <MenuTreeNode :menus="userStore.menus" />
-      </el-menu>
-    </el-aside>
-    <el-container>
-      <el-header class="flex items-center justify-between border-b border-gray-200">
-        <span>AI Work Platform</span>
-        <el-dropdown @command="onCommand">
-          <span class="cursor-pointer">
-            {{ userStore.userInfo?.nickname || userStore.userInfo?.username || '未登录' }}
-          </span>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="logout">退出登录</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </el-header>
-      <el-main>
+  <div class="layout">
+    <AppSidebar :collapsed="collapsed" />
+    <div class="main">
+      <AppTopbar :collapsed="collapsed" @toggle="toggle" />
+      <div class="content">
         <RouterView />
-      </el-main>
-    </el-container>
-  </el-container>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { RouterView } from 'vue-router'
-import { useUserStore } from '@/stores/user'
-import MenuTreeNode from './MenuTreeNode.vue'
+import AppSidebar from './AppSidebar.vue'
+import AppTopbar from './AppTopbar.vue'
 
-const userStore = useUserStore()
+const STORAGE_KEY = 'ai-work-sidebar-collapsed'
+const collapsed = ref(localStorage.getItem(STORAGE_KEY) === '1')
 
-function onCommand(command: string) {
-  if (command === 'logout') {
-    userStore.logout()
-  }
+function toggle() {
+  collapsed.value = !collapsed.value
+  localStorage.setItem(STORAGE_KEY, collapsed.value ? '1' : '0')
 }
 </script>
+
+<style scoped>
+.layout {
+  position: relative;
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+  background: var(--dc-canvas);
+  color: var(--dc-ink);
+}
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--dc-canvas);
+}
+.content {
+  flex: 1;
+  position: relative;
+  overflow: auto;
+  padding: 24px;
+}
+</style>
