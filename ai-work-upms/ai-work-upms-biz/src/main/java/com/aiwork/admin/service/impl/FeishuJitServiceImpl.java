@@ -75,34 +75,43 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 		if (StrUtil.isBlank(tenantToken)) {
 			return null;
 		}
+		return fetchContactUser(openId, tenantToken);
+	}
 
-		String userResult = HttpRequest
-			.get(CONTACT_USER_URL + openId + "?user_id_type=open_id&department_id_type=open_department_id")
-			.header("Authorization", "Bearer " + tenantToken)
-			.execute()
-			.body();
-		JSONObject userObj = JSONUtil.parseObj(userResult);
-		if (!Integer.valueOf(0).equals(userObj.getInt("code"))) {
-			log.warn("feishu contact user response code invalid, code: {}", userObj.getInt("code"));
+	private FeishuUserInfo fetchContactUser(String openId, String tenantToken) {
+		try {
+			String userResult = HttpRequest
+				.get(CONTACT_USER_URL + openId + "?user_id_type=open_id&department_id_type=open_department_id")
+				.header("Authorization", "Bearer " + tenantToken)
+				.execute()
+				.body();
+			JSONObject userObj = JSONUtil.parseObj(userResult);
+			if (!Integer.valueOf(0).equals(userObj.getInt("code"))) {
+				log.warn("feishu contact user response code invalid, code: {}", userObj.getInt("code"));
+				return null;
+			}
+
+			JSONObject user = userObj.getByPath("data.user", JSONObject.class);
+			if (user == null) {
+				log.warn("feishu contact user data missing");
+				return null;
+			}
+			FeishuUserInfo info = new FeishuUserInfo();
+			info.setOpenId(openId);
+			info.setName(user.getStr("name"));
+			info.setMobile(user.getStr("mobile"));
+			info.setAvatar(user.getByPath("avatar.avatar_240", String.class));
+			info.setTenantUserId(user.getStr("user_id"));
+			List<String> deptOpenIds = user.getJSONArray("department_ids") == null ? Collections.emptyList()
+					: user.getJSONArray("department_ids").toList(String.class);
+			info.setDeptOpenIds(deptOpenIds);
+			info.setDeptChain(fetchDeptChain(deptOpenIds, tenantToken));
+			return info;
+		}
+		catch (Exception e) {
+			log.warn("feishu contact user request failed, exception type: {}", e.getClass().getSimpleName());
 			return null;
 		}
-
-		JSONObject user = userObj.getByPath("data.user", JSONObject.class);
-		if (user == null) {
-			log.warn("feishu contact user data missing");
-			return null;
-		}
-		FeishuUserInfo info = new FeishuUserInfo();
-		info.setOpenId(openId);
-		info.setName(user.getStr("name"));
-		info.setMobile(user.getStr("mobile"));
-		info.setAvatar(user.getByPath("avatar.avatar_240", String.class));
-		info.setTenantUserId(user.getStr("user_id"));
-		List<String> deptOpenIds = user.getJSONArray("department_ids") == null ? Collections.emptyList()
-				: user.getJSONArray("department_ids").toList(String.class);
-		info.setDeptOpenIds(deptOpenIds);
-		info.setDeptChain(fetchDeptChain(deptOpenIds, tenantToken));
-		return info;
 	}
 
 	@Override
@@ -111,17 +120,23 @@ public class FeishuJitServiceImpl implements FeishuJitService {
 	}
 
 	private String fetchTenantToken(SysSocialDetails socialDetails) {
-		String tokenResult = HttpUtil.post(TENANT_TOKEN_URL,
-				JSONUtil.createObj()
-					.set("app_id", socialDetails.getAppId())
-					.set("app_secret", socialDetails.getAppSecret())
-					.toString());
-		JSONObject tokenObj = JSONUtil.parseObj(tokenResult);
-		if (!Integer.valueOf(0).equals(tokenObj.getInt("code"))) {
-			log.warn("feishu tenant token response code invalid, code: {}", tokenObj.getInt("code"));
+		try {
+			String tokenResult = HttpUtil.post(TENANT_TOKEN_URL,
+					JSONUtil.createObj()
+						.set("app_id", socialDetails.getAppId())
+						.set("app_secret", socialDetails.getAppSecret())
+						.toString());
+			JSONObject tokenObj = JSONUtil.parseObj(tokenResult);
+			if (!Integer.valueOf(0).equals(tokenObj.getInt("code"))) {
+				log.warn("feishu tenant token response code invalid, code: {}", tokenObj.getInt("code"));
+				return null;
+			}
+			return tokenObj.getStr("tenant_access_token");
+		}
+		catch (Exception e) {
+			log.warn("feishu tenant token request failed, exception type: {}", e.getClass().getSimpleName());
 			return null;
 		}
-		return tokenObj.getStr("tenant_access_token");
 	}
 
 	/**

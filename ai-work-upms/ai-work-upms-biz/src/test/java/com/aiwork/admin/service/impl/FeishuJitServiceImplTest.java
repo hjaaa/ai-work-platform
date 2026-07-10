@@ -17,6 +17,7 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -82,6 +83,46 @@ class FeishuJitServiceImplTest {
 					""");
 
 			assertNull(feishuJitService.fetchUser("ou_test"));
+		}
+	}
+
+	@Test
+	void fetchUserReturnsNullWhenTenantTokenRequestThrows() {
+		when(sysSocialDetailsMapper.selectOne(any())).thenReturn(feishuSocialDetails());
+
+		try (MockedStatic<HttpUtil> mockedHttpUtil = mockStatic(HttpUtil.class)) {
+			mockedHttpUtil
+				.when(() -> HttpUtil.post(
+						eq("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"), anyString()))
+				.thenThrow(new IllegalStateException("request failed"));
+
+			assertNull(assertDoesNotThrow(() -> feishuJitService.fetchUser("ou_test")));
+		}
+	}
+
+	@Test
+	void fetchUserReturnsNullWhenContactRequestThrows() {
+		when(sysSocialDetailsMapper.selectOne(any())).thenReturn(feishuSocialDetails());
+		HttpRequest userRequest = mock(HttpRequest.class);
+		when(userRequest.header(eq("Authorization"), anyString())).thenReturn(userRequest);
+		when(userRequest.execute()).thenThrow(new IllegalStateException("request failed"));
+
+		try (MockedStatic<HttpUtil> mockedHttpUtil = mockStatic(HttpUtil.class);
+				MockedStatic<HttpRequest> mockedHttpRequest = mockStatic(HttpRequest.class)) {
+			mockedHttpUtil
+				.when(() -> HttpUtil.post(
+						eq("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"), anyString()))
+				.thenReturn("""
+					{
+						"code": 0,
+						"tenant_access_token": "t-test-token"
+					}
+					""");
+			mockedHttpRequest
+				.when(() -> HttpRequest.get(startsWith("https://open.feishu.cn/open-apis/contact/v3/users/")))
+				.thenReturn(userRequest);
+
+			assertNull(assertDoesNotThrow(() -> feishuJitService.fetchUser("ou_test")));
 		}
 	}
 
