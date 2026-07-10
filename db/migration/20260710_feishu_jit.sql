@@ -1,4 +1,9 @@
 -- 飞书扫码登录 JIT 自动建号:部门映射列、平台企业内用户 ID 列、功能开关参数
+-- 适用:已用旧版 db/ai_work.sql 初始化的存量环境;新环境直接使用最新 db/ai_work.sql,无需执行本脚本
+-- 执行前请备份 ai_work 库
+
+USE `ai_work`;
+
 ALTER TABLE `sys_dept`
     ADD COLUMN `feishu_dept_id` varchar(64) DEFAULT NULL COMMENT '飞书 open_department_id 映射',
     ADD UNIQUE INDEX `uk_feishu_dept_id` (`feishu_dept_id`);
