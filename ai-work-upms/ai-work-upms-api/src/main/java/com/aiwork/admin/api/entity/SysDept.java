@@ -102,4 +102,10 @@ public class SysDept extends Model<SysDept> {
 	@TableField(fill = FieldFill.INSERT)
 	private String delFlag;
 
+	/**
+	 * 飞书 open_department_id 映射
+	 */
+	@Schema(description = "飞书 open_department_id 映射")
+	private String feishuDeptId;
+
 }

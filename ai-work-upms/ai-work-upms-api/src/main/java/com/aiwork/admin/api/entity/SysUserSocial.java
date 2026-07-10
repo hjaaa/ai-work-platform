@@ -51,6 +51,12 @@ public class SysUserSocial extends Model<SysUserSocial> {
 	private String identify;
 
 	/**
+	 * 用户在该社交平台企业内的ID(如飞书user_id)
+	 */
+	@Schema(description = "用户在该社交平台企业内的ID")
+	private String tenantUserId;
+
+	/**
 	 * 创建人
 	 */
 	@TableField(fill = FieldFill.INSERT)

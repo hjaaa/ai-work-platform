@@ -8,14 +8,19 @@ import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.hutool.http.HttpUtil;
 import cn.hutool.json.JSONUtil;
+import com.aiwork.admin.api.dto.FeishuUserInfo;
 import com.aiwork.admin.api.dto.UserDTO;
+import com.aiwork.admin.api.dto.UserInfo;
 import com.aiwork.admin.api.entity.SysSocialDetails;
 import com.aiwork.admin.api.entity.SysUser;
 import com.aiwork.admin.api.entity.SysUserSocial;
 import com.aiwork.admin.mapper.SysSocialDetailsMapper;
 import com.aiwork.admin.mapper.SysUserSocialMapper;
+import com.aiwork.admin.service.FeishuJitService;
 import com.aiwork.admin.service.SysUserService;
 import com.aiwork.common.core.exception.CheckedException;
+import com.aiwork.common.core.util.R;
+import com.aiwork.common.data.resolver.ParamResolver;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -58,8 +63,11 @@ class FeishuLoginHandlerTest {
 	@Mock
 	private SysSocialDetailsMapper sysSocialDetailsMapper;
 
+	@Mock
+	private FeishuJitService feishuJitService;
+
 	private FeishuLoginHandler newHandler() {
-		return new FeishuLoginHandler(sysUserService, sysUserSocialMapper, sysSocialDetailsMapper) {
+		return new FeishuLoginHandler(sysUserService, sysUserSocialMapper, sysSocialDetailsMapper, feishuJitService) {
 			@Override
 			protected CheckedException bindFailed() {
 				return new CheckedException("feishu bind failed");
@@ -68,6 +76,18 @@ class FeishuLoginHandlerTest {
 			@Override
 			protected CheckedException socialAlreadyBound() {
 				return new CheckedException("social already bound");
+			}
+		};
+	}
+
+	/**
+	 * 固定 identify 返回值,隔离 HTTP 链路,专测 handle 的 JIT 分支
+	 */
+	private FeishuLoginHandler newHandlerWithIdentify(String openId) {
+		return new FeishuLoginHandler(sysUserService, sysUserSocialMapper, sysSocialDetailsMapper, feishuJitService) {
+			@Override
+			public String identify(String code) {
+				return openId;
 			}
 		};
 	}
@@ -100,6 +120,70 @@ class FeishuLoginHandlerTest {
 
 		assertNull(newHandler().info("feishu-open-id"));
 		verify(sysUserService, never()).getUserInfo(any(UserDTO.class));
+	}
+
+	@Test
+	void handleSkipsJitWhenSwitchDisabled() {
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
+
+		try (MockedStatic<ParamResolver> mockedParam = mockStatic(ParamResolver.class)) {
+			mockedParam.when(() -> ParamResolver.getStr(eq("FEISHU_JIT_ENABLE"), anyString())).thenReturn("0");
+
+			assertNull(newHandlerWithIdentify("ou_test").handle("test-code"));
+			verify(feishuJitService, never()).fetchUser(anyString());
+		}
+	}
+
+	@Test
+	void handleReturnsNullWhenMobileMissing() {
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
+		FeishuUserInfo incomplete = new FeishuUserInfo();
+		incomplete.setOpenId("ou_test");
+		when(feishuJitService.fetchUser("ou_test")).thenReturn(incomplete);
+
+		try (MockedStatic<ParamResolver> mockedParam = mockStatic(ParamResolver.class)) {
+			mockedParam.when(() -> ParamResolver.getStr(eq("FEISHU_JIT_ENABLE"), anyString())).thenReturn("1");
+
+			assertNull(newHandlerWithIdentify("ou_test").handle("test-code"));
+			verify(feishuJitService, never()).provision(any());
+		}
+	}
+
+	@Test
+	void handleProvisionsAndLoginsWhenJitEnabled() {
+		// info 第一次查绑定:无;provision 后第二次:有
+		SysUserSocial binding = new SysUserSocial();
+		binding.setUserId(7L);
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(null, binding);
+		FeishuUserInfo feishuUser = new FeishuUserInfo();
+		feishuUser.setOpenId("ou_test");
+		feishuUser.setMobile("13800138000");
+		when(feishuJitService.fetchUser("ou_test")).thenReturn(feishuUser);
+		when(feishuJitService.provision(feishuUser)).thenReturn(Boolean.TRUE);
+		UserInfo userInfo = new UserInfo();
+		when(sysUserService.getUserInfo(any(UserDTO.class))).thenReturn(R.ok(userInfo));
+
+		try (MockedStatic<ParamResolver> mockedParam = mockStatic(ParamResolver.class)) {
+			mockedParam.when(() -> ParamResolver.getStr(eq("FEISHU_JIT_ENABLE"), anyString())).thenReturn("1");
+
+			assertEquals(userInfo, newHandlerWithIdentify("ou_test").handle("test-code"));
+		}
+	}
+
+	@Test
+	void handleReturnsNullWhenProvisionThrows() {
+		when(sysUserSocialMapper.selectOne(any())).thenReturn(null);
+		FeishuUserInfo feishuUser = new FeishuUserInfo();
+		feishuUser.setOpenId("ou_test");
+		feishuUser.setMobile("13800138000");
+		when(feishuJitService.fetchUser("ou_test")).thenReturn(feishuUser);
+		when(feishuJitService.provision(feishuUser)).thenThrow(new RuntimeException("db error"));
+
+		try (MockedStatic<ParamResolver> mockedParam = mockStatic(ParamResolver.class)) {
+			mockedParam.when(() -> ParamResolver.getStr(eq("FEISHU_JIT_ENABLE"), anyString())).thenReturn("1");
+
+			assertNull(newHandlerWithIdentify("ou_test").handle("test-code"));
+		}
 	}
 
 	@Test
