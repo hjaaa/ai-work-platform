@@ -715,7 +715,7 @@ INSERT INTO `sys_public_param` VALUES (27, '密码过期天数', 'PASSWORD_EXPIR
 INSERT INTO `sys_public_param` VALUES (28, '登录失败锁定次数', 'LOGIN_ERROR_TIMES', '5', '0', NULL, 'admin', 'admin', '2026-03-28 00:00:00', NULL, '2', '0', '0');
 INSERT INTO `sys_public_param` VALUES (29, '密码规则预设', 'SITE_PASSWORD_RULE', 'letterNumber', '0', NULL, 'admin', 'admin', '2026-03-28 00:00:00', NULL, '2', '1', '0');
 INSERT INTO `sys_public_param` VALUES (30, '验证码触发失败次数', 'CAPTCHA_ERROR_TIMES', '3', '0', NULL, 'admin', 'admin', '2026-07-05 00:00:00', NULL, '2', '0', '0');
-INSERT INTO `sys_public_param` VALUES (31, '飞书扫码自动建号开关', 'FEISHU_JIT_ENABLE', '1', '0', NULL, 'admin', 'admin', '2026-07-10 00:00:00', NULL, '2', '1', '0');
+INSERT INTO `sys_public_param` VALUES (31, '飞书扫码自动建号开关', 'FEISHU_JIT_ENABLE', '1', '0', NULL, 'admin', 'admin', '2026-07-10 00:00:00', NULL, '2', '0', '0');
 COMMIT;
 
 -- ----------------------------
