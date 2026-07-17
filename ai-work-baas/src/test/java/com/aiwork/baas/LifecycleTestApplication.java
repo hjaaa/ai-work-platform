@@ -19,6 +19,8 @@
 
 package com.aiwork.baas;
 
+import com.aiwork.baas.security.CurrentUserProvider;
+import com.aiwork.baas.security.TestCurrentUserProvider;
 import com.aiwork.baas.security.crypto.BaasCryptoService;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -41,6 +43,11 @@ public class LifecycleTestApplication {
     @Bean
     public BaasCryptoService baasCryptoService() {
         return new BaasCryptoService(Map.of("k1", Base64.getEncoder().encodeToString(new byte[32])), "k1");
+    }
+
+    @Bean
+    public CurrentUserProvider currentUserProvider() {
+        return new TestCurrentUserProvider();
     }
 
 }
