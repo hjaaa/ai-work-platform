@@ -1,7 +1,7 @@
 # BaaS 核心 MVP 设计(ai-work-baas)
 
 - 日期:2026-07-17
-- 状态:v4,已按三轮评审意见修订(修订记录见文末)
+- 状态:v5,已按四轮评审意见修订(修订记录见文末)
 - 范围:「MySQL 版 BaaS 平台」首个子项目(核心 MVP,定位内部 Alpha)的设计文档,同时记录三个子项目的总体开发顺序决策
 
 ## 1. 背景与目标
@@ -89,7 +89,7 @@ Cloud 网关会剥掉外部路径第一段(AiWorkRequestGlobalFilter 重写 Stri
 | 表 | 内容 |
 |---|---|
 | `baas_project` | `project_ref`(短标识,入 URL,**不作为授权凭据**)、`db_name`、**状态机字段**(见 9.1)、`owner_user_id`(平台用户,Studio 归属校验依据)、`allowed_origins`(JSON,CORS 白名单)、runtime 账号名及**加密**凭据。不存任何明文 key |
-| `baas_jwt_key` | 项目 JWT 签名密钥:HS256 secret **加密存储**、`kid`、状态(current/previous/revoked)、previous 带 `valid_until`(= 轮换时刻 + access TTL)。**常规轮换**在存在未过期 previous 时拒绝;**紧急轮换**(当前 key 疑似泄露)允许先撤销 previous 再立即轮换,代价是部分现存 access token 立即失效 |
+| `baas_jwt_key` | 项目 JWT 签名密钥:HS256 secret **加密存储**、`kid`、状态(current/previous/revoked)、previous 带 `valid_until`(= 轮换时刻 + access TTL)。**常规轮换**在存在未过期 previous 时拒绝;**紧急轮换**(current key 疑似泄露)为独立状态转换:撤销**全部 current 与 previous** → 直接生成新 current,**不保留 previous**。所有旧 access JWT 立即失效(预期代价);`_sessions` 与 refresh token 不撤销,合法客户端凭 refresh token 换取新 key 签发的 access JWT;操作记高等级审计日志 |
 | `baas_api_key` | API Key:project_id、类型(publishable/secret)、**key 哈希**、明文前缀(展示用,如 `pub_a1b2…`)、状态、创建/吊销/最后使用时间。支持同类型多 key 无停机轮换 |
 | `baas_table` | 表元数据:project_id、table_name、注释、状态、`owner_column`(可空,行归属列名,见 8.3) |
 | `baas_column` | 列元数据:类型、长度、可空、默认值、主键/自增/唯一/单列索引、注释 |
@@ -151,12 +151,14 @@ PUT  /auth/v1/user/password                   修改密码:成功后撤销该用
 ```
 /studio/projects                     GET 列表 / POST 创建
 /studio/projects/{ref}               GET 详情(含状态) / PATCH 更新(含 allowed_origins) / DELETE 删除(状态机驱动)
-/studio/projects/{ref}/tables        GET / POST / PATCH / DELETE(建改删表,附操作 ID 幂等)
-/studio/projects/{ref}/tables/{t}/acl    GET / PUT 表级 ACL 与 owner_column 配置
-/studio/projects/{ref}/keys          GET / POST 创建 / POST {id}/revoke 吊销
-/studio/projects/{ref}/jwt-keys      POST rotate 轮换签名密钥
-/studio/projects/{ref}/users         GET / DELETE 终端用户管理
-/studio/projects/{ref}/reconcile     POST 触发表结构对账
+/studio/projects/{ref}/tables              GET 列表 / POST 建表(附操作 ID 幂等)
+/studio/projects/{ref}/tables/{table}      GET 详情 / PATCH 改表 / DELETE 删表(附操作 ID 幂等)
+/studio/projects/{ref}/tables/{table}/acl  GET / PUT 表级 ACL 与 owner_column 配置
+/studio/projects/{ref}/keys                GET / POST 创建 / POST {id}/revoke 吊销
+/studio/projects/{ref}/jwt-keys            POST rotate 常规轮换 / POST emergency-rotate 紧急轮换
+/studio/projects/{ref}/users               GET 终端用户列表
+/studio/projects/{ref}/users/{userId}      DELETE 删除终端用户
+/studio/projects/{ref}/reconcile           POST 触发表结构对账
 ```
 
 管理面沿用平台 `R<T>` 响应与 springdoc 文档;数据面提供**静态** OpenAPI(描述查询语法契约,不做 per-project 动态反射)。项目 CORS 白名单(`allowed_origins`)通过 `PATCH /studio/projects/{ref}` 配置。
@@ -261,7 +263,7 @@ PROVISIONING → ACTIVE → DELETING → DELETED
 - BaaS 的 JWT secret、数据库凭据、refresh 重放密文等一律使用 **BaaS 专用加密器**,算法 AES-256-GCM(随机 IV),AAD 绑定 `project_id + 字段类型 + 记录 ID`,防密文跨记录替换
 - 主密钥只能来自**环境变量或部署 Secret**,不得入库、入 Nacos 配置中心或提交 Git;未配置主密钥时 BaaS 模块启动失败(fail-fast),不回退到默认 Jasypt
 - 密文格式 `v1:{keyId}:{base64(iv|ciphertext|tag)}`,预留主密钥轮换(新密钥写入用新 keyId,读取按前缀路由)
-- **API Key 不走 AES 加密**:opaque key 本身为高熵随机串(≥256 bit),存储用 SHA-256(或 HMAC-SHA-256)摘要即可,无需加盐;比较采用常量时间算法
+- **API Key 不走 AES 加密**:opaque key 本身为高熵随机串(≥256 bit),存储固定用 **SHA-256** 摘要(高熵输入下无需加盐或 pepper,也就无额外密钥生命周期负担);比较采用常量时间算法
 
 ### 12.2 通用防线
 
@@ -293,7 +295,7 @@ PROVISIONING → ACTIVE → DELETING → DELETED
 
 - **单元测试**(回归主防线):查询语法解析器、SQL 构建器、角色/ACL/owner 策略解析、JWT 与 key 校验
 - **集成测试**:Testcontainers 真 MySQL,覆盖「建项目状态机 → 建表 → CRUD 各操作符与语义细则 → signup/login/refresh/logout → ACL 与 owner 策略拦截 → key 吊销生效」全链路
-- **安全场景必测**:owner 伪造/转移(各角色 × INSERT/PATCH 携带 owner 列)、URL/apikey/JWT 三项目标识不一致、secret key 携带 JWT、Studio 跨项目越权(IDOR,替换 `{ref}`)、并发 refresh(grace 窗口内/外)、连续 JWT 轮换、软删除后对账不复活、Cloud 与 Boot 两种形态的鉴权链各自生效
+- **安全场景必测**:owner 伪造/转移(各角色 × INSERT/PATCH 携带 owner 列)、URL/apikey/JWT 三项目标识不一致、secret key 携带 JWT、Studio 跨项目越权(IDOR,替换 `{ref}`)、并发 refresh(grace 窗口内/外)、连续 JWT 轮换、**紧急轮换后原 current 与 previous 签发的 JWT 均立即 401 且 refresh token 仍可换新**、软删除后对账不复活、Cloud 与 Boot 两种形态的鉴权链各自生效
 - **交付物**:数据面静态 OpenAPI + 管理面 springdoc 文档,后续 MCP 插件以 7.3 为契约
 
 ## 15. 明确不进 MVP 的范围
@@ -309,6 +311,7 @@ PROVISIONING → ACTIVE → DELETING → DELETED
 
 ## 16. 修订记录
 
+- **v5(2026-07-17)**:按第四轮评审修订。P0——JWT 紧急轮换改为独立状态转换:撤销全部 current 与 previous、生成新 current 且不保留 previous(原方案会让已泄露的 current 降级为 previous 继续被信任一个 access TTL);明确旧 access JWT 立即失效为预期代价、会话与 refresh token 不撤销、记高等级审计日志,§14 增加对应测试项。契约清理——表/用户管理路由改为集合/单资源标准形式,jwt-keys 补 emergency-rotate 端点(§7.3);API Key 摘要固定为 SHA-256,不再留 HMAC 选项(§12.1)。
 - **v4(2026-07-17)**:按第三轮评审修订。P0——refresh reuse grace 与哈希存储的矛盾:采用同事务数据库方案,`_refresh_tokens` 增加 `consumed_at / replacement_token_id / reuse_grace_until / replay_payload_ciphertext`,首次刷新在行锁事务内轮换并保存 AES-GCM 加密的完整响应(AAD 绑定 project+session+token),grace 内重放解密返回同一响应,超窗撤销会话,grace 后清除密文;同步修正 7.2 接口摘要与 grace 规则的措辞冲突。P1——Studio 项目路由改为集合/单资源标准形式并补 PATCH(§7.3);anon 在 owner 表上的读写统一追加 `owner IS NULL`,开启 anon.insert 时校验 owner 列可空(§8.3);JWT sub 明确为 bigint 十进制字符串并严格解析(§7.2);JWT Key 增加紧急轮换语义(§6.1);密文格式落为 `v1:{keyId}:{base64(iv|ciphertext|tag)}` + AAD 约定,API Key 改为 SHA-256/HMAC 摘要 + 常量时间比较、不走 AES(§12.1);CORS 预检由 CORS Filter 在 ApiKeyAuthFilter 之前仅查元数据处理,`*` 时 allowCredentials=false(§12.2);项目创建先落 PROVISIONING 记录再产生外部副作用(§9.1)。
 - **v3(2026-07-17)**:按复审意见修订,4 项安全 P0——① owner 策略补全写路径:角色 × 操作完整规则表(anon/authenticated 携带 owner 列一律 400,仅 service_role 可指定/修改 owner),owner 列强制 bigint + 单列索引(§8.3);② URL/apikey/JWT 三方项目一致性强制校验,不一致 401,校验通过前不选择数据源;secret key 与终端用户 JWT 互斥(§7.4);③ Studio 项目级对象授权:owner_user_id 归属校验、列表过滤、ROLE_BAAS_ADMIN 跨项目、project_ref 不作为授权凭据(§7.3);④ 密钥加密基线:BaaS 专用 AES-256-GCM 加密器,主密钥仅环境变量/Secret,fail-fast,密文带版本前缀,明确不继承默认 Jasypt(§12.1)。P1——refresh 并发 grace 窗口与事务行锁(§7.2)、JWT previous key valid_until 与轮换限制(§6.1)、对账跳过 tombstone/延迟 DROP 期间禁止重建同名(§9.3/9.4)、allowed_origins 数据模型与配置接口(§6.1/§7.3)、邮箱规范化与 bcrypt 长度边界(§7.2)、日志改结构化脱敏(§11)、安全场景测试清单(§14)。
 - **v2(2026-07-17)**:按评审意见修订——① owner 列策略进 MVP(8.3);② 补完整会话模型:_sessions/_refresh_tokens、refresh 轮换、logout、改密撤销、JWT claims 约束(7.2);③ API Key 改 opaque publishable/secret + baas_api_key 哈希多 key 轮换,JWT 签名密钥独立并支持 kid 双版本(6.1、8.1);④ 补项目/DDL 状态机、操作日志、串行锁、幂等、删除阻断流程、对账边界(第 9 节);⑤ 拆分 Provisioner/Runtime 账号、凭据加密、隔离能力如实声明、专用 ProjectDataSourceRegistry(第 10 节);⑥ 明确 Cloud/Boot 双形态入口契约与 base_url 约定(第 5 节);⑦ P1:REST 语义细则、资源限制、表编辑器能力边界、管理面 API 契约、CORS/防暴力/审计、范围外清单扩充。
