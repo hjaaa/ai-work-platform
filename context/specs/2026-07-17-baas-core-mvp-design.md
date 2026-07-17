@@ -1,7 +1,7 @@
 # BaaS 核心 MVP 设计(ai-work-baas)
 
 - 日期:2026-07-17
-- 状态:v5,已按四轮评审意见修订(修订记录见文末)
+- 状态:v6,已按四轮评审意见修订,并附实施规划与会话交接(§16)
 - 范围:「MySQL 版 BaaS 平台」首个子项目(核心 MVP,定位内部 Alpha)的设计文档,同时记录三个子项目的总体开发顺序决策
 
 ## 1. 背景与目标
@@ -309,8 +309,41 @@ PROVISIONING → ACTIVE → DELETING → DELETED
 - 多租户资源配额与计量计费(对外时再做)
 - 每项目独立 MySQL 实例(预留演进)
 
-## 16. 修订记录
+## 16. 实施规划与会话交接
 
+本节供后续会话(全新上下文)接手时定位进度与方法。
+
+### 16.1 计划拆分
+
+BaaS 核心 MVP 拆为 5 份实施计划,每份独立产出可运行、可测试的软件,按依赖顺序执行:
+
+| 计划 | 范围 | 对应 spec 章节 | 依赖 | 状态(2026-07-17) |
+|---|---|---|---|---|
+| **A 项目底座与生命周期** | 模块骨架(`ai-work-baas`,端口 4010)、元数据库、AES-GCM 加密器、API Key 体系、项目状态机与延迟清理、项目连接池注册表、Studio 项目管理 API(含 IDOR 防护) | §4、§6、§8.1、§9.1/9.3、§10、§12.1 | — | 计划已写至 v5,经五轮评审,待最终复审后执行 |
+| **B 表管理与 DDL** | 建/改/删表(元数据 + 真实 DDL)、Redis 串行锁 + 操作 ID 幂等(`baas_ddl_log`)、表级 ACL 与 owner 列配置(bigint 校验/自动建索引/anon.insert 要求可空)、软删 tombstone 与同名禁重建、`information_schema` 对账 | §8.2/8.3(配置面)、§9.2/9.4、§13(表编辑器边界) | A | 未写 |
+| **C 数据面 REST** | PostgREST 风格解析器与 SQL 构建器、`/rest/v1/{table}` 动态 CRUD 语义细则、ApiKeyAuthFilter + URL/apikey/JWT 三方一致性、owner 行策略注入、CORS Filter(先于鉴权、仅查元数据)、错误体映射、资源限制、Cloud/Boot 双形态入口落地、数据面静态 OpenAPI | §5、§7.1/7.4、§8.2/8.3(执行面)、§11、§12.2、§13 | A、B | 未写 |
+| **D 终端用户 Auth** | `/auth/v1/*`:signup/login、`_sessions`/`_refresh_tokens`、refresh 行锁事务 + 10 秒 grace 加密重放、logout/改密撤销会话、JWT 签发验签(kid 双版本)、常规/紧急轮换端点、防暴力限速 | §7.2、§6.1/6.2、§12.2 | A、C | 未写 |
+| **E Studio 前端** | ai-work-ui 的 BaaS 控制台:项目列表/详情、可视化表编辑器、ACL 与 owner 配置、API Key 管理(明文仅显示一次),遵循 ai-work-ui/DESIGN.md | §7.3 的界面化 | A、B(可与 C/D 并行) | 未写 |
+
+MVP 之后(各自另行「设计 → 计划」,不属于上述 5 份):插件市场 MVP → MCP 插件(以 §7.3 管理面 API 为契约,作为市场首个插件)→ Storage → Realtime → Functions(见 §2)。
+
+### 16.2 接手方法
+
+1. **计划文档位置**:`docs/superpowers/plans/`(该目录被 .gitignore 忽略,仅本机保留;Plan A 为 `2026-07-17-baas-plan-a-foundation.md`)。若文件缺失,以本 spec 为准用 superpowers:writing-plans 重写。
+2. **计划编写标准**(Plan A 五轮评审形成,后续计划直接沿用):无占位符;逐任务给出完整可编译的实现与测试代码(含 package/import);每步带确切验证命令与预期输出;资源文件用确定命令生成;测试类 `*Test` 命名,定向运行加 `-Dsurefire.failIfNoSpecifiedTests=false`。**写 Plan B~E 之前必须先读已合入的实际代码,不得凭 spec 推测接口。**
+3. **流程**:writing-plans 写计划 → 需求方评审(通常多轮,逐条核实后修订)→ 通过后以 subagent-driven-development(推荐)或 executing-plans 执行;实现代码从 develop 新开 feature 分支(如 `feat/baas-foundation`),spec 修订在 docs 分支(当前 `docs/baas-core-mvp-design`)。
+4. **已确认的工程事实**(写计划时直接采用):
+   - upms 占端口 4000,`ai-work-baas` 用 **4010**
+   - Spring Boot 4.0.7 受管 **Testcontainers 2.x**:依赖 `testcontainers-mysql` / `testcontainers-junit-jupiter`,类为 `org.testcontainers.mysql.MySQLContainer` 且无泛型
+   - `SecurityUtils.getRoleIds()` 把 `ROLE_` 后缀 `Long.parseLong`,字符串角色不可用;BaaS 管理员判定用 upms 权限码 `baas_admin` 的 authority 字符串直查
+   - 仓库默认 Jasypt(PBEWithMD5AndDES + dev 根密码明文)不得用于 BaaS 密钥(§12.1);主密钥只经 `System.getenv`
+   - 已确认 `R.ok()` / `R.ok(T)` / `R.failed(String)` 存在,`AiWorkUser.getId()` 返回 `Long`
+   - dynamic-datasource 的 Header/Session 解析链不可用于数据面(§4);BaaS 用自研 ProjectDataSourceRegistry
+   - gateway 全局过滤器剥掉外部路径第一段;boot 形态 context-path `/admin` 且无网关(§5)
+
+## 17. 修订记录
+
+- **v6(2026-07-17)**:新增 §16「实施规划与会话交接」——BaaS 核心 MVP 的 5 份实施计划拆分(A 底座/B 表管理/C 数据面/D Auth/E 前端)及依赖与状态、后续会话接手方法、计划编写标准、已确认工程事实清单;原修订记录顺延为 §17。规划性变更,不改动任何功能设计。
 - **v5(2026-07-17)**:按第四轮评审修订。P0——JWT 紧急轮换改为独立状态转换:撤销全部 current 与 previous、生成新 current 且不保留 previous(原方案会让已泄露的 current 降级为 previous 继续被信任一个 access TTL);明确旧 access JWT 立即失效为预期代价、会话与 refresh token 不撤销、记高等级审计日志,§14 增加对应测试项。契约清理——表/用户管理路由改为集合/单资源标准形式,jwt-keys 补 emergency-rotate 端点(§7.3);API Key 摘要固定为 SHA-256,不再留 HMAC 选项(§12.1)。
 - **v4(2026-07-17)**:按第三轮评审修订。P0——refresh reuse grace 与哈希存储的矛盾:采用同事务数据库方案,`_refresh_tokens` 增加 `consumed_at / replacement_token_id / reuse_grace_until / replay_payload_ciphertext`,首次刷新在行锁事务内轮换并保存 AES-GCM 加密的完整响应(AAD 绑定 project+session+token),grace 内重放解密返回同一响应,超窗撤销会话,grace 后清除密文;同步修正 7.2 接口摘要与 grace 规则的措辞冲突。P1——Studio 项目路由改为集合/单资源标准形式并补 PATCH(§7.3);anon 在 owner 表上的读写统一追加 `owner IS NULL`,开启 anon.insert 时校验 owner 列可空(§8.3);JWT sub 明确为 bigint 十进制字符串并严格解析(§7.2);JWT Key 增加紧急轮换语义(§6.1);密文格式落为 `v1:{keyId}:{base64(iv|ciphertext|tag)}` + AAD 约定,API Key 改为 SHA-256/HMAC 摘要 + 常量时间比较、不走 AES(§12.1);CORS 预检由 CORS Filter 在 ApiKeyAuthFilter 之前仅查元数据处理,`*` 时 allowCredentials=false(§12.2);项目创建先落 PROVISIONING 记录再产生外部副作用(§9.1)。
 - **v3(2026-07-17)**:按复审意见修订,4 项安全 P0——① owner 策略补全写路径:角色 × 操作完整规则表(anon/authenticated 携带 owner 列一律 400,仅 service_role 可指定/修改 owner),owner 列强制 bigint + 单列索引(§8.3);② URL/apikey/JWT 三方项目一致性强制校验,不一致 401,校验通过前不选择数据源;secret key 与终端用户 JWT 互斥(§7.4);③ Studio 项目级对象授权:owner_user_id 归属校验、列表过滤、ROLE_BAAS_ADMIN 跨项目、project_ref 不作为授权凭据(§7.3);④ 密钥加密基线:BaaS 专用 AES-256-GCM 加密器,主密钥仅环境变量/Secret,fail-fast,密文带版本前缀,明确不继承默认 Jasypt(§12.1)。P1——refresh 并发 grace 窗口与事务行锁(§7.2)、JWT previous key valid_until 与轮换限制(§6.1)、对账跳过 tombstone/延迟 DROP 期间禁止重建同名(§9.3/9.4)、allowed_origins 数据模型与配置接口(§6.1/§7.3)、邮箱规范化与 bcrypt 长度边界(§7.2)、日志改结构化脱敏(§11)、安全场景测试清单(§14)。
