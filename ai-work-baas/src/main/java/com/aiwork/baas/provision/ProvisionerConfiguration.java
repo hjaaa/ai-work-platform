@@ -19,13 +19,10 @@
 
 package com.aiwork.baas.provision;
 
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-
-import javax.sql.DataSource;
 
 /**
  * Provisioner 高权限账号数据源，仅管理面生命周期操作使用，
@@ -39,18 +36,13 @@ public class ProvisionerConfiguration {
 
     private static final String MYSQL_DRIVER_CLASS_NAME = "com.mysql.cj.jdbc.Driver";
 
-    @Bean("provisionerDataSource")
-    public DataSource provisionerDataSource(@Value("${baas.provisioner.url}") String url,
+    @Bean
+    public ProjectProvisioner projectProvisioner(@Value("${baas.provisioner.url}") String url,
             @Value("${baas.provisioner.username}") String username,
             @Value("${baas.provisioner.password}") String password) {
         DriverManagerDataSource dataSource = new DriverManagerDataSource(url, username, password);
         dataSource.setDriverClassName(MYSQL_DRIVER_CLASS_NAME);
-        return dataSource;
-    }
-
-    @Bean
-    public ProjectProvisioner projectProvisioner(@Qualifier("provisionerDataSource") DataSource provisionerDataSource) {
-        return new ProjectProvisioner(provisionerDataSource);
+        return new ProjectProvisioner(dataSource);
     }
 
 }
