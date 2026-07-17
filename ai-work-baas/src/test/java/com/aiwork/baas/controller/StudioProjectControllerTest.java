@@ -41,6 +41,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -144,6 +145,104 @@ class StudioProjectControllerTest {
         mockMvc.perform(get("/studio/projects/foreignref0000000000"))
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.code").value(1))
+            .andExpect(jsonPath("$.msg").value("项目不存在或无权访问"))
+            .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void validationFailureReturns400AsR() throws Exception {
+        mockMvc.perform(post("/studio/projects").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"name\":\" \"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(1))
+            .andExpect(jsonPath("$.msg").value("请求参数校验失败"))
+            .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void pathVariableTypeMismatchReturns400AsR() throws Exception {
+        mockMvc.perform(post("/studio/projects/" + PROJECT_REF + "/keys/not-a-number/revoke"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(1))
+            .andExpect(jsonPath("$.msg").value("请求参数格式错误"))
+            .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void malformedJsonReturns400AsR() throws Exception {
+        mockMvc.perform(post("/studio/projects").contentType(MediaType.APPLICATION_JSON).content("{"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(1))
+            .andExpect(jsonPath("$.msg").value("请求体格式错误"))
+            .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void invalidEnumReturns400AsR() throws Exception {
+        mockMvc.perform(post("/studio/projects/" + PROJECT_REF + "/keys")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"keyType\":\"ROOT\"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(1))
+            .andExpect(jsonPath("$.msg").value("请求体格式错误"))
+            .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void illegalArgumentReturns400AsR() throws Exception {
+        when(accessService.requireOwned(PROJECT_REF)).thenReturn(project(10L, PROJECT_REF, 1L));
+        doThrow(new IllegalArgumentException("internal validation detail"))
+            .when(keyService)
+            .updateAllowedOrigins(10L, List.of("https://a.com"));
+
+        mockMvc.perform(patch("/studio/projects/" + PROJECT_REF).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"allowedOrigins\":[\"https://a.com\"]}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value(1))
+            .andExpect(jsonPath("$.msg").value("请求参数不合法"))
+            .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void lifecycleStateConflictReturns409AsR() throws Exception {
+        when(accessService.requireOwned(PROJECT_REF)).thenReturn(project(10L, PROJECT_REF, 1L));
+        doThrow(new IllegalStateException("project not deletable or concurrent state change"))
+            .when(lifecycleService)
+            .deleteProject(10L, 1L);
+
+        mockMvc.perform(delete("/studio/projects/" + PROJECT_REF))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value(1))
+            .andExpect(jsonPath("$.msg").value("当前项目状态不允许执行该操作"))
+            .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void keyStateConflictReturns409AsR() throws Exception {
+        when(accessService.requireOwned(PROJECT_REF)).thenReturn(project(10L, PROJECT_REF, 1L));
+        when(keyService.createKey(10L, KeyType.PUBLISHABLE, 1L))
+            .thenThrow(new IllegalStateException("project key operation cannot run within an active transaction"));
+
+        mockMvc.perform(post("/studio/projects/" + PROJECT_REF + "/keys")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"keyType\":\"PUBLISHABLE\"}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value(1))
+            .andExpect(jsonPath("$.msg").value("当前项目状态不允许执行该操作"))
+            .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void unexpectedExceptionReturns500AsRWithoutLeak() throws Exception {
+        when(accessService.listVisible())
+            .thenThrow(new RuntimeException("jdbc:mysql://internal?password=should-never-leak"));
+
+        mockMvc.perform(get("/studio/projects"))
+            .andExpect(status().isInternalServerError())
+            .andExpect(jsonPath("$.code").value(1))
+            .andExpect(jsonPath("$.msg").value("服务暂时不可用，请稍后重试"))
+            .andExpect(jsonPath("$.msg").value(org.hamcrest.Matchers.not(
+                    org.hamcrest.Matchers.containsString("should-never-leak"))))
             .andExpect(jsonPath("$.data").doesNotExist());
     }
 

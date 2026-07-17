@@ -112,12 +112,42 @@ class ProjectDataSourceRegistryTest {
 
     }
 
-    static class ThrowingCloseDataSource extends StubDataSource {
+    static class RetriableCloseDataSource extends StubDataSource {
+
+        private final AtomicInteger remainingFailures;
+
+        RetriableCloseDataSource(int failureCount) {
+            this.remainingFailures = new AtomicInteger(failureCount);
+        }
 
         @Override
         public void close() {
-            super.close();
-            throw new IllegalStateException("test close failure");
+            closeCalls.incrementAndGet();
+            if (remainingFailures.getAndDecrement() > 0) {
+                throw new IllegalStateException("test close failure before physical close");
+            }
+            closed.set(true);
+        }
+
+    }
+
+    static class BlockingCloseDataSource extends StubDataSource {
+
+        private final CountDownLatch closeStarted;
+
+        private final CountDownLatch allowClose;
+
+        BlockingCloseDataSource(CountDownLatch closeStarted, CountDownLatch allowClose) {
+            this.closeStarted = closeStarted;
+            this.allowClose = allowClose;
+        }
+
+        @Override
+        public void close() {
+            closeCalls.incrementAndGet();
+            closeStarted.countDown();
+            await(allowClose);
+            closed.set(true);
         }
 
     }
@@ -336,42 +366,178 @@ class ProjectDataSourceRegistryTest {
     }
 
     @Test
-    void closeFailureAndRepeatedBlockReleaseCapacityOnce() throws Exception {
+    void closeFailureKeepsPoolCapacityUntilSuccessfulRetry() {
         Map<String, StubDataSource> created = new java.util.concurrent.ConcurrentHashMap<>();
         AtomicInteger factoryCalls = new AtomicInteger();
         ProjectDataSourceRegistry registry = new ProjectDataSourceRegistry(project -> {
             factoryCalls.incrementAndGet();
             return created.computeIfAbsent(project.getProjectRef(), key -> "a".equals(key)
-                    ? new ThrowingCloseDataSource() : new StubDataSource());
-        }, 1, 10, 10);
+                    ? new RetriableCloseDataSource(1) : new StubDataSource());
+        }, 1, 10, 20);
         registry.execute(project("a"), dataSource -> null);
 
         registry.blockAndDrain("a");
-        registry.blockAndDrain("a");
 
         assertThat(created.get("a").closeCalls.get()).isEqualTo(1);
-        CountDownLatch borrowerInside = new CountDownLatch(1);
-        CountDownLatch releaseBorrower = new CountDownLatch(1);
-        ExecutorService executor = executor(1, "registry-close-failure-");
+        assertThat(created.get("a").closed.get()).isFalse();
+        assertThatThrownBy(() -> registry.execute(project("b"), dataSource -> null))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("maxPools");
+        assertThat(factoryCalls.get()).isEqualTo(1);
+
+        registry.blockAndDrain("a");
+        registry.blockAndDrain("a");
+        registry.execute(project("b"), dataSource -> null);
+
+        assertThat(created.get("a").closed.get()).isTrue();
+        assertThat(created.get("a").closeCalls.get()).isEqualTo(2);
+        assertThat(factoryCalls.get()).isEqualTo(2);
+    }
+
+    @Test
+    void closeFailureKeepsGlobalBudgetUntilSuccessfulRetry() {
+        Map<String, StubDataSource> created = new java.util.concurrent.ConcurrentHashMap<>();
+        AtomicInteger factoryCalls = new AtomicInteger();
+        ProjectDataSourceRegistry registry = new ProjectDataSourceRegistry(project -> {
+            factoryCalls.incrementAndGet();
+            return created.computeIfAbsent(project.getProjectRef(), key -> "a".equals(key)
+                    ? new RetriableCloseDataSource(1) : new StubDataSource());
+        }, 2, 10, 10);
+        registry.execute(project("a"), dataSource -> null);
+
+        registry.blockAndDrain("a");
+
+        assertThatThrownBy(() -> registry.execute(project("b"), dataSource -> null))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("budget");
+        assertThat(factoryCalls.get()).isEqualTo(1);
+
+        registry.blockAndDrain("a");
+        registry.execute(project("b"), dataSource -> null);
+
+        assertThat(created.get("a").closed.get()).isTrue();
+        assertThat(created.get("a").closeCalls.get()).isEqualTo(2);
+        assertThat(factoryCalls.get()).isEqualTo(2);
+    }
+
+    @Test
+    void lruCloseFailureKeepsProjectRefIsolated() {
+        AtomicInteger projectFactoryCalls = new AtomicInteger();
+        ProjectDataSourceRegistry registry = new ProjectDataSourceRegistry(project -> {
+            if ("a".equals(project.getProjectRef())) {
+                return projectFactoryCalls.incrementAndGet() == 1
+                        ? new RetriableCloseDataSource(1) : new StubDataSource();
+            }
+            return new StubDataSource();
+        }, 2, 10, 30);
+        registry.execute(project("a"), dataSource -> null);
+        registry.execute(project("b"), dataSource -> null);
+        registry.execute(project("c"), dataSource -> null);
+
+        assertThatThrownBy(() -> registry.execute(project("a"), dataSource -> null))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("draining");
+        assertThat(projectFactoryCalls.get()).isEqualTo(1);
+
+        registry.retryClose("a");
+        registry.execute(project("a"), dataSource -> null);
+
+        assertThat(projectFactoryCalls.get()).isEqualTo(2);
+    }
+
+    @Test
+    void closeAllRetriesBoundedlyAndClosesEveryRegisteredPool() {
+        Map<String, StubDataSource> created = new java.util.concurrent.ConcurrentHashMap<>();
+        ProjectDataSourceRegistry registry = new ProjectDataSourceRegistry(project -> created.computeIfAbsent(
+                project.getProjectRef(), key -> "a".equals(key)
+                        ? new RetriableCloseDataSource(2) : new StubDataSource()), 2, 10, 20);
+        registry.execute(project("a"), dataSource -> null);
+        registry.execute(project("b"), dataSource -> null);
+
+        registry.closeAll();
+
+        assertThat(created.get("a").closed.get()).isTrue();
+        assertThat(created.get("a").closeCalls.get()).isEqualTo(3);
+        assertThat(created.get("b").closed.get()).isTrue();
+        assertThat(created.get("b").closeCalls.get()).isEqualTo(1);
+    }
+
+    @Test
+    void closeAllRejectsNewProjectFirstBorrowOnceShutdownBegins() throws Exception {
+        CountDownLatch closeStarted = new CountDownLatch(1);
+        CountDownLatch allowClose = new CountDownLatch(1);
+        CountDownLatch newBorrowStarted = new CountDownLatch(1);
+        AtomicInteger factoryCalls = new AtomicInteger();
+        BlockingCloseDataSource firstDataSource = new BlockingCloseDataSource(closeStarted, allowClose);
+        ProjectDataSourceRegistry registry = new ProjectDataSourceRegistry(project -> {
+            factoryCalls.incrementAndGet();
+            return "a".equals(project.getProjectRef()) ? firstDataSource : new StubDataSource();
+        }, 2, 10, 20);
+        registry.execute(project("a"), dataSource -> null);
+        ExecutorService executor = executor(2, "registry-close-all-");
 
         try {
-            Future<?> borrower = executor.submit(() -> registry.execute(project("b"), dataSource -> {
-                borrowerInside.countDown();
-                await(releaseBorrower);
-                return null;
-            }));
-            await(borrowerInside);
+            Future<?> closeAll = executor.submit(registry::closeAll);
+            await(closeStarted);
+            Future<?> newBorrow = executor.submit(() -> {
+                newBorrowStarted.countDown();
+                return registry.execute(project("b"), dataSource -> null);
+            });
+            await(newBorrowStarted);
 
+            allowClose.countDown();
+            closeAll.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+            assertThatThrownBy(() -> newBorrow.get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("project pool registry is closed");
             assertThatThrownBy(() -> registry.execute(project("c"), dataSource -> null))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("maxPools");
-            assertThat(factoryCalls.get()).isEqualTo(2);
-
-            releaseBorrower.countDown();
-            borrower.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                .hasMessage("project pool registry is closed");
+            assertThat(factoryCalls.get()).isEqualTo(1);
+            assertThat(firstDataSource.closed.get()).isTrue();
         }
         finally {
-            releaseBorrower.countDown();
+            allowClose.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void closeAllRejectsCreateThatPassedFastCheckBeforeShutdownLock() throws Exception {
+        CountDownLatch newBorrowStarted = new CountDownLatch(1);
+        AtomicInteger factoryCalls = new AtomicInteger();
+        AtomicReference<ProjectDataSourceRegistry> registryReference = new AtomicReference<>();
+        AtomicReference<Thread> newBorrowThread = new AtomicReference<>();
+        AtomicReference<Future<?>> newBorrowFuture = new AtomicReference<>();
+        ExecutorService executor = executor(1, "registry-close-race-");
+        ProjectDataSourceRegistry registry = new ProjectDataSourceRegistry(project -> {
+            factoryCalls.incrementAndGet();
+            return new StubDataSource();
+        }, 1, 10, 20, projectRef -> {
+            newBorrowFuture.set(executor.submit(() -> {
+                newBorrowThread.set(Thread.currentThread());
+                newBorrowStarted.countDown();
+                return registryReference.get().execute(project("b"), dataSource -> null);
+            }));
+            await(newBorrowStarted);
+            awaitThreadState(newBorrowThread.get(), Thread.State.BLOCKED);
+            registryReference.get().closeAll();
+        });
+        registryReference.set(registry);
+        registry.execute(project("a"), dataSource -> null);
+
+        try {
+            assertThatThrownBy(() -> registry.execute(project("c"), dataSource -> null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("project pool registry is closed");
+            assertThatThrownBy(() -> newBorrowFuture.get().get(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("project pool registry is closed");
+            assertThat(factoryCalls.get()).isEqualTo(1);
+        }
+        finally {
             executor.shutdownNow();
             assertThat(executor.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)).isTrue();
         }

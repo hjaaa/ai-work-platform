@@ -20,10 +20,13 @@
 package com.aiwork.baas.datasource;
 
 import com.aiwork.baas.entity.BaasProject;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.sql.DataSource;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,6 +46,8 @@ import java.util.function.Function;
 @Slf4j
 public class ProjectDataSourceRegistry {
 
+    private static final int CLOSE_ALL_ATTEMPTS = 3;
+
     private enum State {
 
         OPEN, DRAINING, CLOSED
@@ -60,6 +65,8 @@ public class ProjectDataSourceRegistry {
         private final AtomicReference<State> state = new AtomicReference<>(State.OPEN);
 
         private volatile long lastAccessTime = System.nanoTime();
+
+        private boolean closeInProgress;
 
         private Entry(String projectRef, DataSource dataSource) {
             this.projectRef = projectRef;
@@ -89,6 +96,29 @@ public class ProjectDataSourceRegistry {
             state.compareAndSet(State.OPEN, State.DRAINING);
         }
 
+        private synchronized boolean tryStartClose() {
+            if (state.get() != State.DRAINING || activeCount.get() != 0 || closeInProgress) {
+                return false;
+            }
+
+            closeInProgress = true;
+            return true;
+        }
+
+        private synchronized boolean completeClose() {
+            if (!closeInProgress || state.get() != State.DRAINING) {
+                return false;
+            }
+
+            state.set(State.CLOSED);
+            closeInProgress = false;
+            return true;
+        }
+
+        private synchronized void closeFailed() {
+            closeInProgress = false;
+        }
+
         private void release() {
             activeCount.decrementAndGet();
             closeIfDrained(this);
@@ -97,6 +127,8 @@ public class ProjectDataSourceRegistry {
     }
 
     private final Map<String, Entry> pools = new ConcurrentHashMap<>();
+
+    private final Map<String, Entry> closingEntries = new ConcurrentHashMap<>();
 
     private final Set<String> blockedProjectRefs = ConcurrentHashMap.newKeySet();
 
@@ -111,6 +143,8 @@ public class ProjectDataSourceRegistry {
     private final Semaphore globalBudget;
 
     private final Object capacityLock = new Object();
+
+    private volatile boolean registryClosed;
 
     public ProjectDataSourceRegistry(Function<BaasProject, DataSource> factory, int maxPools, int perPoolMax,
             int globalMaxConnections) {
@@ -137,8 +171,12 @@ public class ProjectDataSourceRegistry {
     public <T> T execute(BaasProject project, Function<DataSource, T> action) {
         String projectRef = project.getProjectRef();
         for (;;) {
+            ensureRegistryOpen();
             if (blockedProjectRefs.contains(projectRef)) {
                 throw blockedException(projectRef);
+            }
+            if (closingEntries.containsKey(projectRef)) {
+                throw drainingException(projectRef);
             }
 
             Entry entry = pools.get(projectRef);
@@ -146,6 +184,10 @@ public class ProjectDataSourceRegistry {
                 entry = createIfAbsent(project);
             }
             if (entry.tryAcquire()) {
+                if (registryClosed) {
+                    entry.release();
+                    throw registryClosedException();
+                }
                 if (blockedProjectRefs.contains(projectRef)) {
                     entry.release();
                     throw blockedException(projectRef);
@@ -170,15 +212,63 @@ public class ProjectDataSourceRegistry {
         synchronized (capacityLock) {
             blockedProjectRefs.add(projectRef);
             Entry entry = pools.remove(projectRef);
+            if (entry == null) {
+                entry = closingEntries.get(projectRef);
+            }
             if (entry != null) {
                 drain(entry);
             }
         }
     }
 
+    /**
+     * 对隔离中的关闭失败池执行一次有界重试，不改变 LRU 淘汰引用可重建的语义。
+     * @param projectRef 项目引用
+     */
+    public void retryClose(String projectRef) {
+        synchronized (capacityLock) {
+            Entry entry = closingEntries.get(projectRef);
+            if (entry != null) {
+                closeIfDrained(entry);
+            }
+        }
+    }
+
+    /**
+     * 容器销毁时阻断新借用并关闭全部注册池，每个失败池最多尝试三次。
+     */
+    @PreDestroy
+    public void closeAll() {
+        List<Entry> registeredEntries;
+        synchronized (capacityLock) {
+            registryClosed = true;
+            registeredEntries = new ArrayList<>(closingEntries.values());
+            for (Entry entry : pools.values()) {
+                if (!closingEntries.containsKey(entry.projectRef)) {
+                    registeredEntries.add(entry);
+                }
+            }
+            for (Entry entry : registeredEntries) {
+                blockedProjectRefs.add(entry.projectRef);
+                pools.remove(entry.projectRef, entry);
+                drain(entry);
+            }
+        }
+
+        for (int attempt = 1; attempt < CLOSE_ALL_ATTEMPTS && !closingEntries.isEmpty(); attempt++) {
+            for (Entry entry : new ArrayList<>(closingEntries.values())) {
+                closeIfDrained(entry);
+            }
+        }
+        if (!closingEntries.isEmpty()) {
+            log.warn("close all pools completed with {} pool(s) still isolated", closingEntries.size());
+        }
+    }
+
     private Entry createIfAbsent(BaasProject project) {
         String projectRef = project.getProjectRef();
         synchronized (capacityLock) {
+            ensureRegistryOpen();
             Entry existing = pools.get(projectRef);
             if (existing != null) {
                 return existing;
@@ -186,8 +276,15 @@ public class ProjectDataSourceRegistry {
             if (blockedProjectRefs.contains(projectRef)) {
                 throw blockedException(projectRef);
             }
+            if (closingEntries.containsKey(projectRef)) {
+                throw drainingException(projectRef);
+            }
 
             evictIdleUntilCapacity();
+            if (registryClosed) {
+                poolCapacity.release();
+                throw registryClosedException();
+            }
             if (!globalBudget.tryAcquire(perPoolMax)) {
                 poolCapacity.release();
                 throw new IllegalStateException("global connection budget exhausted");
@@ -224,40 +321,64 @@ public class ProjectDataSourceRegistry {
             }
 
             pools.remove(victim.projectRef, victim);
+            closingEntries.putIfAbsent(victim.projectRef, victim);
             closeIfDrained(victim);
         }
     }
 
     private void drain(Entry entry) {
+        closingEntries.putIfAbsent(entry.projectRef, entry);
         entry.startDrain();
         closeIfDrained(entry);
     }
 
     private void closeIfDrained(Entry entry) {
-        if (entry.activeCount.get() == 0 && entry.state.compareAndSet(State.DRAINING, State.CLOSED)) {
-            try {
-                closeDataSource(entry);
-            }
-            finally {
+        if (!entry.tryStartClose()) {
+            return;
+        }
+
+        boolean closed = false;
+        try {
+            closeDataSource(entry);
+            if (entry.completeClose()) {
+                closed = true;
+                closingEntries.remove(entry.projectRef, entry);
                 globalBudget.release(perPoolMax);
                 poolCapacity.release();
             }
         }
+        catch (Exception exception) {
+            log.warn("close pool {} failed", entry.projectRef, exception);
+        }
+        finally {
+            if (!closed) {
+                entry.closeFailed();
+            }
+        }
     }
 
-    private void closeDataSource(Entry entry) {
+    private void closeDataSource(Entry entry) throws Exception {
         if (entry.dataSource instanceof AutoCloseable closeable) {
-            try {
-                closeable.close();
-            }
-            catch (Exception exception) {
-                log.warn("close pool {} failed", entry.projectRef, exception);
-            }
+            closeable.close();
         }
     }
 
     private IllegalStateException blockedException(String projectRef) {
         return new IllegalStateException("project pool is blocked: " + projectRef);
+    }
+
+    private IllegalStateException drainingException(String projectRef) {
+        return new IllegalStateException("project pool is draining: " + projectRef);
+    }
+
+    private void ensureRegistryOpen() {
+        if (registryClosed) {
+            throw registryClosedException();
+        }
+    }
+
+    private IllegalStateException registryClosedException() {
+        return new IllegalStateException("project pool registry is closed");
     }
 
 }

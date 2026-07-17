@@ -27,6 +27,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -70,6 +72,41 @@ class ProjectProvisionerTest {
         RuntimeException exception = assertThrows(RuntimeException.class,
                 () -> jdbcTemplate.execute("CREATE TABLE t1(id int)"));
         assertThat(exception.getCause()).hasMessageContaining("CREATE command denied");
+    }
+
+    @Test
+    void systemTablesUseUnsignedBigintIdsAndContainAuditTimestamps() {
+        String databaseName = "baas_schema_ref";
+        provisioner.createDatabase(databaseName);
+        provisioner.initSystemTables(databaseName);
+
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource("mysql", "root", "root"));
+        Map<String, String> idColumnTypes = jdbcTemplate.query(
+                "SELECT table_name, column_name, column_type FROM information_schema.columns "
+                        + "WHERE table_schema = ? AND table_name IN ('_users', '_sessions', '_refresh_tokens') "
+                        + "AND column_name IN ('id', 'user_id', 'session_id', 'replacement_token_id')",
+                resultSet -> {
+                    Map<String, String> columnTypes = new java.util.HashMap<>(8);
+                    while (resultSet.next()) {
+                        columnTypes.put(resultSet.getString("table_name") + "." + resultSet.getString("column_name"),
+                                resultSet.getString("column_type"));
+                    }
+                    return columnTypes;
+                }, databaseName);
+        assertThat(idColumnTypes).hasSize(6).containsAllEntriesOf(Map.of(
+                "_users.id", "bigint unsigned",
+                "_sessions.id", "bigint unsigned",
+                "_sessions.user_id", "bigint unsigned",
+                "_refresh_tokens.id", "bigint unsigned",
+                "_refresh_tokens.session_id", "bigint unsigned",
+                "_refresh_tokens.replacement_token_id", "bigint unsigned"));
+
+        Long commonFieldCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                        + "WHERE table_schema = ? AND table_name IN ('_users', '_sessions', '_refresh_tokens') "
+                        + "AND column_name IN ('id', 'create_time', 'update_time')",
+                Long.class, databaseName);
+        assertThat(commonFieldCount).isEqualTo(9L);
     }
 
     @Test

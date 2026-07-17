@@ -46,24 +46,28 @@ public class ProjectProvisioner {
             + "TO '%s'@'%%'";
 
     private static final String CREATE_USERS_TABLE_SQL = "CREATE TABLE IF NOT EXISTS `%s`._users ("
-            + "id bigint NOT NULL AUTO_INCREMENT, email varchar(255) NOT NULL, password_hash varchar(100) NOT NULL, "
+            + "id bigint unsigned NOT NULL AUTO_INCREMENT, email varchar(255) NOT NULL, "
+            + "password_hash varchar(100) NOT NULL, "
             + "raw_meta json DEFAULT NULL, create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, "
             + "update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
             + "PRIMARY KEY (id), UNIQUE KEY uk_email (email)) ENGINE=InnoDB";
 
     private static final String CREATE_SESSIONS_TABLE_SQL = "CREATE TABLE IF NOT EXISTS `%s`._sessions ("
-            + "id bigint NOT NULL AUTO_INCREMENT, user_id bigint NOT NULL, "
+            + "id bigint unsigned NOT NULL AUTO_INCREMENT, user_id bigint unsigned NOT NULL, "
             + "status varchar(16) NOT NULL DEFAULT 'ACTIVE', "
             + "create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            + "update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
             + "last_active_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (id), "
             + "KEY idx_user (user_id)) ENGINE=InnoDB";
 
     private static final String CREATE_REFRESH_TOKENS_TABLE_SQL = "CREATE TABLE IF NOT EXISTS `%s`._refresh_tokens ("
-            + "id bigint NOT NULL AUTO_INCREMENT, token_hash char(64) NOT NULL, session_id bigint NOT NULL, "
+            + "id bigint unsigned NOT NULL AUTO_INCREMENT, token_hash char(64) NOT NULL, "
+            + "session_id bigint unsigned NOT NULL, "
             + "expire_time datetime NOT NULL, consumed_at datetime DEFAULT NULL, "
-            + "replacement_token_id bigint DEFAULT NULL, "
+            + "replacement_token_id bigint unsigned DEFAULT NULL, "
             + "reuse_grace_until datetime DEFAULT NULL, replay_payload_ciphertext text DEFAULT NULL, "
-            + "create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (id), "
+            + "create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            + "update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (id), "
             + "UNIQUE KEY uk_token_hash (token_hash), KEY idx_session (session_id)) ENGINE=InnoDB";
 
     private static final String DROP_DATABASE_SQL = "DROP DATABASE IF EXISTS `%s`";
