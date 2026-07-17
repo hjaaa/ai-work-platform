@@ -26,6 +26,7 @@ import com.aiwork.baas.entity.BaasAuditLog;
 import com.aiwork.baas.entity.BaasProject;
 import com.aiwork.baas.entity.enums.ProjectStatus;
 import com.aiwork.baas.entity.enums.ProvisionStep;
+import com.aiwork.baas.exception.ProjectProvisionException;
 import com.aiwork.baas.mapper.BaasApiKeyMapper;
 import com.aiwork.baas.mapper.BaasAuditLogMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
@@ -142,7 +143,7 @@ class ProjectLifecycleServiceTest {
             .initSystemTables(Mockito.anyString());
         try {
             assertThatThrownBy(() -> lifecycleService.createProject("retrycase", 1L))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(ProjectProvisionException.class);
         }
         finally {
             Mockito.reset(provisioner);
@@ -172,7 +173,7 @@ class ProjectLifecycleServiceTest {
         try {
             Throwable thrown = catchThrowable(() -> lifecycleService.createProject("auditfailure", 1L));
             assertThat(thrown)
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(ProjectProvisionException.class)
                 .hasMessageContaining("provision failed at USER_CREATED");
             assertThat(thrown.getCause()).hasMessage("mysql gone");
         }
@@ -196,7 +197,7 @@ class ProjectLifecycleServiceTest {
                 + "END IF; END");
         try {
             assertThatThrownBy(() -> lifecycleService.createProject("createauditrollback", 1L))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(ProjectProvisionException.class)
                 .hasMessageContaining("provision failed");
 
             BaasProject failedProject = projectMapper.selectOne(Wrappers.<BaasProject>lambdaQuery()

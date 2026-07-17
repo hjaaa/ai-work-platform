@@ -81,10 +81,17 @@ public class BaasStudioExceptionHandler {
         return R.failed("当前项目状态不允许执行该操作");
     }
 
+    @ExceptionHandler(ProjectProvisionException.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public R<Void> handleProvisionFailure(ProjectProvisionException exception) {
+        log.error("project provisioning failed", exception);
+        return R.failed("项目开通失败，请稍后重试");
+    }
+
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public R<Void> handleUnexpected(Exception exception) {
-        log.error("unexpected Studio exception, type={}", exception.getClass().getName());
+        log.error("unexpected Studio exception", exception);
         return R.failed("服务暂时不可用，请稍后重试");
     }
 

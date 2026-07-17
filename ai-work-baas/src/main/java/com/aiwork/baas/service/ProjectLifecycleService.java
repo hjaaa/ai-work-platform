@@ -28,6 +28,7 @@ import com.aiwork.baas.entity.enums.JwtKeyStatus;
 import com.aiwork.baas.entity.enums.KeyType;
 import com.aiwork.baas.entity.enums.ProjectStatus;
 import com.aiwork.baas.entity.enums.ProvisionStep;
+import com.aiwork.baas.exception.ProjectProvisionException;
 import com.aiwork.baas.mapper.BaasApiKeyMapper;
 import com.aiwork.baas.mapper.BaasAuditLogMapper;
 import com.aiwork.baas.mapper.BaasJwtKeyMapper;
@@ -193,7 +194,7 @@ public class ProjectLifecycleService {
         }
         catch (Exception exception) {
             markProvisionFailed(project, operatorUserId, exception);
-            throw new IllegalStateException("provision failed at " + project.getProvisionStep(), exception);
+            throw new ProjectProvisionException("provision failed at " + project.getProvisionStep(), exception);
         }
     }
 

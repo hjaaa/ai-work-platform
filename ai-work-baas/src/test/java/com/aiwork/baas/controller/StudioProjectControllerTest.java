@@ -26,6 +26,7 @@ import com.aiwork.baas.entity.enums.KeyType;
 import com.aiwork.baas.entity.enums.ProjectStatus;
 import com.aiwork.baas.exception.BaasStudioExceptionHandler;
 import com.aiwork.baas.exception.ProjectNotFoundException;
+import com.aiwork.baas.exception.ProjectProvisionException;
 import com.aiwork.baas.security.CurrentUserProvider;
 import com.aiwork.baas.service.ProjectAccessService;
 import com.aiwork.baas.service.ProjectKeyService;
@@ -229,6 +230,21 @@ class StudioProjectControllerTest {
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value(1))
             .andExpect(jsonPath("$.msg").value("当前项目状态不允许执行该操作"))
+            .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void provisionFailureReturns500AsRWithoutLeak() throws Exception {
+        when(lifecycleService.createProject(eq("demo"), eq(1L))).thenThrow(new ProjectProvisionException(
+                "provision failed at INIT", new RuntimeException("jdbc:mysql://internal?password=should-never-leak")));
+
+        mockMvc.perform(post("/studio/projects").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"name\":\"demo\"}"))
+            .andExpect(status().isInternalServerError())
+            .andExpect(jsonPath("$.code").value(1))
+            .andExpect(jsonPath("$.msg").value("项目开通失败，请稍后重试"))
+            .andExpect(jsonPath("$.msg").value(org.hamcrest.Matchers.not(
+                    org.hamcrest.Matchers.containsString("should-never-leak"))))
             .andExpect(jsonPath("$.data").doesNotExist());
     }
 
