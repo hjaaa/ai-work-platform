@@ -29,3 +29,8 @@ spring:
     import:
       - optional:nacos:application-@profiles.active@.yml
       - optional:nacos:${spring.application.name}-@profiles.active@.yml
+
+baas:
+  ddl:
+    maintenance-interval-millis: 300000
+    stale-running-minutes: 10

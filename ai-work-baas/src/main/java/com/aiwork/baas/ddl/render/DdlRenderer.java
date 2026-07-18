@@ -230,6 +230,30 @@ public final class DdlRenderer {
                 head + String.join(", ", clauses.stream().map(AlterClause::sanitizedSql).toList()));
     }
 
+    /** 到期清理使用的受控 DROP TABLE。 */
+    public static RenderedDdl renderDropTable(String dbName, String tableName) {
+        requireManagedDatabase(dbName);
+        String sql = "DROP TABLE IF EXISTS " + quoteIdentifier(dbName) + "." + quoteIdentifier(tableName);
+        return new RenderedDdl(sql, sql);
+    }
+
+    /** 项目物理清理使用的受控 DROP DATABASE。 */
+    public static RenderedDdl renderDropDatabase(String dbName) {
+        requireManagedDatabase(dbName);
+        String sql = "DROP DATABASE IF EXISTS " + quoteIdentifier(dbName);
+        return new RenderedDdl(sql, sql);
+    }
+
+    /** 项目物理清理使用的受控 DROP USER。 */
+    public static RenderedDdl renderDropUser(String username) {
+        IdentifierValidator.validate(username);
+        if (!username.startsWith("rt_")) {
+            throw new IllegalArgumentException("unmanaged runtime user");
+        }
+        String sql = "DROP USER IF EXISTS '" + username + "'@'%'";
+        return new RenderedDdl(sql, sql);
+    }
+
     private static void validateColumn(LogicalColumn column) {
         IdentifierValidator.validate(column.columnName());
         ColumnTypeValidator.validateTypeParams(column.type().code(), column.length(), column.scale());
@@ -238,6 +262,13 @@ public final class DdlRenderer {
     private static String quoteIdentifier(String identifier) {
         IdentifierValidator.validate(identifier);
         return "`" + identifier + "`";
+    }
+
+    private static void requireManagedDatabase(String dbName) {
+        IdentifierValidator.validate(dbName);
+        if (!dbName.startsWith("baas_")) {
+            throw new IllegalArgumentException("unmanaged project database");
+        }
     }
 
     private static void requireLength(String text, int limit, String message) {

@@ -154,4 +154,21 @@ class DdlRendererTest {
             .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void destructiveDdlIsRenderedOnlyFromValidatedIdentifiers() {
+        assertThat(DdlRenderer.renderDropTable("baas_p1", "orders").sql())
+            .isEqualTo("DROP TABLE IF EXISTS `baas_p1`.`orders`");
+        assertThat(DdlRenderer.renderDropDatabase("baas_p1").sql())
+            .isEqualTo("DROP DATABASE IF EXISTS `baas_p1`");
+        assertThat(DdlRenderer.renderDropUser("rt_project1").sql())
+            .isEqualTo("DROP USER IF EXISTS 'rt_project1'@'%'");
+
+        assertThatThrownBy(() -> DdlRenderer.renderDropTable("baas_p1", "orders`; DROP DATABASE mysql; --"))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> DdlRenderer.renderDropDatabase("mysql"))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> DdlRenderer.renderDropUser("root'@'localhost"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
 }

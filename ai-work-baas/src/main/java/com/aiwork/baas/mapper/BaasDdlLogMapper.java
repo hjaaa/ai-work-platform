@@ -86,4 +86,14 @@ public interface BaasDdlLogMapper extends BaseMapper<BaasDdlLog> {
             @Param("fenceEpoch") long fenceEpoch, @Param("status") String status, @Param("step") String step,
             @Param("resultSnapshot") String resultSnapshot, @Param("errorMsg") String errorMsg);
 
+    /**
+     * HTTP 陈旧 RUNNING 兜底：旧 owner_token 与 fence_epoch 双条件 CAS 置 FAILED。
+     */
+    @Update("UPDATE baas_ddl_log SET status = 'FAILED', fence_epoch = #{newEpoch}, error_msg = #{errorCode} "
+            + "WHERE id = #{logId} AND owner_token = #{observedToken} AND fence_epoch = #{observedEpoch} "
+            + "AND status = 'RUNNING'")
+    int casForceFailRunning(@Param("logId") Long logId, @Param("observedToken") String observedToken,
+            @Param("observedEpoch") long observedEpoch, @Param("newEpoch") long newEpoch,
+            @Param("errorCode") String errorCode);
+
 }

@@ -21,6 +21,7 @@ package com.aiwork.baas.service;
 
 import com.aiwork.baas.LifecycleTestApplication;
 import com.aiwork.baas.datasource.ProjectDataSourceRegistry;
+import com.aiwork.baas.ddl.lock.ProjectDdlLockExecutor;
 import com.aiwork.baas.entity.BaasApiKey;
 import com.aiwork.baas.entity.BaasAuditLog;
 import com.aiwork.baas.entity.BaasProject;
@@ -43,6 +44,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -65,11 +67,16 @@ class ProjectLifecycleServiceTest {
         .withDatabaseName("ai_work_baas")
         .withInitScript("init-metadata.sql");
 
+    @Container
+    static GenericContainer<?> redis = new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", mysql::getJdbcUrl);
         registry.add("spring.datasource.username", () -> "root");
         registry.add("spring.datasource.password", () -> "root");
+        registry.add("spring.data.redis.host", redis::getHost);
+        registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         registry.add("baas.provisioner.url", () -> mysql.getJdbcUrl().replace("/ai_work_baas", "/mysql"));
         registry.add("baas.provisioner.username", () -> "root");
         registry.add("baas.provisioner.password", () -> "root");
@@ -95,6 +102,9 @@ class ProjectLifecycleServiceTest {
 
     @MockitoSpyBean
     private PhysicalPreconditions physicalPreconditions;
+
+    @MockitoSpyBean
+    private ProjectDdlLockExecutor lockExecutor;
 
     @MockitoSpyBean
     private ProjectDataSourceRegistry registry;
@@ -199,6 +209,29 @@ class ProjectLifecycleServiceTest {
             .eq(BaasApiKey::getProjectId, failedProject.getId())
             .eq(BaasApiKey::getStatus, "ACTIVE"));
         assertThat(activeKeyCount).isEqualTo(2L);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void createLockInfrastructureFailureMarksFailedAndCanRetry() {
+        Mockito.doThrow(new IllegalStateException("DDL_LOCK_INFRASTRUCTURE_FAILED"))
+            .when(lockExecutor)
+            .execute(Mockito.anyLong(), Mockito.any());
+        try {
+            assertThatThrownBy(() -> lifecycleService.createProject("lockinfraretry", 1L))
+                .isInstanceOf(ProjectProvisionException.class)
+                .hasMessage("provision lock infrastructure failed");
+        }
+        finally {
+            Mockito.reset(lockExecutor);
+        }
+
+        BaasProject failedProject = projectMapper.selectOne(Wrappers.<BaasProject>lambdaQuery()
+            .eq(BaasProject::getName, "lockinfraretry"));
+        assertThat(failedProject.getStatus()).isEqualTo(ProjectStatus.FAILED);
+
+        var retried = lifecycleService.retryProvision(failedProject.getId());
+        assertThat(retried.project().getStatus()).isEqualTo(ProjectStatus.ACTIVE);
     }
 
     @Test
@@ -417,6 +450,9 @@ class ProjectLifecycleServiceTest {
     void physicalCleanupDropsDatabase() {
         var created = lifecycleService.createProject("tocleanup", 1L);
         lifecycleService.deleteProject(created.project().getId(), 1L);
+        projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
+            .eq(BaasProject::getId, created.project().getId())
+            .set(BaasProject::getDeleteAfter, LocalDateTime.now().minusMinutes(1)));
 
         lifecycleService.physicallyCleanup(projectMapper.selectById(created.project().getId()));
 
