@@ -2,6 +2,7 @@ package com.aiwork.baas.ddl.index;
 
 import com.aiwork.baas.ddl.RequestFingerprint;
 
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -39,20 +40,23 @@ public final class IndexNameAllocator {
     public static Allocation allocate(boolean unique, String columnName, Set<String> existingIndexNames,
             String currentIndexNameOnColumn) {
         String canonical = canonicalName(unique, columnName);
-        if (canonical.equals(currentIndexNameOnColumn)) {
-            return new Allocation(canonical, true);
+        Set<String> normalizedExistingNames = existingIndexNames.stream()
+            .map(IndexNameAllocator::normalizeName)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (sameName(canonical, currentIndexNameOnColumn)) {
+            return new Allocation(currentIndexNameOnColumn, true);
         }
-        if (!existingIndexNames.contains(canonical)) {
+        if (!normalizedExistingNames.contains(normalizeName(canonical))) {
             return new Allocation(canonical, false);
         }
         String prefix = unique ? "uk_" : "idx_";
         for (int sequence = 0;; sequence++) {
             String salt = sequence == 0 ? columnName : columnName + "#" + sequence;
             String candidate = hashedName(prefix, columnName, salt);
-            if (candidate.equals(currentIndexNameOnColumn)) {
-                return new Allocation(candidate, true);
+            if (sameName(candidate, currentIndexNameOnColumn)) {
+                return new Allocation(currentIndexNameOnColumn, true);
             }
-            if (!existingIndexNames.contains(candidate)) {
+            if (!normalizedExistingNames.contains(normalizeName(candidate))) {
                 return new Allocation(candidate, false);
             }
         }
@@ -62,6 +66,14 @@ public final class IndexNameAllocator {
         String hash = RequestFingerprint.sha256Hex(salt).substring(0, HASH_LENGTH);
         int keep = Math.min(columnName.length(), MAX_INDEX_NAME_LENGTH - prefix.length() - 1 - HASH_LENGTH);
         return prefix + columnName.substring(0, keep) + "_" + hash;
+    }
+
+    private static boolean sameName(String first, String second) {
+        return second != null && normalizeName(first).equals(normalizeName(second));
+    }
+
+    private static String normalizeName(String name) {
+        return name.toLowerCase(Locale.ROOT);
     }
 
 }

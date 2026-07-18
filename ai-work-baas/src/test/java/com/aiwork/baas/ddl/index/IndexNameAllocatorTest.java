@@ -24,6 +24,14 @@ class IndexNameAllocatorTest {
     }
 
     @Test
+    void namesAt60And61ColumnsRespect64CharacterLimit() {
+        assertThat(IndexNameAllocator.canonicalName(false, "c".repeat(60))).hasSize(64)
+            .isEqualTo("idx_" + "c".repeat(60));
+        assertThat(IndexNameAllocator.canonicalName(false, "c".repeat(61))).hasSize(64)
+            .startsWith("idx_").containsPattern("_[0-9a-f]{8}$");
+    }
+
+    @Test
     void unoccupiedCanonicalNameUsedDirectly() {
         var allocation = IndexNameAllocator.allocate(false, "email", Set.of("idx_other"), null);
         assertThat(allocation.name()).isEqualTo("idx_email");
@@ -33,6 +41,13 @@ class IndexNameAllocatorTest {
     @Test
     void occupiedByTargetItselfIsIdempotent() {
         var allocation = IndexNameAllocator.allocate(false, "email", Set.of("idx_email"), "idx_email");
+        assertThat(allocation.alreadySatisfied()).isTrue();
+    }
+
+    @Test
+    void idempotentMatchIsCaseInsensitiveAndPreservesActualName() {
+        var allocation = IndexNameAllocator.allocate(false, "email", Set.of("IDX_EMAIL"), "IDX_EMAIL");
+        assertThat(allocation.name()).isEqualTo("IDX_EMAIL");
         assertThat(allocation.alreadySatisfied()).isTrue();
     }
 
@@ -47,10 +62,26 @@ class IndexNameAllocatorTest {
     }
 
     @Test
+    void uppercaseForeignNameOccupiesCanonicalName() {
+        var allocation = IndexNameAllocator.allocate(false, "email", Set.of("IDX_EMAIL"), null);
+        assertThat(allocation.name()).startsWith("idx_email_").isNotEqualToIgnoringCase("IDX_EMAIL");
+        assertThat(allocation.alreadySatisfied()).isFalse();
+    }
+
+    @Test
     void hashCollisionAdvancesDeterministically() {
         var first = IndexNameAllocator.allocate(false, "email", Set.of("idx_email"), null);
         var second = IndexNameAllocator.allocate(false, "email", Set.of("idx_email", first.name()), null);
         assertThat(second.name()).isNotEqualTo(first.name()).hasSizeLessThanOrEqualTo(64);
+    }
+
+    @Test
+    void consecutiveHashedNameConflictsAdvanceWithoutExceeding64Characters() {
+        var first = IndexNameAllocator.allocate(false, "c".repeat(61),
+                Set.of(IndexNameAllocator.canonicalName(false, "c".repeat(61))), null);
+        var second = IndexNameAllocator.allocate(false, "c".repeat(61),
+                Set.of(IndexNameAllocator.canonicalName(false, "c".repeat(61)), first.name()), null);
+        assertThat(second.name()).isNotEqualTo(first.name()).hasSize(64);
     }
 
 }

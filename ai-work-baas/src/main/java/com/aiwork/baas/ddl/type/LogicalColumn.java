@@ -31,6 +31,8 @@ public record LogicalColumn(String columnName, ColumnType type, Integer length, 
 
     public LogicalColumn {
         scale = ColumnTypeValidator.normalizeScale(type, scale);
+        indexed = unique ? false : indexed;
+        comment = comment != null && comment.isEmpty() ? null : comment;
     }
 
     /** 类型形状(类型 + 参数)是否一致,用于对账比较与探测续跑。 */

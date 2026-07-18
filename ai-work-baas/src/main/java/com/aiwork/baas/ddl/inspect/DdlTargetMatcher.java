@@ -17,9 +17,7 @@ public final class DdlTargetMatcher {
             List<LogicalColumn> expectedColumns) {
         if (actual == null || !Objects.equals(actual.tableName(), expectedName)
                 || !Objects.equals(emptyToNull(actual.tableComment()), emptyToNull(expectedComment))
-                || !"BASE TABLE".equals(actual.tableType()) || !"InnoDB".equals(actual.engine())
-                || !"Dynamic".equals(actual.rowFormat()) || !"utf8mb4_general_ci".equals(actual.collation())
-                || actual.hasTriggers() || actual.hasForeignKeys() || actual.hasCheckConstraints()
+                || !PhysicalStructureAdmission.hasRequiredBaseline(actual)
                 || actual.columns().size() != expectedColumns.size()) {
             return false;
         }
