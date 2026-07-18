@@ -56,6 +56,8 @@ import java.util.function.Supplier;
 @RequiredArgsConstructor
 public class DdlExecutionEngine {
 
+    private static final String FAILURE_FINALIZATION_ERROR_CODE = "DDL_FAILURE_FINALIZATION_FAILED";
+
     private final BaasDdlLogMapper ddlLogMapper;
 
     private final DdlLockManager lockManager;
@@ -154,6 +156,7 @@ public class DdlExecutionEngine {
             throw new DdlConflictException("所有权确认失败,放弃执行");
         }
         context.setCurrentStep(DdlStep.valueOf(confirmed.getStep()));
+        context.assertLockStillHeld();
 
         try {
             return work.perform(context);
@@ -274,6 +277,7 @@ public class DdlExecutionEngine {
     }
 
     private void markFailed(DdlWorkContext context, DdlWork work, Exception cause) {
+        context.assertLockStillHeld();
         try {
             transactionTemplate.executeWithoutResult(txStatus -> {
                 fencingGuard.verifyEpochInTx(context.spec().projectId(), context.fenceEpoch());
@@ -285,9 +289,13 @@ public class DdlExecutionEngine {
                 work.onFailureTx(context);
             });
         }
+        catch (StaleExecutorException stale) {
+            throw stale;
+        }
         catch (Exception secondary) {
-            log.warn("mark ddl failed operationId={} errorType={} originalCode={}", context.spec().operationId(),
-                    secondary.getClass().getSimpleName(), sanitizeError(cause));
+            log.warn("mark ddl failed operationId={} errorType={} errorCode={}", context.spec().operationId(),
+                    secondary.getClass().getSimpleName(), FAILURE_FINALIZATION_ERROR_CODE);
+            throw new DdlExecutionException(FAILURE_FINALIZATION_ERROR_CODE, "UNKNOWN", 0);
         }
     }
 

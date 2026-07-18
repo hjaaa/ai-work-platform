@@ -29,13 +29,17 @@ import com.aiwork.baas.entity.enums.DdlOperationType;
 import com.aiwork.baas.entity.enums.DdlStep;
 import com.aiwork.baas.entity.enums.ProjectStatus;
 import com.aiwork.baas.exception.DdlConflictException;
+import com.aiwork.baas.exception.DdlExecutionException;
 import com.aiwork.baas.mapper.BaasDdlLogMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -45,14 +49,18 @@ import org.testcontainers.mysql.MySQLContainer;
 
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 @SpringBootTest(classes = LifecycleTestApplication.class, properties = { "spring.config.import=",
         "spring.cloud.nacos.discovery.enabled=false", "spring.cloud.nacos.config.enabled=false",
         "spring.cloud.service-registry.auto-registration.enabled=false" })
 @Testcontainers
+@ExtendWith(OutputCaptureExtension.class)
 class DdlExecutionEngineTest {
 
     @Container
@@ -409,6 +417,172 @@ class DdlExecutionEngineTest {
         BaasDdlLog logRecord = ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId);
         assertThat(logRecord.getStatus()).isEqualTo(DdlLogStatus.RUNNING.name());
         assertThat(failureTxCalled).isFalse();
+    }
+
+    @Test
+    void lostRedisLockBeforeFailureTerminalLeavesRunningAndSkipsFailureTx() {
+        BaasProject project = newProject();
+        String operationId = UUID.randomUUID().toString();
+        AtomicBoolean failureTxCalled = new AtomicBoolean(false);
+        DdlWork work = new DdlWork() {
+            @Override
+            public void validateInLock(DdlWorkContext context) {
+            }
+
+            @Override
+            public ObjectNode perform(DdlWorkContext context) {
+                lockManager.release(context.lockHandle());
+                throw new IllegalStateException("perform failure after lost lock");
+            }
+
+            @Override
+            public void onFailureTx(DdlWorkContext context) {
+                failureTxCalled.set(true);
+            }
+        };
+
+        assertThatThrownBy(() -> engine.execute(spec(project, operationId, "a".repeat(64)), work))
+            .isInstanceOf(StaleExecutorException.class);
+        BaasDdlLog logRecord = ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId);
+        assertThat(logRecord.getStatus()).isEqualTo(DdlLogStatus.RUNNING.name());
+        assertThat(failureTxCalled).isFalse();
+    }
+
+    @Test
+    void failureTxExceptionRollsBackAndReturnsSanitizedFinalizationFailure() {
+        BaasProject project = newProject();
+        String operationId = UUID.randomUUID().toString();
+        DdlWork work = new DdlWork() {
+            @Override
+            public void validateInLock(DdlWorkContext context) {
+            }
+
+            @Override
+            public ObjectNode perform(DdlWorkContext context) {
+                throw new IllegalStateException("perform failure");
+            }
+
+            @Override
+            public void onFailureTx(DdlWorkContext context) {
+                BaasProject marker = projectMapper.selectById(context.spec().projectId());
+                marker.setName("failure-marker");
+                projectMapper.updateById(marker);
+                throw new IllegalArgumentException("secret finalization failure");
+            }
+        };
+
+        Throwable failure = catchThrowable(
+                () -> engine.execute(spec(project, operationId, "a".repeat(64)), work));
+
+        assertThat(failure).isInstanceOf(DdlExecutionException.class)
+            .hasMessage("DDL 执行失败")
+            .hasNoCause();
+        assertThat(((DdlExecutionException) failure).errorCode()).isEqualTo("DDL_FAILURE_FINALIZATION_FAILED");
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId).getStatus())
+            .isEqualTo(DdlLogStatus.RUNNING.name());
+        assertThat(projectMapper.selectById(project.getId()).getName()).isEqualTo("engine");
+    }
+
+    @Test
+    void lostRedisLockAfterOwnershipTxPreventsPerform() {
+        BaasProject project = newProject();
+        String operationId = UUID.randomUUID().toString();
+        AtomicInteger performCount = new AtomicInteger();
+        DdlWork work = new DdlWork() {
+            @Override
+            public void validateInLock(DdlWorkContext context) {
+            }
+
+            @Override
+            public void inOwnershipTx(DdlWorkContext context) {
+                lockManager.release(context.lockHandle());
+            }
+
+            @Override
+            public ObjectNode perform(DdlWorkContext context) {
+                performCount.incrementAndGet();
+                return MAPPER.createObjectNode();
+            }
+        };
+
+        assertThatThrownBy(() -> engine.execute(spec(project, operationId, "a".repeat(64)), work))
+            .isInstanceOf(StaleExecutorException.class);
+        assertThat(performCount).hasValue(0);
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId).getStatus())
+            .isEqualTo(DdlLogStatus.RUNNING.name());
+    }
+
+    @Test
+    void failureFinalizationWarningUsesOnlyStableCode(CapturedOutput output) {
+        BaasProject project = newProject();
+        String operationId = UUID.randomUUID().toString();
+        DdlWork work = new DdlWork() {
+            @Override
+            public void validateInLock(DdlWorkContext context) {
+            }
+
+            @Override
+            public ObjectNode perform(DdlWorkContext context) {
+                var sql = new java.sql.SQLException("secret_table.secret_column", "HY000", 9999);
+                throw new org.springframework.jdbc.BadSqlGrammarException("ddl", "ALTER secret_table", sql);
+            }
+
+            @Override
+            public void onFailureTx(DdlWorkContext context) {
+                throw new IllegalStateException("secret finalization failure");
+            }
+        };
+
+        Throwable failure = catchThrowable(() -> engine.execute(spec(project, operationId, "a".repeat(64)), work));
+
+        assertThat(failure).isInstanceOf(DdlExecutionException.class);
+        assertThat(((DdlExecutionException) failure).errorCode())
+            .isEqualTo("DDL_FAILURE_FINALIZATION_FAILED");
+        String warningLine = output.getOut()
+            .lines()
+            .filter(line -> line.contains("mark ddl failed operationId=" + operationId))
+            .findFirst()
+            .orElseThrow();
+        assertThat(warningLine).contains("operationId=" + operationId, "errorType=IllegalStateException",
+                "errorCode=DDL_FAILURE_FINALIZATION_FAILED")
+            .doesNotContain("originalCode=", "sqlState=HY000", "vendorCode=9999", "secret finalization");
+    }
+
+    @Test
+    void metadataWritesRollbackWhenSuccessTerminalGuardFails() {
+        BaasProject project = newProject();
+        String operationId = UUID.randomUUID().toString();
+        AtomicReference<String> ownerToken = new AtomicReference<>();
+        DdlWork work = new DdlWork() {
+            @Override
+            public void validateInLock(DdlWorkContext context) {
+            }
+
+            @Override
+            public ObjectNode perform(DdlWorkContext context) {
+                context.advanceToDdlApplied();
+                ownerToken.set(context.ownerToken());
+                return context.completeSuccess(() -> {
+                    BaasProject marker = projectMapper.selectById(context.spec().projectId());
+                    marker.setName("metadata-marker");
+                    projectMapper.updateById(marker);
+                    BaasDdlLog competing = ddlLogMapper.selectByProjectAndOperation(context.spec().projectId(),
+                            context.spec().operationId());
+                    competing.setOwnerToken("competing-owner");
+                    ddlLogMapper.updateById(competing);
+                    return MAPPER.createObjectNode().put("mustRollback", true);
+                });
+            }
+        };
+
+        assertThatThrownBy(() -> engine.execute(spec(project, operationId, "a".repeat(64)), work))
+            .isInstanceOf(StaleExecutorException.class);
+        BaasDdlLog logRecord = ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId);
+        assertThat(projectMapper.selectById(project.getId()).getName()).isEqualTo("engine");
+        assertThat(logRecord.getStatus()).isEqualTo(DdlLogStatus.RUNNING.name());
+        assertThat(logRecord.getStep()).isEqualTo(DdlStep.DDL_APPLIED.name());
+        assertThat(logRecord.getOwnerToken()).isEqualTo(ownerToken.get());
+        assertThat(logRecord.getResultSnapshot()).isNull();
     }
 
 }
