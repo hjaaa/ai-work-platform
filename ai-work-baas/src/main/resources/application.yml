@@ -1,6 +1,16 @@
 server:
   port: 4010
 
+management:
+  health:
+    readinessstate:
+      enabled: true
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: readinessState,physicalPreconditions
+
 spring:
   application:
     name: @artifactId@

@@ -30,6 +30,7 @@ import com.aiwork.baas.exception.ProjectProvisionException;
 import com.aiwork.baas.mapper.BaasApiKeyMapper;
 import com.aiwork.baas.mapper.BaasAuditLogMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
+import com.aiwork.baas.provision.PhysicalPreconditions;
 import com.aiwork.baas.provision.ProjectProvisioner;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.junit.jupiter.api.Test;
@@ -93,6 +94,9 @@ class ProjectLifecycleServiceTest {
     private ProjectProvisioner provisioner;
 
     @MockitoSpyBean
+    private PhysicalPreconditions physicalPreconditions;
+
+    @MockitoSpyBean
     private ProjectDataSourceRegistry registry;
 
     @Autowired
@@ -133,6 +137,41 @@ class ProjectLifecycleServiceTest {
             .hasMessageContaining("active transaction");
 
         assertThat(projectMapper.selectCount(null)).isEqualTo(projectCountBefore);
+        Mockito.verifyNoInteractions(provisioner, registry);
+    }
+
+    @Test
+    void physicalPreconditionsFailureRejectsCreateAndRetryWithoutSideEffects() {
+        var created = lifecycleService.createProject("physicalpreconditions", 1L);
+        Long projectId = created.project().getId();
+        projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
+            .eq(BaasProject::getId, projectId)
+            .set(BaasProject::getStatus, ProjectStatus.FAILED));
+        Long projectCountBefore = projectMapper.selectCount(null);
+        Long activeKeyCountBefore = apiKeyMapper.selectCount(Wrappers.<BaasApiKey>lambdaQuery()
+            .eq(BaasApiKey::getProjectId, projectId)
+            .eq(BaasApiKey::getStatus, "ACTIVE"));
+        Mockito.clearInvocations(provisioner, registry);
+        Mockito.doThrow(new IllegalStateException("physical preconditions failed"))
+            .when(physicalPreconditions)
+            .assertSatisfied();
+        try {
+            assertThatThrownBy(() -> lifecycleService.createProject("physicalblocked", 1L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("physical preconditions failed");
+            assertThatThrownBy(() -> lifecycleService.retryProvision(projectId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("physical preconditions failed");
+        }
+        finally {
+            Mockito.reset(physicalPreconditions);
+        }
+
+        assertThat(projectMapper.selectCount(null)).isEqualTo(projectCountBefore);
+        assertThat(projectMapper.selectById(projectId).getStatus()).isEqualTo(ProjectStatus.FAILED);
+        assertThat(apiKeyMapper.selectCount(Wrappers.<BaasApiKey>lambdaQuery()
+            .eq(BaasApiKey::getProjectId, projectId)
+            .eq(BaasApiKey::getStatus, "ACTIVE"))).isEqualTo(activeKeyCountBefore);
         Mockito.verifyNoInteractions(provisioner, registry);
     }
 

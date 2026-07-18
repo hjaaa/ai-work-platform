@@ -137,6 +137,16 @@ class SystemTableBaselineTest {
     }
 
     @Test
+    void stringDefaultCaseDriftIsManifestMismatch() {
+        provisioner.createDatabase("baas_defcase1");
+        provisioner.initSystemTables("baas_defcase1");
+        rootJdbc.execute("ALTER TABLE baas_defcase1._sessions ALTER COLUMN status SET DEFAULT 'active'");
+
+        assertThat(SystemTableManifest.compare(readSystemTables("baas_defcase1")))
+            .isEqualTo(SystemTableManifest.MatchResult.MISMATCH);
+    }
+
+    @Test
     void unexpectedOnUpdateExtraIsManifestMismatch() {
         provisioner.createDatabase("baas_extra1");
         provisioner.initSystemTables("baas_extra1");

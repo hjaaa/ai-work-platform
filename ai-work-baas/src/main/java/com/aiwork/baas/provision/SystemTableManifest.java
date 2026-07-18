@@ -145,8 +145,7 @@ public final class SystemTableManifest {
                 return false;
             }
             String expectedDefault = DEFAULTS.get(tableName).get(expected.name());
-            String actualDefault = column.columnDefault() == null ? null
-                    : column.columnDefault().toUpperCase(Locale.ROOT).replace("()", "");
+            String actualDefault = normalizeDefault(expectedDefault, column.columnDefault());
             if (!Objects.equals(expectedDefault, actualDefault)) {
                 return false;
             }
@@ -191,6 +190,14 @@ public final class SystemTableManifest {
             }
         }
         return true;
+    }
+
+    private static String normalizeDefault(String expectedDefault, String actualDefault) {
+        if (actualDefault == null || !"CURRENT_TIMESTAMP".equals(expectedDefault)) {
+            return actualDefault;
+        }
+        String normalized = actualDefault.toUpperCase(Locale.ROOT).replace("()", "");
+        return "CURRENT_TIMESTAMP".equals(normalized) ? normalized : actualDefault;
     }
 
     /**
