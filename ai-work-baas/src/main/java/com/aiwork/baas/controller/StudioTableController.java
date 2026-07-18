@@ -19,6 +19,7 @@
 
 package com.aiwork.baas.controller;
 
+import com.aiwork.baas.controller.dto.TableAlterDTO;
 import com.aiwork.baas.controller.dto.TableCreateDTO;
 import com.aiwork.baas.entity.BaasProject;
 import com.aiwork.baas.service.ProjectAccessService;
@@ -29,6 +30,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -68,6 +70,13 @@ public class StudioTableController {
             @PathVariable("table") String tableName) {
         BaasProject project = accessService.requireOwned(projectRef);
         return R.ok(tableService.getTableSnapshot(project, tableName));
+    }
+
+    @PatchMapping("/{table}")
+    public R<ObjectNode> alter(@PathVariable("ref") String projectRef, @PathVariable("table") String tableName,
+            @Valid @RequestBody TableAlterDTO alterDTO) {
+        BaasProject project = accessService.requireOwned(projectRef);
+        return R.ok(tableService.alterTable(project, tableName, alterDTO));
     }
 
 }

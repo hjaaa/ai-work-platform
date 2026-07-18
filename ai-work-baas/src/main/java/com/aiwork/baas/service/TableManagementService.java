@@ -20,6 +20,7 @@
 package com.aiwork.baas.service;
 
 import com.aiwork.baas.controller.dto.ColumnDefinitionDTO;
+import com.aiwork.baas.controller.dto.TableAlterDTO;
 import com.aiwork.baas.controller.dto.TableCreateDTO;
 import com.aiwork.baas.ddl.OperationIdValidator;
 import com.aiwork.baas.ddl.RequestFingerprint;
@@ -213,6 +214,21 @@ public class TableManagementService {
                 dto.tableName(), null, hash, null, rendered.sanitizedSql());
 
         return engine.execute(spec, new CreateTableWork(project, dto, plans, rendered));
+    }
+
+    public ObjectNode alterTable(BaasProject project, String tableName, TableAlterDTO dto) {
+        if (project == null || dto == null) {
+            throw new BaasBadRequestException("改表请求不完整");
+        }
+        OperationIdValidator.requireUuid(dto.operationId());
+        AlterTableWork.staticValidate(tableName, dto);
+        String path = "/studio/projects/" + project.getProjectRef() + "/tables/" + tableName;
+        String hash = RequestFingerprint.http("PATCH", path, DdlOperationType.ALTER.code(),
+                RequestFingerprint.canonicalBody(dto));
+        DdlOperationSpec spec = new DdlOperationSpec(project.getId(), dto.operationId(), DdlOperationType.ALTER,
+                tableName, null, hash, null, null);
+        return engine.execute(spec, new AlterTableWork(this, project, tableName, dto, tableMapper, columnMapper,
+                aclMapper));
     }
 
     private final class CreateTableWork implements DdlWork {

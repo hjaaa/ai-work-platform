@@ -40,6 +40,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -92,6 +93,28 @@ class StudioTableControllerTest {
         order.verify(accessService).requireOwned(PROJECT_REF);
         order.verify(tableService).createTable(Mockito.eq(project), Mockito.argThat(dto ->
                 "orders".equals(dto.tableName()) && dto.columns().size() == 1));
+    }
+
+    @Test
+    void alterChecksOwnershipBeforeDelegatingAndReturnsSnapshot() throws Exception {
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        snapshot.put("tableName", "orders");
+        snapshot.put("comment", "新注释");
+        when(accessService.requireOwned(PROJECT_REF)).thenReturn(project);
+        when(tableService.alterTable(Mockito.eq(project), Mockito.eq("orders"), Mockito.any()))
+            .thenReturn(snapshot);
+
+        mockMvc.perform(patch("/studio/projects/" + PROJECT_REF + "/tables/orders")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"operationId\":\"6f9e6d0e-b30c-4e20-8101-4d1b8cf1ee54\",\"comment\":\"新注释\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.tableName").value("orders"))
+            .andExpect(jsonPath("$.data.comment").value("新注释"));
+
+        InOrder order = inOrder(accessService, tableService);
+        order.verify(accessService).requireOwned(PROJECT_REF);
+        order.verify(tableService).alterTable(Mockito.eq(project), Mockito.eq("orders"), Mockito.argThat(dto ->
+                "新注释".equals(dto.comment())));
     }
 
     @Test
