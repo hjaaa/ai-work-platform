@@ -49,6 +49,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
+import java.sql.Connection;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -186,10 +187,47 @@ class ProjectLifecycleServiceTest {
     }
 
     @Test
+    void physicalPreconditionsFailureStillAllowsDeleteButBlocksPhysicalCleanup() {
+        var created = lifecycleService.createProject("deletewithoutphysical", 1L);
+        Long projectId = created.project().getId();
+        String projectRef = created.project().getProjectRef();
+        Mockito.clearInvocations(physicalPreconditions, registry);
+        Mockito.doThrow(new IllegalStateException("physical preconditions failed"))
+            .when(physicalPreconditions)
+            .assertSatisfied();
+        try {
+            lifecycleService.deleteProject(projectId, 1L);
+
+            BaasProject deleting = projectMapper.selectById(projectId);
+            assertThat(deleting.getStatus()).isEqualTo(ProjectStatus.DELETING);
+            assertThat(apiKeyMapper.selectCount(Wrappers.<BaasApiKey>lambdaQuery()
+                .eq(BaasApiKey::getProjectId, projectId)
+                .eq(BaasApiKey::getStatus, "ACTIVE"))).isZero();
+            Mockito.verify(registry).blockAndDrain(projectRef);
+            projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
+                .eq(BaasProject::getId, projectId)
+                .set(BaasProject::getDeleteAfter, LocalDateTime.now().minusMinutes(1)));
+
+            assertThatThrownBy(() -> lifecycleService.physicallyCleanup(projectMapper.selectById(projectId)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("physical preconditions failed");
+        }
+        finally {
+            Mockito.reset(physicalPreconditions, registry);
+        }
+
+        assertThat(projectMapper.selectById(projectId).getStatus()).isEqualTo(ProjectStatus.DELETING);
+        Long databaseCount = rootJdbc().queryForObject(
+                "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ?", Long.class,
+                created.project().getDbName());
+        assertThat(databaseCount).isEqualTo(1L);
+    }
+
+    @Test
     void realProvisionFailureThenRetryEndsActive() {
         Mockito.doThrow(new IllegalStateException("mysql gone"))
             .when(provisioner)
-            .initSystemTables(Mockito.anyString());
+            .initSystemTables(Mockito.any(Connection.class), Mockito.anyString());
         try {
             assertThatThrownBy(() -> lifecycleService.createProject("retrycase", 1L))
                 .isInstanceOf(ProjectProvisionException.class);
@@ -238,7 +276,7 @@ class ProjectLifecycleServiceTest {
     void failedAuditDoesNotMaskProvisionFailureAndProjectRemainsFailed() {
         Mockito.doThrow(new IllegalStateException("mysql gone"))
             .when(provisioner)
-            .initSystemTables(Mockito.anyString());
+            .initSystemTables(Mockito.any(Connection.class), Mockito.anyString());
         Mockito.doThrow(new IllegalStateException("audit unavailable"))
             .when(auditLogMapper)
             .insert(Mockito.any(BaasAuditLog.class));
@@ -338,7 +376,8 @@ class ProjectLifecycleServiceTest {
             return null;
         })
             .when(provisioner)
-            .createRuntimeUser(Mockito.anyString(), Mockito.anyString(), Mockito.anyString());
+            .createRuntimeUser(Mockito.any(Connection.class), Mockito.anyString(), Mockito.anyString(),
+                    Mockito.anyString());
         try {
             lifecycleService.retryProvision(projectId);
         }
@@ -454,7 +493,8 @@ class ProjectLifecycleServiceTest {
             .eq(BaasProject::getId, created.project().getId())
             .set(BaasProject::getDeleteAfter, LocalDateTime.now().minusMinutes(1)));
 
-        lifecycleService.physicallyCleanup(projectMapper.selectById(created.project().getId()));
+        assertThat(lifecycleService.physicallyCleanup(projectMapper.selectById(created.project().getId())))
+            .isEqualTo(ProjectCleanupResult.CLEANED);
 
         BaasProject deletedProject = projectMapper.selectById(created.project().getId());
         assertThat(deletedProject.getStatus()).isEqualTo(ProjectStatus.DELETED);

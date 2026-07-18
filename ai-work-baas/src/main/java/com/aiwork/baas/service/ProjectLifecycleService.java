@@ -51,9 +51,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.security.SecureRandom;
+import java.sql.Connection;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 项目生命周期状态机(spec §9.1、§9.3)。平台库操作按三段短事务组织：元数据创建、开通完成、删除意图；
@@ -115,16 +117,22 @@ public class ProjectLifecycleService {
             projectMapper.updateById(createdProject);
             return createdProject;
         });
+        AtomicReference<CreatedProject> completedProvision = new AtomicReference<>();
         try {
             return lockExecutor.execute(project.getId(), (handle, connection) -> {
                 lockExecutor.assertStillHeld(handle);
-                return continueProvision(project, ownerUserId);
+                CreatedProject result = continueProvision(project, ownerUserId, connection);
+                completedProvision.set(result);
+                return result;
             });
         }
         catch (ProjectProvisionException provisionException) {
             throw provisionException;
         }
         catch (DdlLockBusyException busy) {
+            if (completedProvision.get() != null) {
+                return completedProvision.get();
+            }
             markProvisionFailed(project, ownerUserId, busy);
             throw new ProjectProvisionException("provision lock unavailable", busy);
         }
@@ -137,30 +145,41 @@ public class ProjectLifecycleService {
     public CreatedProject retryProvision(Long projectId) {
         physicalPreconditions.assertSatisfied();
         rejectAmbientTransaction();
+        AtomicReference<CreatedProject> completedProvision = new AtomicReference<>();
         try {
             return lockExecutor.execute(projectId, (handle, connection) -> {
                 lockExecutor.assertStillHeld(handle);
                 BaasProject project = transactionTemplate.execute(status -> prepareProvisionRetry(projectId));
-                return continueProvision(project, project.getOwnerUserId());
+                CreatedProject result = continueProvision(project, project.getOwnerUserId(), connection);
+                completedProvision.set(result);
+                return result;
             });
         }
         catch (DdlLockBusyException busy) {
+            if (completedProvision.get() != null) {
+                return completedProvision.get();
+            }
             throw new DdlConflictException("该项目有 DDL 操作进行中，无法重试开通");
         }
     }
 
     public void deleteProject(Long projectId, Long operatorUserId) {
-        physicalPreconditions.assertSatisfied();
         rejectAmbientTransaction();
         BaasProject project;
+        AtomicReference<BaasProject> committedDelete = new AtomicReference<>();
         try {
             project = lockExecutor.execute(projectId, (handle, connection) -> {
                 lockExecutor.assertStillHeld(handle);
-                return transactionTemplate.execute(status -> markDeleting(projectId, operatorUserId));
+                BaasProject result = transactionTemplate.execute(status -> markDeleting(projectId, operatorUserId));
+                committedDelete.set(result);
+                return result;
             });
         }
         catch (DdlLockBusyException busy) {
-            throw new DdlConflictException("该项目有 DDL 操作进行中，无法删除");
+            project = committedDelete.get();
+            if (project == null) {
+                throw new DdlConflictException("该项目有 DDL 操作进行中，无法删除");
+            }
         }
 
         registry.blockAndDrain(project.getProjectRef());
@@ -169,15 +188,18 @@ public class ProjectLifecycleService {
     /**
      * 对已进入 DELETING 状态的项目执行物理清理，由 {@link ProjectCleanupJob} 在延迟期到达后调用。
      * @param project 待清理项目
+     * @return 本轮已完成清理或已跳过
      */
-    public void physicallyCleanup(BaasProject project) {
+    public ProjectCleanupResult physicallyCleanup(BaasProject project) {
         physicalPreconditions.assertSatisfied();
         rejectAmbientTransaction();
+        AtomicReference<ProjectCleanupResult> completedCleanup = new AtomicReference<>();
         try {
-            lockExecutor.execute(project.getId(), (handle, connection) -> {
+            return lockExecutor.execute(project.getId(), (handle, connection) -> {
                 BaasProject current = projectMapper.selectById(project.getId());
                 if (!cleanupDue(current)) {
-                    return null;
+                    completedCleanup.set(ProjectCleanupResult.SKIPPED);
+                    return ProjectCleanupResult.SKIPPED;
                 }
 
                 lockExecutor.assertStillHeld(handle);
@@ -195,13 +217,18 @@ public class ProjectLifecycleService {
                         throw new IllegalStateException("project physical cleanup status race");
                     }
                 });
-                return null;
+                completedCleanup.set(ProjectCleanupResult.CLEANED);
+                return ProjectCleanupResult.CLEANED;
             });
         }
         catch (DdlLockBusyException busy) {
+            if (completedCleanup.get() != null) {
+                return completedCleanup.get();
+            }
             if (log.isInfoEnabled()) {
                 log.info("project {} cleanup skipped: ddl lock busy", project.getProjectRef());
             }
+            return ProjectCleanupResult.SKIPPED;
         }
     }
 
@@ -247,22 +274,23 @@ public class ProjectLifecycleService {
                 && !project.getDeleteAfter().isAfter(LocalDateTime.now());
     }
 
-    private CreatedProject continueProvision(BaasProject project, Long operatorUserId) {
+    private CreatedProject continueProvision(BaasProject project, Long operatorUserId, Connection connection) {
         try {
             ProvisionStep completedStep = ProvisionStep.valueOf(project.getProvisionStep());
             String passwordAad = aad(project.getId(), "db_password", String.valueOf(project.getId()));
             String runtimePassword = cryptoService.decrypt(project.getRuntimeDbPasswordCipher(), passwordAad);
 
             if (completedStep.ordinal() < ProvisionStep.DB_CREATED.ordinal()) {
-                provisioner.createDatabase(project.getDbName());
+                provisioner.createDatabase(connection, project.getDbName());
                 advance(project, ProvisionStep.DB_CREATED);
             }
             if (completedStep.ordinal() < ProvisionStep.USER_CREATED.ordinal()) {
-                provisioner.createRuntimeUser(project.getRuntimeDbUser(), runtimePassword, project.getDbName());
+                provisioner.createRuntimeUser(connection, project.getRuntimeDbUser(), runtimePassword,
+                        project.getDbName());
                 advance(project, ProvisionStep.USER_CREATED);
             }
             if (completedStep.ordinal() < ProvisionStep.SYSTEM_TABLES.ordinal()) {
-                provisioner.initSystemTables(project.getDbName());
+                provisioner.initSystemTables(connection, project.getDbName());
                 advance(project, ProvisionStep.SYSTEM_TABLES);
             }
 

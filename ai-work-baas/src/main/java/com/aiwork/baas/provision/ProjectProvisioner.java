@@ -22,9 +22,11 @@ package com.aiwork.baas.provision;
 import com.aiwork.baas.ddl.inspect.PhysicalDatabase;
 import com.aiwork.baas.ddl.inspect.PhysicalTable;
 import com.aiwork.baas.ddl.inspect.SchemaInspector;
+import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -89,9 +91,17 @@ public class ProjectProvisioner {
     }
 
     public void createDatabase(String databaseName) {
+        createDatabase(jdbcTemplate, databaseName);
+    }
+
+    public void createDatabase(Connection connection, String databaseName) {
+        createDatabase(SchemaInspector.jdbcFor(connection), databaseName);
+    }
+
+    private void createDatabase(JdbcOperations jdbc, String databaseName) {
         IdentifierValidator.validate(databaseName);
-        jdbcTemplate.execute(CREATE_DATABASE_SQL.formatted(databaseName));
-        PhysicalDatabase database = SchemaInspector.readDatabase(jdbcTemplate, databaseName);
+        jdbc.execute(CREATE_DATABASE_SQL.formatted(databaseName));
+        PhysicalDatabase database = SchemaInspector.readDatabase(jdbc, databaseName);
         if (database == null || !"utf8mb4".equals(database.charset())
                 || !"utf8mb4_general_ci".equals(database.collation())) {
             throw new IllegalStateException("database baseline mismatch (spec §9.1): " + databaseName
@@ -100,24 +110,40 @@ public class ProjectProvisioner {
     }
 
     public void createRuntimeUser(String username, String password, String databaseName) {
+        createRuntimeUser(jdbcTemplate, username, password, databaseName);
+    }
+
+    public void createRuntimeUser(Connection connection, String username, String password, String databaseName) {
+        createRuntimeUser(SchemaInspector.jdbcFor(connection), username, password, databaseName);
+    }
+
+    private void createRuntimeUser(JdbcOperations jdbc, String username, String password, String databaseName) {
         IdentifierValidator.validate(username);
         IdentifierValidator.validate(databaseName);
         validateRuntimePassword(password);
 
-        jdbcTemplate.execute(CREATE_USER_SQL.formatted(username, password));
-        jdbcTemplate.execute(ALTER_USER_SQL.formatted(username, password));
-        jdbcTemplate.execute(GRANT_RUNTIME_PRIVILEGES_SQL.formatted(databaseName, username));
+        jdbc.execute(CREATE_USER_SQL.formatted(username, password));
+        jdbc.execute(ALTER_USER_SQL.formatted(username, password));
+        jdbc.execute(GRANT_RUNTIME_PRIVILEGES_SQL.formatted(databaseName, username));
     }
 
     public void initSystemTables(String databaseName) {
+        initSystemTables(jdbcTemplate, databaseName);
+    }
+
+    public void initSystemTables(Connection connection, String databaseName) {
+        initSystemTables(SchemaInspector.jdbcFor(connection), databaseName);
+    }
+
+    private void initSystemTables(JdbcOperations jdbc, String databaseName) {
         IdentifierValidator.validate(databaseName);
-        jdbcTemplate.execute(CREATE_USERS_TABLE_SQL.formatted(databaseName));
-        jdbcTemplate.execute(CREATE_SESSIONS_TABLE_SQL.formatted(databaseName));
-        jdbcTemplate.execute(CREATE_REFRESH_TOKENS_TABLE_SQL.formatted(databaseName));
-        SystemTableManifest.MatchResult result = SystemTableManifest.compare(readSystemTables(databaseName));
+        jdbc.execute(CREATE_USERS_TABLE_SQL.formatted(databaseName));
+        jdbc.execute(CREATE_SESSIONS_TABLE_SQL.formatted(databaseName));
+        jdbc.execute(CREATE_REFRESH_TOKENS_TABLE_SQL.formatted(databaseName));
+        SystemTableManifest.MatchResult result = SystemTableManifest.compare(readSystemTables(jdbc, databaseName));
         if (result == SystemTableManifest.MatchResult.MATCH_LEGACY_PLAN_A) {
-            upgradeLegacySystemTables(databaseName);
-            result = SystemTableManifest.compare(readSystemTables(databaseName));
+            upgradeLegacySystemTables(jdbc, databaseName);
+            result = SystemTableManifest.compare(readSystemTables(jdbc, databaseName));
         }
         if (result != SystemTableManifest.MatchResult.MATCH_CURRENT) {
             throw new IllegalStateException("system table manifest mismatch (spec §9.1): " + databaseName);
@@ -137,26 +163,26 @@ public class ProjectProvisioner {
         }
     }
 
-    private void upgradeLegacySystemTables(String databaseName) {
+    private void upgradeLegacySystemTables(JdbcOperations jdbc, String databaseName) {
         for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
-            PhysicalTable table = SchemaInspector.readTable(jdbcTemplate, databaseName, tableName);
+            PhysicalTable table = SchemaInspector.readTable(jdbc, databaseName, tableName);
             if (SystemTableManifest.tableMatches(tableName, table, false)) {
                 continue;
             }
-            Long overflow = jdbcTemplate.queryForObject(
+            Long overflow = jdbc.queryForObject(
                     SystemTableManifest.unsignedBoundsCheckSql(databaseName, tableName), Long.class);
             if (overflow != null && overflow > 0) {
                 throw new IllegalStateException(
                         "unsigned value exceeds signed bigint range, cannot migrate: " + tableName);
             }
-            jdbcTemplate.execute(SystemTableManifest.legacyMigrationSql(databaseName, tableName));
+            jdbc.execute(SystemTableManifest.legacyMigrationSql(databaseName, tableName));
         }
     }
 
-    private Map<String, PhysicalTable> readSystemTables(String databaseName) {
+    private Map<String, PhysicalTable> readSystemTables(JdbcOperations jdbc, String databaseName) {
         Map<String, PhysicalTable> tables = new HashMap<>();
         for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
-            tables.put(tableName, SchemaInspector.readTable(jdbcTemplate, databaseName, tableName));
+            tables.put(tableName, SchemaInspector.readTable(jdbc, databaseName, tableName));
         }
         return tables;
     }

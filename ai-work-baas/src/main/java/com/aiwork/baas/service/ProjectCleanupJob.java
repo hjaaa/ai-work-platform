@@ -53,13 +53,14 @@ public class ProjectCleanupJob {
             .lt(BaasProject::getDeleteAfter, LocalDateTime.now()));
         for (BaasProject project : expiredProjects) {
             try {
-                lifecycleService.physicallyCleanup(project);
-                if (log.isInfoEnabled()) {
+                ProjectCleanupResult result = lifecycleService.physicallyCleanup(project);
+                if (result == ProjectCleanupResult.CLEANED && log.isInfoEnabled()) {
                     log.info("baas project {} physically cleaned", project.getProjectRef());
                 }
             }
             catch (Exception exception) {
-                log.error("cleanup project {} failed", project.getProjectRef(), exception);
+                log.error("cleanup project {} failed errorType={}", project.getProjectRef(),
+                        exception.getClass().getSimpleName());
             }
         }
     }
