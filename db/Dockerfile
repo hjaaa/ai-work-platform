@@ -10,3 +10,5 @@ RUN ln -sf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 COPY ./ai_work.sql /docker-entrypoint-initdb.d
 
 COPY ./ai_work_config.sql /docker-entrypoint-initdb.d
+
+COPY ./ai_work_baas.sql /docker-entrypoint-initdb.d
