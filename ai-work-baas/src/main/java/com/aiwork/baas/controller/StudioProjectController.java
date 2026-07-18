@@ -26,12 +26,15 @@ import com.aiwork.baas.controller.dto.KeyCreateDTO;
 import com.aiwork.baas.controller.dto.ProjectDTO;
 import com.aiwork.baas.controller.dto.ProjectPatchDTO;
 import com.aiwork.baas.controller.dto.ProjectVO;
+import com.aiwork.baas.controller.dto.ReconcileTriggerDTO;
 import com.aiwork.baas.entity.BaasProject;
 import com.aiwork.baas.security.CurrentUserProvider;
 import com.aiwork.baas.service.ProjectAccessService;
 import com.aiwork.baas.service.ProjectKeyService;
 import com.aiwork.baas.service.ProjectLifecycleService;
+import com.aiwork.baas.service.ReconcileService;
 import com.aiwork.common.core.util.R;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -64,6 +67,8 @@ public class StudioProjectController {
 
     private final CurrentUserProvider userProvider;
 
+    private final ReconcileService reconcileService;
+
     @GetMapping
     public R<List<ProjectVO>> list() {
         return R.ok(accessService.listVisible().stream().map(ProjectVO::from).toList());
@@ -93,6 +98,13 @@ public class StudioProjectController {
         BaasProject project = accessService.requireOwned(projectRef);
         lifecycleService.deleteProject(project.getId(), userProvider.currentUserId());
         return R.ok();
+    }
+
+    @PostMapping("/{ref}/reconcile")
+    public R<ObjectNode> reconcile(@PathVariable("ref") String projectRef,
+            @Valid @RequestBody ReconcileTriggerDTO triggerDTO) {
+        BaasProject project = accessService.requireOwned(projectRef);
+        return R.ok(reconcileService.manualReconcile(project, triggerDTO));
     }
 
     @GetMapping("/{ref}/keys")

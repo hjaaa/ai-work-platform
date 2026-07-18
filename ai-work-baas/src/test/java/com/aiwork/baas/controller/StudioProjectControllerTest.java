@@ -21,6 +21,7 @@ package com.aiwork.baas.controller;
 
 import com.aiwork.baas.controller.dto.ApiKeyVO;
 import com.aiwork.baas.controller.dto.CreatedKeyVO;
+import com.aiwork.baas.controller.dto.ReconcileTriggerDTO;
 import com.aiwork.baas.entity.BaasProject;
 import com.aiwork.baas.entity.enums.KeyType;
 import com.aiwork.baas.entity.enums.ProjectStatus;
@@ -31,16 +32,22 @@ import com.aiwork.baas.security.CurrentUserProvider;
 import com.aiwork.baas.service.ProjectAccessService;
 import com.aiwork.baas.service.ProjectKeyService;
 import com.aiwork.baas.service.ProjectLifecycleService;
+import com.aiwork.baas.service.ReconcileService;
+import com.aiwork.common.core.jackson.AiWorkJavaTimeModule;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -65,6 +72,10 @@ class StudioProjectControllerTest {
     private ProjectKeyService keyService;
 
     private CurrentUserProvider userProvider;
+
+    private ReconcileService reconcileService;
+
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new AiWorkJavaTimeModule());
 
     private MockMvc mockMvc;
 
@@ -92,10 +103,14 @@ class StudioProjectControllerTest {
         accessService = Mockito.mock(ProjectAccessService.class);
         keyService = Mockito.mock(ProjectKeyService.class);
         userProvider = Mockito.mock(CurrentUserProvider.class);
+        reconcileService = Mockito.mock(ReconcileService.class);
         when(userProvider.currentUserId()).thenReturn(1L);
         mockMvc = MockMvcBuilders
-            .standaloneSetup(new StudioProjectController(lifecycleService, accessService, keyService, userProvider))
+            .standaloneSetup(
+                    new StudioProjectController(lifecycleService, accessService, keyService, userProvider,
+                            reconcileService))
             .setControllerAdvice(new BaasStudioExceptionHandler())
+            .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
             .build();
     }
 
@@ -293,6 +308,37 @@ class StudioProjectControllerTest {
         mockMvc.perform(delete("/studio/projects/" + PROJECT_REF)).andExpect(status().isOk());
 
         verify(lifecycleService).deleteProject(10L, 1L);
+    }
+
+    @Test
+    void reconcileRequiresOwnedProjectAndDelegatesBodyOperationId() throws Exception {
+        BaasProject owned = project(10L, PROJECT_REF, 1L);
+        String operationId = "11111111-1111-1111-1111-111111111111";
+        ObjectNode report = objectMapper.createObjectNode();
+        report.putArray("corrected").add("orders");
+        when(accessService.requireOwned(PROJECT_REF)).thenReturn(owned);
+        when(reconcileService.manualReconcile(any(BaasProject.class), any(ReconcileTriggerDTO.class)))
+            .thenReturn(report);
+
+        mockMvc.perform(post("/studio/projects/" + PROJECT_REF + "/reconcile")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"operationId\":\"" + operationId + "\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.corrected[0]").value("orders"));
+
+        verify(accessService).requireOwned(PROJECT_REF);
+        verify(reconcileService).manualReconcile(eq(owned), eq(new ReconcileTriggerDTO(operationId)));
+    }
+
+    @Test
+    void reconcileRejectsBlankOperationIdBeforeOwnershipLookup() throws Exception {
+        mockMvc.perform(post("/studio/projects/" + PROJECT_REF + "/reconcile")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"operationId\":\" \"}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.msg").value("请求参数校验失败"));
+
+        Mockito.verifyNoInteractions(accessService, reconcileService);
     }
 
     @Test
