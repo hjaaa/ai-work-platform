@@ -20,9 +20,17 @@
 package com.aiwork.baas.support;
 
 import com.aiwork.baas.LifecycleTestApplication;
+import com.aiwork.baas.entity.BaasProject;
+import com.aiwork.baas.service.ProjectLifecycleService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+
+import java.util.UUID;
 
 /**
  * Plan B 项目级 Spring 集成测试共享装配。
@@ -35,6 +43,26 @@ import org.springframework.test.context.DynamicPropertySource;
 				"spring.cloud.nacos.config.enabled=false",
 				"spring.cloud.service-registry.auto-registration.enabled=false" })
 public abstract class PlanBProjectIntegrationTestSupport extends PlanBContainerSupport {
+
+	protected static final ObjectMapper MAPPER = new ObjectMapper();
+
+	@Autowired
+	private ProjectLifecycleService lifecycleService;
+
+	protected BaasProject project;
+
+	protected JdbcTemplate rootJdbc;
+
+	@BeforeEach
+	void createProjectFixture() {
+		rootJdbc = new JdbcTemplate(mysqlDataSource());
+		String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+		project = lifecycleService.createProject(projectNamePrefix() + "-" + suffix, 1L).project();
+	}
+
+	protected String projectNamePrefix() {
+		return "plan-b";
+	}
 
 	@DynamicPropertySource
 	protected static void registerPlanBProperties(DynamicPropertyRegistry registry) {
