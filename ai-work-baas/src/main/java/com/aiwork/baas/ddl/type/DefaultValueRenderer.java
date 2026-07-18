@@ -72,7 +72,10 @@ public final class DefaultValueRenderer {
         return switch (type) {
             case INT -> integral(value, INT_MIN, INT_MAX);
             case BIGINT -> integral(value, LONG_MIN, LONG_MAX);
-            case DECIMAL -> decimal(value, length, scale == null ? 0 : scale);
+            case DECIMAL -> {
+                ColumnTypeValidator.validateTypeParams(type.code(), length, scale);
+                yield decimal(value, length, ColumnTypeValidator.normalizeScale(type, scale));
+            }
             case BOOLEAN -> bool(value);
             case DATE -> date(value);
             case DATETIME -> datetime(value);

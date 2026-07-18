@@ -71,6 +71,19 @@ class DefaultValueRendererTest {
     }
 
     @Test
+    void decimalRejectsMissingOrInvalidTypeParams() {
+        assertThatThrownBy(() -> DefaultValueRenderer.render(ColumnType.DECIMAL, null, 0,
+                MAPPER.getNodeFactory().numberNode(1)))
+            .isInstanceOf(BaasBadRequestException.class);
+        assertThatThrownBy(() -> DefaultValueRenderer.render(ColumnType.DECIMAL, 66, 0,
+                MAPPER.getNodeFactory().numberNode(1)))
+            .isInstanceOf(BaasBadRequestException.class);
+        assertThatThrownBy(() -> DefaultValueRenderer.render(ColumnType.DECIMAL, 1, 2,
+                MAPPER.getNodeFactory().numberNode(new java.math.BigDecimal("0.01"))))
+            .isInstanceOf(BaasBadRequestException.class);
+    }
+
+    @Test
     void booleanRendersTrueFalseKeywords() {
         var rendered = DefaultValueRenderer.render(ColumnType.BOOLEAN, null, null,
                 MAPPER.getNodeFactory().booleanNode(true));
