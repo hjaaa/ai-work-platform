@@ -70,6 +70,8 @@ class AlterTableWork implements DdlWork {
 
     private static final String STRICT_SQL_MODE = "STRICT_ALL_TABLES";
 
+    private static final String OWNER_DROP_INTENT_MARKER = "/* BAAS_INTENT:ACL_CLOSED_BY_OWNER_DROP */";
+
     private final TableManagementService service;
 
     private final BaasProject project;
@@ -203,7 +205,7 @@ class AlterTableWork implements DdlWork {
         Map<String, BaasColumn> byName = metadataColumns.stream()
             .collect(Collectors.toMap(BaasColumn::getColumnName, column -> column, (first, second) -> first,
                     LinkedHashMap::new));
-        preparePlans(byName);
+        preparePlans(context, byName);
         targetTableName = dto.newTableName() == null ? tableName : dto.newTableName();
         validateTargetMetadataName();
 
@@ -283,7 +285,7 @@ class AlterTableWork implements DdlWork {
         buildClauses(sourcePhysical);
     }
 
-    private void preparePlans(Map<String, BaasColumn> byName) {
+    private void preparePlans(DdlWorkContext context, Map<String, BaasColumn> byName) {
         addPlans = new LinkedHashMap<>();
         modifyPlans = new LinkedHashMap<>();
         lossyOperation = !dto.dropColumnsOrEmpty().isEmpty();
@@ -301,7 +303,7 @@ class AlterTableWork implements DdlWork {
         }
         prepareModifyPlans(byName);
         validateRenameTargets(byName);
-        detectOwnerImpacts();
+        detectOwnerImpacts(context);
         finalColumns = computeFinalColumns(byName);
         validateFinalOwner();
         int finalIndexCount = (int) finalColumns.stream()
@@ -338,17 +340,23 @@ class AlterTableWork implements DdlWork {
         }
     }
 
-    private void detectOwnerImpacts() {
+    private void detectOwnerImpacts(DdlWorkContext context) {
         String ownerColumn = tableRow.getOwnerColumn();
+        dropsOwnerColumn = hasPersistedOwnerDropIntent(context)
+                || ownerColumn != null && dto.dropColumnsOrEmpty().contains(ownerColumn);
         if (ownerColumn == null) {
             return;
         }
-        dropsOwnerColumn = dto.dropColumnsOrEmpty().contains(ownerColumn);
         for (ColumnRenameDTO rename : dto.renameColumnsOrEmpty()) {
             if (rename.from().equals(ownerColumn)) {
                 renamedOwnerColumn = rename.to();
             }
         }
+    }
+
+    private boolean hasPersistedOwnerDropIntent(DdlWorkContext context) {
+        return context.existingLog() != null && context.existingLog().getDdlText() != null
+                && context.existingLog().getDdlText().startsWith(OWNER_DROP_INTENT_MARKER);
     }
 
     private void validateFinalOwner() {
@@ -520,6 +528,9 @@ class AlterTableWork implements DdlWork {
         }
         String sanitizedSql = clauses.isEmpty() ? null
                 : DdlRenderer.renderAlterTable(project.getDbName(), tableName, clauses).sanitizedSql();
+        if (dropsOwnerColumn && sanitizedSql != null) {
+            sanitizedSql = OWNER_DROP_INTENT_MARKER + " " + sanitizedSql;
+        }
         service.patchDdlLog(context.logId(), tableRow.getId(), sanitizedSql);
     }
 

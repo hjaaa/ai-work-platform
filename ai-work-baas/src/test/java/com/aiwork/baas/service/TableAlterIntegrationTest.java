@@ -286,6 +286,27 @@ class TableAlterIntegrationTest extends PlanBProjectIntegrationTestSupport {
     }
 
     @Test
+    void uppercaseForeignIndexNameOccupiesCanonicalNameAcrossFullAlterChain() {
+        String table = createSimpleTable("alt_index_case");
+        tableService.alterTable(project, table, new TableAlterDTO(UUID.randomUUID().toString(), null, null, null,
+                null, null, List.of(new ColumnDefinitionDTO("name", "varchar", 64, null, true, null, false, true,
+                        null)), null));
+        rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table
+                + "` RENAME INDEX `idx_name` TO `IDX_EMAIL`");
+        TableAlterDTO dto = new TableAlterDTO(UUID.randomUUID().toString(), null, null, null,
+                List.of(new ColumnDefinitionDTO("email", "varchar", 64, null, true, null, false, true, null)),
+                null, null, null);
+
+        tableService.alterTable(project, table, dto);
+
+        assertThat(indexNames(table, "name")).containsExactly("IDX_EMAIL");
+        List<String> emailIndexes = indexNames(table, "email");
+        assertThat(emailIndexes).hasSize(1);
+        assertThat(emailIndexes.get(0)).startsWith("idx_email_").isNotEqualToIgnoringCase("IDX_EMAIL");
+        assertThat(ddlLog(dto).getDdlText()).contains("ADD INDEX `idx_email_");
+    }
+
+    @Test
     void ambiguousIndexesOnOneColumnAreRejectedBeforeDdl() {
         String table = createSimpleTable("alt_amb_idx");
         rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table + "` ADD INDEX foo_age (`age`)");
@@ -348,8 +369,11 @@ class TableAlterIntegrationTest extends PlanBProjectIntegrationTestSupport {
     }
 
     @Test
-    void ownerDropClosesAclBeforeDdlAndKeepsItClosedOnFailure() {
+    void ownerDropFailureThenRetryPersistsAclClosureIntent() throws Exception {
         String table = createSimpleTable("alt_owner_drop");
+        tableService.alterTable(project, table, new TableAlterDTO(UUID.randomUUID().toString(), null, null, null,
+                null, null, List.of(new ColumnDefinitionDTO("age", "bigint", null, null, true, null, false, true,
+                        null)), null));
         seedOwner(table, "age", true);
         rootJdbc.update("INSERT INTO `" + project.getDbName() + "`.`" + table + "` (name, age) VALUES (?, ?)",
                 "a-very-long-name-over-8", 1);
@@ -369,6 +393,25 @@ class TableAlterIntegrationTest extends PlanBProjectIntegrationTestSupport {
             assertThat(acl.getCanDelete()).isFalse();
         });
         assertThat(columnCount(table, "age")).isEqualTo(1L);
+        assertThat(ddlLog(dto).getDdlText()).contains("ACL_CLOSED_BY_OWNER_DROP");
+
+        rootJdbc.update("DELETE FROM `" + project.getDbName() + "`.`" + table + "`");
+        ObjectNode success = tableService.alterTable(project, table, dto);
+        ObjectNode replay = tableService.alterTable(project, table, dto);
+        BaasDdlLog completedLog = ddlLog(dto);
+
+        assertThat(success.path("aclClosedByOwnerDrop").asBoolean()).isTrue();
+        assertThat(MAPPER.readTree(completedLog.getResultSnapshot()).path("aclClosedByOwnerDrop").asBoolean())
+            .isTrue();
+        assertThat(replay).isEqualTo(success);
+        assertThat(replay.path("aclClosedByOwnerDrop").asBoolean()).isTrue();
+        assertThat(tableRow(table).getOwnerColumn()).isNull();
+        assertThat(aclRows(row.getId())).allSatisfy(acl -> {
+            assertThat(acl.getCanSelect()).isFalse();
+            assertThat(acl.getCanInsert()).isFalse();
+            assertThat(acl.getCanUpdate()).isFalse();
+            assertThat(acl.getCanDelete()).isFalse();
+        });
     }
 
     @Test
@@ -474,6 +517,44 @@ class TableAlterIntegrationTest extends PlanBProjectIntegrationTestSupport {
         assertThat(ddlLog(dto).getStatus()).isEqualTo(DdlLogStatus.SUCCESS.name());
         assertThat(ddlLog(dto).getOwnerToken()).isNotEqualTo("dead-executor");
         assertThat(tableRow(table).getStatus()).isEqualTo(TableStatus.ACTIVE.name());
+    }
+
+    @Test
+    void staleOwnerDropAfterOwnershipCrashRestoresPersistedAclClosureIntent() {
+        String table = createSimpleTable("alt_owner_crash");
+        tableService.alterTable(project, table, new TableAlterDTO(UUID.randomUUID().toString(), null, null, null,
+                null, null, List.of(new ColumnDefinitionDTO("age", "bigint", null, null, true, null, false, true,
+                        null)), null));
+        seedOwner(table, "age", true);
+        TableAlterDTO dto = new TableAlterDTO(UUID.randomUUID().toString(), true, null, null, null, List.of("age"),
+                null, null);
+        seedAlterLog(table, dto, DdlStep.PREPARED, DdlLogStatus.RUNNING);
+        BaasTable row = tableRow(table);
+        row.setOwnerColumn(null);
+        row.setStatus(TableStatus.ALTERING.name());
+        tableMapper.updateById(row);
+        aclMapper.update(null, Wrappers.<BaasTableAcl>lambdaUpdate()
+            .eq(BaasTableAcl::getTableId, row.getId())
+            .set(BaasTableAcl::getCanSelect, false)
+            .set(BaasTableAcl::getCanInsert, false)
+            .set(BaasTableAcl::getCanUpdate, false)
+            .set(BaasTableAcl::getCanDelete, false));
+        BaasDdlLog crashedLog = ddlLog(dto);
+        crashedLog.setDdlText("/* BAAS_INTENT:ACL_CLOSED_BY_OWNER_DROP */ ALTER TABLE `"
+                + project.getDbName() + "`.`" + table + "` DROP COLUMN `age`");
+        ddlLogMapper.updateById(crashedLog);
+
+        ObjectNode success = tableService.alterTable(project, table, dto);
+
+        assertThat(success.path("aclClosedByOwnerDrop").asBoolean()).isTrue();
+        assertThat(columnCount(table, "age")).isZero();
+        assertThat(tableRow(table).getOwnerColumn()).isNull();
+        assertThat(aclRows(row.getId())).allSatisfy(acl -> {
+            assertThat(acl.getCanSelect()).isFalse();
+            assertThat(acl.getCanInsert()).isFalse();
+            assertThat(acl.getCanUpdate()).isFalse();
+            assertThat(acl.getCanDelete()).isFalse();
+        });
     }
 
     @Test
