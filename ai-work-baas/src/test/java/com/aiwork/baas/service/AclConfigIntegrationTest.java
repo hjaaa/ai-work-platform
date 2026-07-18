@@ -150,6 +150,75 @@ class AclConfigIntegrationTest extends PlanBProjectIntegrationTestSupport {
     }
 
     @Test
+    void physicalOwnerTypeDriftFromBigintToIntIsConflict() {
+        String table = createTableWithOwnerCandidate("acl_type_drift", true);
+        rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table
+                + "` MODIFY owner_id int NULL");
+        AclPutDTO dto = put(READ_ONLY, READ_ONLY, "owner_id");
+
+        assertThatThrownBy(() -> aclService.putAcl(project, table, dto))
+            .isInstanceOf(DdlConflictException.class)
+            .hasMessageContaining("物理列");
+        assertAclPutRejectedWithoutSideEffects(table, dto);
+    }
+
+    @Test
+    void ordinaryAndUniqueOwnerIndexesAreRejectedAsAmbiguous() {
+        String table = createTableWithOwnerCandidate("acl_idx_mix", true);
+        rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table
+                + "` ADD INDEX idx_owner_normal (owner_id), ADD UNIQUE INDEX uk_owner (owner_id)");
+        AclPutDTO dto = put(READ_ONLY, READ_ONLY, "owner_id");
+
+        assertThatThrownBy(() -> aclService.putAcl(project, table, dto))
+            .isInstanceOf(DdlConflictException.class)
+            .hasMessageContaining("索引");
+        assertAclPutRejectedWithoutSideEffects(table, dto);
+        assertThat(secondaryIndexCount(table)).isEqualTo(2L);
+    }
+
+    @Test
+    void duplicateOrdinaryOwnerIndexesAreRejectedAsAmbiguous() {
+        String table = createTableWithOwnerCandidate("acl_idx_dup", true);
+        rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table
+                + "` ADD INDEX idx_owner_a (owner_id), ADD INDEX idx_owner_b (owner_id)");
+        AclPutDTO dto = put(READ_ONLY, READ_ONLY, "owner_id");
+
+        assertThatThrownBy(() -> aclService.putAcl(project, table, dto))
+            .isInstanceOf(DdlConflictException.class)
+            .hasMessageContaining("索引");
+        assertAclPutRejectedWithoutSideEffects(table, dto);
+        assertThat(secondaryIndexCount(table)).isEqualTo(2L);
+    }
+
+    @Test
+    void compositeOwnerIndexIsRejectedInsteadOfAddingSingleColumnIndex() {
+        String table = createTableWithOwnerCandidate("acl_idx_comp", true);
+        rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table
+                + "` ADD INDEX idx_owner_title (owner_id, title)");
+        AclPutDTO dto = put(READ_ONLY, READ_ONLY, "owner_id");
+
+        assertThatThrownBy(() -> aclService.putAcl(project, table, dto))
+            .isInstanceOf(DdlConflictException.class)
+            .hasMessageContaining("索引");
+        assertAclPutRejectedWithoutSideEffects(table, dto);
+        assertThat(secondaryIndexCount(table)).isEqualTo(1L);
+    }
+
+    @Test
+    void unrelatedPrefixIndexIsRejectedBeforeAddingOwnerIndex() {
+        String table = createTableWithOwnerCandidate("acl_idx_prefix", true);
+        rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table
+                + "` ADD INDEX idx_title_prefix (title(16))");
+        AclPutDTO dto = put(READ_ONLY, READ_ONLY, "owner_id");
+
+        assertThatThrownBy(() -> aclService.putAcl(project, table, dto))
+            .isInstanceOf(DdlConflictException.class)
+            .hasMessageContaining("索引");
+        assertAclPutRejectedWithoutSideEffects(table, dto);
+        assertThat(secondaryIndexCount(table)).isEqualTo(1L);
+    }
+
+    @Test
     void missingPhysicalOwnerColumnIsConflictWithoutLogOrAclChange() {
         String table = createTableWithOwnerCandidate("acl_missing_phy", true);
         rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table + "` DROP COLUMN owner_id");
@@ -356,6 +425,20 @@ class AclConfigIntegrationTest extends PlanBProjectIntegrationTestSupport {
         return rootJdbc.queryForObject("SELECT COUNT(*) FROM information_schema.STATISTICS "
                 + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?", Long.class,
                 project.getDbName(), table, column);
+    }
+
+    private long secondaryIndexCount(String table) {
+        return rootJdbc.queryForObject("SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS "
+                + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME <> 'PRIMARY'", Long.class,
+                project.getDbName(), table);
+    }
+
+    private void assertAclPutRejectedWithoutSideEffects(String table, AclPutDTO dto) {
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), dto.operationId())).isNull();
+        ObjectNode snapshot = tableService.getTableSnapshot(project, table);
+        assertThat(snapshot.get("ownerColumn").isNull()).isTrue();
+        assertThat(snapshot.at("/acl/anon/select").asBoolean()).isFalse();
+        assertThat(snapshot.at("/acl/authenticated/select").asBoolean()).isFalse();
     }
 
     private BaasDdlLog seedAclLog(String table, AclPutDTO dto, DdlStep step, DdlLogStatus status) {

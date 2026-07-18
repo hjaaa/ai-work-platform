@@ -32,6 +32,7 @@ import com.aiwork.baas.ddl.index.IndexAdmission;
 import com.aiwork.baas.ddl.index.IndexNameAllocator;
 import com.aiwork.baas.ddl.inspect.LogicalModelMapper;
 import com.aiwork.baas.ddl.inspect.MappingOutcome;
+import com.aiwork.baas.ddl.inspect.PhysicalColumn;
 import com.aiwork.baas.ddl.inspect.PhysicalIndex;
 import com.aiwork.baas.ddl.inspect.PhysicalTable;
 import com.aiwork.baas.ddl.inspect.SchemaInspector;
@@ -58,7 +59,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -211,11 +214,9 @@ public class AclConfigService {
             if (dto.ownerColumn() == null) {
                 return;
             }
-            BaasColumn metadataOwner = readMetadataOwner();
             PhysicalTable physical = readManagedPhysicalTable(context);
-            LogicalColumn physicalOwner = mapPhysicalOwner(physical);
-            validateOwnerColumn(metadataOwner, physicalOwner);
-            prepareIndexOperation(physical, physicalOwner);
+            OwnerIndexMapping ownerMapping = inspectPhysicalStructure(physical);
+            prepareIndexOperation(physical, ownerMapping.logicalColumn(), ownerMapping.index());
         }
 
         private BaasTable resolveTableRow(DdlWorkContext context) {
@@ -233,16 +234,6 @@ public class AclConfigService {
             return original;
         }
 
-        private BaasColumn readMetadataOwner() {
-            List<BaasColumn> matches = columnMapper.selectList(Wrappers.<BaasColumn>lambdaQuery()
-                .eq(BaasColumn::getTableId, tableRow.getId())
-                .eq(BaasColumn::getColumnName, dto.ownerColumn()));
-            if (matches.size() != 1) {
-                throw new BaasBadRequestException("owner 列不存在或元数据不唯一: " + dto.ownerColumn());
-            }
-            return matches.get(0);
-        }
-
         private PhysicalTable readManagedPhysicalTable(DdlWorkContext context) {
             PhysicalTable physical = SchemaInspector.readTable(context.projectJdbc(), project.getDbName(), tableName);
             if (physical == null) {
@@ -257,22 +248,9 @@ public class AclConfigService {
             return physical;
         }
 
-        private LogicalColumn mapPhysicalOwner(PhysicalTable physical) {
-            var physicalOwner = physical.findColumn(dto.ownerColumn());
-            if (physicalOwner == null) {
-                throw new DdlConflictException("owner 物理列不存在,请先对账处理");
-            }
-            PhysicalIndex existingIndex = physical.mappableSingleColumnIndexOn(dto.ownerColumn());
-            MappingOutcome<LogicalColumn> outcome = LogicalModelMapper.toLogical(physicalOwner,
-                    existingIndex != null && existingIndex.unique(), existingIndex != null && !existingIndex.unique());
-            if (!outcome.ok()) {
-                throw new DdlConflictException("owner 物理列不可映射,请先对账处理");
-            }
-            return outcome.value();
-        }
-
         private void validateOwnerColumn(BaasColumn metadataOwner, LogicalColumn physicalOwner) {
-            boolean physicalDrift = !Objects.equals(metadataOwner.getLength(), physicalOwner.length())
+            boolean physicalDrift = !Objects.equals(metadataOwner.getDataType(), physicalOwner.type().code())
+                    || !Objects.equals(metadataOwner.getLength(), physicalOwner.length())
                     || !Objects.equals(metadataOwner.getScale(), physicalOwner.scale())
                     || !Objects.equals(Boolean.TRUE.equals(metadataOwner.getNullable()), physicalOwner.nullable())
                     || !Objects.equals(metadataOwner.getDefaultValue(), physicalOwner.defaultValue())
@@ -296,8 +274,7 @@ public class AclConfigService {
             }
         }
 
-        private void prepareIndexOperation(PhysicalTable physical, LogicalColumn owner) {
-            PhysicalIndex existingIndex = physical.mappableSingleColumnIndexOn(dto.ownerColumn());
+        private void prepareIndexOperation(PhysicalTable physical, LogicalColumn owner, PhysicalIndex existingIndex) {
             if (existingIndex == null) {
                 IndexAdmission.validateColumnIndexRequest(ColumnType.BIGINT, null, false, true);
                 IndexAdmission.validateFinalStructure(List.of(owner), physical.secondaryIndexes().size() + 1);
@@ -355,7 +332,8 @@ public class AclConfigService {
                 if (physical == null) {
                     throw new DdlConflictException("ACL 补索引物理表不存在");
                 }
-                if (physical.mappableSingleColumnIndexOn(dto.ownerColumn()) == null) {
+                OwnerIndexMapping ownerMapping = inspectPhysicalStructure(physical);
+                if (ownerMapping.index() == null) {
                     if (!needIndex || renderedDdl == null) {
                         throw new DdlConflictException("ACL 补索引目标在执行前发生漂移");
                     }
@@ -370,9 +348,83 @@ public class AclConfigService {
 
         private void verifyOwnerIndex(DdlWorkContext context) {
             PhysicalTable physical = SchemaInspector.readTable(context.projectJdbc(), project.getDbName(), tableName);
-            if (physical == null || physical.mappableSingleColumnIndexOn(dto.ownerColumn()) == null) {
+            if (physical == null) {
                 throw new DdlConflictException("ACL owner 单列索引物理目标校验失败");
             }
+            OwnerIndexMapping ownerMapping = inspectPhysicalStructure(physical);
+            if (ownerMapping.index() == null) {
+                throw new DdlConflictException("ACL owner 单列索引物理目标校验失败");
+            }
+            ownerUnique = ownerMapping.index().unique();
+            ownerIndexed = !ownerUnique;
+        }
+
+        private OwnerIndexMapping inspectPhysicalStructure(PhysicalTable physical) {
+            List<BaasColumn> metadataColumns = columnMapper.selectList(Wrappers.<BaasColumn>lambdaQuery()
+                .eq(BaasColumn::getTableId, tableRow.getId())
+                .orderByAsc(BaasColumn::getId));
+            Map<String, BaasColumn> metadataByName = new LinkedHashMap<>();
+            for (BaasColumn metadata : metadataColumns) {
+                if (metadataByName.put(metadata.getColumnName(), metadata) != null) {
+                    throw new DdlConflictException("平台列元数据存在重复名称,请先对账处理");
+                }
+            }
+            if (metadataByName.size() != physical.columns().size()) {
+                throw new DdlConflictException("物理列结构与平台元数据不一致,请先对账处理");
+            }
+
+            Map<String, PhysicalIndex> indexesByColumn = new LinkedHashMap<>();
+            for (PhysicalIndex index : physical.secondaryIndexes()) {
+                if (!SchemaInspector.isMappableSingleColumnIndex(index)) {
+                    throw new DdlConflictException("物理索引结构不可映射,请先对账处理");
+                }
+                String columnName = index.parts().get(0).columnName();
+                if (!metadataByName.containsKey(columnName) || indexesByColumn.put(columnName, index) != null) {
+                    throw new DdlConflictException("物理索引映射不唯一,请先对账处理");
+                }
+            }
+
+            OwnerIndexMapping ownerMapping = null;
+            for (BaasColumn metadata : metadataColumns) {
+                PhysicalColumn physicalColumn = physical.findColumn(metadata.getColumnName());
+                if (physicalColumn == null) {
+                    throw new DdlConflictException("物理列结构与平台元数据不一致,请先对账处理");
+                }
+                PhysicalIndex index = indexesByColumn.get(metadata.getColumnName());
+                MappingOutcome<LogicalColumn> outcome = LogicalModelMapper.toLogical(physicalColumn,
+                        index != null && index.unique(), index != null && !index.unique());
+                if (!outcome.ok()) {
+                    String subject = metadata.getColumnName().equals(dto.ownerColumn())
+                            ? "owner 物理列" : "物理列";
+                    throw new DdlConflictException(subject + "不可映射,请先对账处理");
+                }
+                LogicalColumn logical = outcome.value();
+                if (metadata.getColumnName().equals(dto.ownerColumn())) {
+                    validateOwnerColumn(metadata, logical);
+                    ownerMapping = new OwnerIndexMapping(logical, index);
+                }
+                else if (!matchesMetadata(metadata, logical)) {
+                    throw new DdlConflictException("物理结构与平台元数据不一致,请先对账处理");
+                }
+            }
+            if (ownerMapping == null) {
+                throw new BaasBadRequestException("owner 列不存在或元数据不唯一: " + dto.ownerColumn());
+            }
+            return ownerMapping;
+        }
+
+        private boolean matchesMetadata(BaasColumn metadata, LogicalColumn physical) {
+            return Objects.equals(metadata.getColumnName(), physical.columnName())
+                    && Objects.equals(metadata.getDataType(), physical.type().code())
+                    && Objects.equals(metadata.getLength(), physical.length())
+                    && Objects.equals(metadata.getScale(), physical.scale())
+                    && Objects.equals(Boolean.TRUE.equals(metadata.getNullable()), physical.nullable())
+                    && Objects.equals(metadata.getDefaultValue(), physical.defaultValue())
+                    && Objects.equals(Boolean.TRUE.equals(metadata.getPk()), physical.pk())
+                    && Objects.equals(Boolean.TRUE.equals(metadata.getAutoIncrement()), physical.autoIncrement())
+                    && Objects.equals(Boolean.TRUE.equals(metadata.getUnique()), physical.unique())
+                    && Objects.equals(Boolean.TRUE.equals(metadata.getIndexed()), physical.indexed())
+                    && Objects.equals(metadata.getComment(), physical.comment());
         }
 
         private ObjectNode applyMetadataAndSnapshot(boolean restoreActive) {
@@ -441,6 +493,9 @@ public class AclConfigService {
             }
         }
 
+    }
+
+    private record OwnerIndexMapping(LogicalColumn logicalColumn, PhysicalIndex index) {
     }
 
 }
