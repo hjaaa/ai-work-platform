@@ -2,6 +2,8 @@ package com.aiwork.baas.ddl.render;
 
 import com.aiwork.baas.ddl.type.ColumnType;
 import com.aiwork.baas.ddl.type.LogicalColumn;
+import com.aiwork.baas.ddl.index.IndexNameAllocator;
+import com.aiwork.baas.ddl.inspect.ActualIndexName;
 import com.aiwork.baas.exception.BaasBadRequestException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -107,8 +109,8 @@ class DdlRendererTest {
                                 false, false, "标题")),
                 DdlRenderer.AlterClause.renameColumn("note", "memo"),
                 DdlRenderer.AlterClause.addIndex(false, "idx_memo", "memo"),
-                DdlRenderer.AlterClause.renameIndex("idx_memo", "idx_note"),
-                DdlRenderer.AlterClause.dropIndex("idx_note"),
+                DdlRenderer.AlterClause.renameIndex(ActualIndexName.fromInformationSchema("idx_memo"), "idx_note"),
+                DdlRenderer.AlterClause.dropIndex(ActualIndexName.fromInformationSchema("idx_note")),
                 DdlRenderer.AlterClause.tableComment("内部'注释"),
                 DdlRenderer.AlterClause.renameTable("baas_p1", "orders2")));
         assertThat(rendered.sql()).isEqualTo("ALTER TABLE `baas_p1`.`orders` ADD COLUMN `note` text NULL, "
@@ -125,6 +127,20 @@ class DdlRendererTest {
         assertThatThrownBy(() -> DdlRenderer.AlterClause.dropColumn("bad-name"))
             .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> DdlRenderer.AlterClause.addIndex(true, "uk_email", "BadName"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void actualIndexNameFromAllocatorCanBeDroppedOrRenamedWhileNewNameRemainsStrict() {
+        var allocation = IndexNameAllocator.allocate(false, "email", java.util.Set.of("IDX_EMAIL"), "IDX_EMAIL");
+        ActualIndexName actualName = ActualIndexName.fromInformationSchema(allocation.name());
+
+        var rendered = DdlRenderer.renderAlterTable("baas_p1", "orders", List.of(
+                DdlRenderer.AlterClause.dropIndex(actualName),
+                DdlRenderer.AlterClause.renameIndex(actualName, "idx_email_v2")));
+        assertThat(rendered.sql()).isEqualTo("ALTER TABLE `baas_p1`.`orders` DROP INDEX `IDX_EMAIL`, "
+                + "RENAME INDEX `IDX_EMAIL` TO `idx_email_v2`");
+        assertThatThrownBy(() -> DdlRenderer.AlterClause.renameIndex(actualName, "IDX_EMAIL_V2"))
             .isInstanceOf(IllegalArgumentException.class);
     }
 

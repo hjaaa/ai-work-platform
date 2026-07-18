@@ -1,6 +1,7 @@
 package com.aiwork.baas.ddl.render;
 
 import com.aiwork.baas.ddl.index.IndexNameAllocator;
+import com.aiwork.baas.ddl.inspect.ActualIndexName;
 import com.aiwork.baas.ddl.type.ColumnType;
 import com.aiwork.baas.ddl.type.ColumnTypeValidator;
 import com.aiwork.baas.ddl.type.DefaultValueRenderer;
@@ -93,13 +94,13 @@ public final class DdlRenderer {
             return new AlterClause(clause, clause);
         }
 
-        public static AlterClause dropIndex(String indexName) {
-            String index = quoteIdentifier(indexName);
+        public static AlterClause dropIndex(ActualIndexName actualIndexName) {
+            String index = actualIndexName.quotedForDdl();
             return new AlterClause("DROP INDEX " + index, "DROP INDEX " + index);
         }
 
-        public static AlterClause renameIndex(String oldIndexName, String newIndexName) {
-            String oldIndex = quoteIdentifier(oldIndexName);
+        public static AlterClause renameIndex(ActualIndexName oldIndexName, String newIndexName) {
+            String oldIndex = oldIndexName.quotedForDdl();
             String newIndex = quoteIdentifier(newIndexName);
             String clause = "RENAME INDEX " + oldIndex + " TO " + newIndex;
             return new AlterClause(clause, clause);
