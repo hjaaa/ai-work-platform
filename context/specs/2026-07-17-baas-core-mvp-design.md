@@ -1,7 +1,7 @@
 # BaaS 核心 MVP 设计(ai-work-baas)
 
 - 日期:2026-07-17
-- 状态:v8,已按四轮评审意见修订,并附实施规划与会话交接(§16);v8 补齐 Plan B(表管理与 DDL)设计细化
+- 状态:v9,已按四轮评审意见修订,并附实施规划与会话交接(§16);v8 补齐 Plan B(表管理与 DDL)设计细化,v9 按 Plan B 设计评审(2 P0/5 P1/1 P2)修订
 - 范围:「MySQL 版 BaaS 平台」首个子项目(核心 MVP,定位内部 Alpha)的设计文档,同时记录三个子项目的总体开发顺序决策
 
 ## 1. 背景与目标
@@ -94,7 +94,7 @@ Cloud 网关会剥掉外部路径第一段(AiWorkRequestGlobalFilter 重写 Stri
 | `baas_table` | 表元数据:project_id、table_name、注释、状态、`owner_column`(可空,行归属列名,见 8.3) |
 | `baas_column` | 列元数据:类型、长度、可空、默认值、主键/自增/唯一/单列索引、注释 |
 | `baas_table_acl` | 表级权限:每表 × {anon, authenticated} × {select, insert, update, delete} 开关。**新表默认全关** |
-| `baas_ddl_log` | Schema 操作日志:操作 ID(幂等键)、project_id、DDL 内容、步骤、状态、错误信息、重试次数 |
+| `baas_ddl_log` | Schema 操作日志:project_id + 操作 ID 联合唯一(幂等键)、操作类型(create/alter/drop/acl-index)、目标表名、**request_hash**(规范化请求体 SHA-256,同 ID 不同 hash → 409)、**result_snapshot**(成功结果 JSON,幂等重放返回)、DDL 内容(**默认值字面量以占位符脱敏记录**)、检查点步骤(PREPARED/DDL_APPLIED/METADATA_APPLIED,见 9.2)、状态、错误信息、重试次数。Plan A 已建的该表缺后四类字段,Plan B 需附 ALTER 迁移脚本 |
 | `baas_audit_log` | 敏感操作审计:key 创建/吊销、JWT 密钥轮换、项目删除等 |
 
 ### 6.2 项目 database 内系统表(建项目时初始化,`_` 前缀,数据 API 不可见)
@@ -163,6 +163,16 @@ PUT  /auth/v1/user/password                   修改密码:成功后撤销该用
 
 管理面沿用平台 `R<T>` 响应与 springdoc 文档;数据面提供**静态** OpenAPI(描述查询语法契约,不做 per-project 动态反射)。项目 CORS 白名单(`allowed_origins`)通过 `PATCH /studio/projects/{ref}` 配置。
 
+**表管理契约通则**:
+
+- 操作 ID 位置:POST 建表 / PATCH 改表放请求 **body** 的 `operationId`;DELETE 删表放 **query 参数** `?operationId=`(DELETE 不带 body)。均为客户端生成的 UUID
+- 幂等语义:同 `(project, operationId)` 重复提交,请求内容摘要一致时返回 `result_snapshot` 原结果(含删表重放);摘要不一致 → 409(见 §9.2)
+- 列定义对象(建表与加列/改列共用):`{columnName, dataType, length, scale, nullable, defaultValue, unique, indexed, comment}`
+- **默认值类型化模型(不接受原始 SQL)**:`defaultValue` 为 JSON 标量,服务端按目标列类型严格解析后**重新渲染为规范字面量**——数值列解析为数值、boolean 解析为 TRUE/FALSE、date/datetime 校验格式、varchar 转义后单引号包裹;仅 datetime 列的值恰为保留字 `CURRENT_TIMESTAMP`(大小写不敏感)时渲染为函数;解析失败或任何其他表达式 → 400;`text` / `json` 列不支持默认值(MySQL 限制,400)。客户端字符串(默认值、表/列注释)**一律不得拼接进 DDL 原文**,统一经类型化渲染器输出;注释限长(列 ≤ 1024、表 ≤ 2048 字符,对齐 MySQL 上限)并转义
+- 索引命名规范:单列唯一 `uk_{columnName}`、单列索引 `idx_{columnName}`(MySQL 索引名表内唯一,足够);**`unique=true` 天然含索引**,此时 `indexed` 忽略(不额外建普通索引),owner 自动补索引(§8.3)遇已 unique 列同样跳过
+
+**建表请求契约(POST tables)**:body 为 `{operationId, tableName, comment, columns: [列定义…]}`;主键 `id bigint` 自增由服务端自动生成,columns 中出现名为 `id` 的列 → 400;响应返回表详情快照(结构同 GET 单表详情),并作为幂等重放的 `result_snapshot`
+
 **改表请求契约(PATCH tables/{table},操作列表式)**:不采用声明式全量 diff(列缺失即隐式删列,危险),改表意图必须显式列出:
 
 ```json
@@ -171,9 +181,9 @@ PUT  /auth/v1/user/password                   修改密码:成功后撤销该用
   "allowLossy": false,
   "newTableName": null,
   "comment": null,
-  "addColumns":    [{ "columnName": "...", "dataType": "...", "length": 0, "scale": 0, "nullable": true, "defaultValue": null, "unique": false, "indexed": false, "comment": null }],
+  "addColumns":    [{ 列定义 }],
   "dropColumns":   ["col_a"],
-  "modifyColumns": [{ "columnName": "...", "dataType": "...", "length": 0, "scale": 0, "nullable": true, "defaultValue": null, "unique": false, "indexed": false, "comment": null }],
+  "modifyColumns": [{ 列定义 }],
   "renameColumns": [{ "from": "old_name", "to": "new_name" }]
 }
 ```
@@ -181,9 +191,9 @@ PUT  /auth/v1/user/password                   修改密码:成功后撤销该用
 - 各操作字段均可选,但至少包含一项操作;同一列在同一请求中只能出现于一种操作(如同列既 drop 又 rename → 400)
 - **`dropColumns` 与有损 `modifyColumns`(见 §13 类型兼容矩阵)要求顶层 `allowLossy=true`**,缺失则 400 并在错误信息中说明风险;Studio 前端据此做二次确认交互
 - **主键列 `id` 不可删除/修改/重命名** → 400
-- **owner_column 联动**:rename 涉及 owner 列时同事务更新 `baas_table.owner_column`;drop 包含 owner 列 → 400(须先在 ACL 端点取消 owner 配置);modify 将 owner 列改出 bigint → 400
-- **表重命名**(`newTableName`):校验合法标识符(§12.2)、非 `_` 前缀、不与现有表或 tombstone 表同名;数据面 URL 随表名变化由调用方自行适配
-- `unique` / `indexed` 开关与现状的差异生成 `ADD/DROP INDEX`,并入同一条 ALTER 语句(§9.2)
+- **owner_column 联动**:rename 涉及 owner 列时在同一平台库事务内更新 `baas_column` 与 `baas_table.owner_column`;modify 将 owner 列改出 bigint → 400;**drop 包含 owner 列为单一 fail-closed 操作**——同一 DDL 锁内先关闭该表全部 anon/authenticated ACL 开关并清空 `owner_column`(平台库同事务),再执行 DROP COLUMN,不存在「owner 已取消、ACL 仍开」的越权窗口(需 `allowLossy=true`,响应中明确告知 ACL 已被关闭)
+- **表重命名**(`newTableName`):校验合法标识符(§12.2)、非 `_` 前缀、不与现有表或 tombstone 表同名;**`RENAME TO` 作为子句并入同一条 ALTER 语句**(MySQL 将 RENAME 定义为 ALTER option),与其他操作混用不产生部分成功;数据面 URL 随表名变化由调用方自行适配
+- `unique` / `indexed` 开关与现状的差异生成 `ADD/DROP INDEX` 子句,并入同一条 ALTER 语句(§9.2);重命名列时同步 `RENAME INDEX` 保持索引命名规范
 
 **项目级对象授权(防 IDOR)**:upms 菜单/API 权限只解决「能否进入 Studio 功能」,不能替代项目归属检查——
 
@@ -229,8 +239,9 @@ opaque key(如 `pub_` / `sec_` 前缀 + 随机串),创建时仅展示一次明�
 配置面细则(`PUT .../tables/{table}/acl`,body 为 `{acl: {anon: {select,insert,update,delete}, authenticated: {…}}, ownerColumn}`):
 
 - ACL 开关为纯平台库元数据写入,**不走 DDL 锁**
-- 设置 `ownerColumn` 时校验:列存在、类型 bigint、`anon.insert=true` 时列必须可空;**若该列尚无索引则自动补建**——补索引是 DDL,走 §9.2 的 DDL 锁与 `baas_ddl_log`(操作 ID 由服务端生成)
-- 取消 owner 配置(置 null)不删除已建索引(无损保留)
+- 设置 `ownerColumn` 时校验:列存在、类型 bigint、`anon.insert=true` 时列必须可空;**若该列尚无索引(含唯一索引)则自动补建**——补索引是 DDL,走 §9.2 的 DDL 锁与 `baas_ddl_log`,幂等键为**确定性服务端 ID** `sys-aclidx-{tableId}-{columnName}`(重试稳定,不随请求变化)
+- **取消 owner 配置(ownerColumn 置 null)为 fail-closed 操作**:服务端在同一平台库事务内强制将该表全部 anon/authenticated ACL 开关一并关闭(owner 策略失效后原 ACL 语义变为全表访问,不允许静默保留),响应中明确告知;调用方如需继续开放访问须再次显式 PUT
+- 取消 owner 配置不删除已建索引(无损保留)
 
 ## 9. 项目与 Schema 生命周期
 
@@ -246,11 +257,15 @@ PROVISIONING → ACTIVE → DELETING → DELETED
 
 ### 9.2 DDL 操作
 
-- 同项目 DDL **串行**:Redis 分布式锁,锁 key `baas:ddl:{projectId}`,value = 操作 ID(防误释放),过期 60 秒(> 5 秒 SQL 超时 + 余量);获取失败返回 409「该项目有 DDL 操作进行中」
-- 锁内顺序:校验(标识符规则、类型白名单、兼容矩阵、owner/ACL 约束)→ 写 `baas_ddl_log` RUNNING → 执行 DDL → 更新元数据 → 置 SUCCESS
-- 每次操作携带客户端操作 ID,`baas_ddl_log.operation_id` 唯一键。重复提交:SUCCESS → 幂等返回原结果;FAILED → 允许重试(retry_count++);RUNNING → 409
-- 改表的多个变更**合并为一条 `ALTER TABLE` 语句**执行(MySQL 8.0 单语句原子,避免多语句间的中途态);仅 `RENAME TABLE` 单独成句
-- MySQL DDL 不可回滚,失败置 FAILED 并记录脱敏错误信息,实际库与元数据的偏差依赖对账恢复一致性
+**跨库一致性事实(设计前提)**:项目库 DDL 与平台库元数据分属不同数据源,**不可能同事务**;MySQL 原子 DDL 仅保证单条 DDL 语句自身崩溃一致,DDL 隐式提交、不能与其他语句组成事务。因此一致性靠「单条 ALTER + 检查点 + 探测式重试 + 对账」保障,不声称事务性。
+
+- **串行锁**:Redis 分布式锁,锁 key `baas:ddl:{projectId}`,value = 操作 ID(防误释放);TTL 60 秒 + **watchdog 自动续租**(每 20 秒续期,DDL 可能因元数据锁等待或 COPY 算法长时间执行,固定租约不可靠);获取失败返回 409「该项目有 DDL 操作进行中」。**每个检查点推进前校验锁仍为本操作持有**(value 比对),续租失败或校验不通过立即中止、不再执行后续步骤,残留中途态由探测式重试/对账恢复
+- **超时分离**:DDL 专用执行超时(默认 5 分钟,可配,§13),与数据面 5 秒查询超时无关;超时后结果不确定,不盲判失败,由重试探测确认
+- **检查点**(`baas_ddl_log.step`):`PREPARED`(校验通过、日志已落)→ `DDL_APPLIED`(项目库 DDL 已确认生效)→ `METADATA_APPLIED`(平台元数据已更新,即 SUCCESS)
+- **探测式重试**:FAILED/中断后同操作 ID 重试,先查项目库 `information_schema` 判定 DDL 是否已生效——已生效则跳过 DDL 直接续跑元数据步骤;未生效则重新执行整条 DDL;**不盲目重放**
+- **幂等键绑定请求内容**:`(project_id, operation_id)` 联合唯一,同时存操作类型、目标表名、`request_hash`(规范化请求体 SHA-256)与 `result_snapshot`。重复提交:hash 一致且 SUCCESS → 返回 `result_snapshot`;hash 不一致 → 409;FAILED → 允许重试(retry_count++);RUNNING → 409
+- 改表的全部变更(含 `RENAME TO`、`ADD/DROP/RENAME INDEX`)**合并为一条 `ALTER TABLE` 语句**执行,不存在多语句间的部分成功
+- 失败置 FAILED 并记录脱敏错误信息;`ddl_text` 中默认值字面量以占位符脱敏记录(§6.1)
 
 ### 9.3 删除流程
 
@@ -258,29 +273,37 @@ PROVISIONING → ACTIVE → DELETING → DELETED
 
 ### 9.4 对账
 
-手动触发(`/reconcile`)+ 可选定时(`@Scheduled` + 配置开关,**默认关闭**,MVP 以手动为主)。**范围仅表结构**:以项目库 `information_schema` 为准修正 `baas_table`/`baas_column`;ACL、owner 配置、密钥属于操作意图,以平台库为唯一事实源,不参与对账。**对账跳过非 ACTIVE 项目及软删/tombstone 表——物理表仍存在不构成「复活」软删除对象的依据**。对账整体在项目 DDL 锁(§9.2)内执行,防止与改表并发;返回对账报告(修正/导入/冲突清单)。逐表处理规则:
+手动触发(`/reconcile`)+ 可选定时(`@Scheduled` + 配置开关,**默认关闭**,MVP 以手动为主)。**范围仅表结构**:以项目库 `information_schema` 为准修正 `baas_table`/`baas_column`;ACL、owner 配置、密钥属于操作意图,以平台库为唯一事实源,不参与对账。**对账跳过非 ACTIVE 项目及软删/tombstone 表——物理表仍存在不构成「复活」软删除对象的依据**。对账整体在项目 DDL 锁(§9.2)内执行,防止与改表并发;返回对账报告(修正/导入/冲突清单)。
+
+比对范围覆盖 Plan B 管理的**全部结构要素**:列集合、类型/长度/精度、可空、默认值、注释、主键/自增、唯一索引与普通索引。逐表处理规则:
 
 | 情形 | 处理 |
 |---|---|
 | 元数据有、项目库无该表 | 表置 CONFLICT |
 | 项目库有、元数据无(非 `_` 前缀) | 导入元数据,状态 ACTIVE,**ACL 默认全关**(安全兜底) |
-| 列差异且库侧类型可映射白名单 | 以库为准修正 `baas_column` |
+| 结构差异且库侧可映射白名单(含默认值/注释/索引差异) | 以库为准修正 `baas_table`/`baas_column` |
 | 列类型超出白名单(如 float) | 表置 CONFLICT |
-| CONFLICT 表再次对账且结构已一致 | 恢复 ACTIVE |
+| **owner 安全约束破坏**:owner 列缺失、类型非 bigint、或索引丢失 | **表置 CONFLICT 并阻断数据面,不做普通修正**(owner 策略的正确性依赖这三项,静默修正会掩盖越权风险) |
+| CONFLICT 表再次对账且结构已一致(含 owner 约束恢复) | 恢复 ACTIVE |
 | 软删 tombstone 表 / 非 ACTIVE 项目 | 跳过 |
 
 ### 9.5 表状态机(`baas_table.status`)
 
 ```
-CREATING → ACTIVE → DELETED(tombstone,deleteAfter = +N 天,默认 7,同 §9.3) → 物理 DROP 后删除元数据行
-    ↓         ↕
-  FAILED   CONFLICT(对账发现结构不一致,人工处置后再次对账可恢复 ACTIVE)
+CREATING → ACTIVE                          建表成功
+CREATING → FAILED                          建表失败(同操作 ID 幂等重试)
+ACTIVE   ⇄ ALTERING                        改表开始/成功返回(执行中,短暂)
+ALTERING → CONFLICT                        改表中断或失败(保持阻断)
+ACTIVE   → CONFLICT                        对账发现结构不一致
+CONFLICT → ACTIVE                          探测式重试续跑成功,或对账确认结构一致
+ACTIVE   → DELETED(tombstone,+N 天,默认 7) → 到期物理 DROP 并删除元数据行(§9.3)
 ```
 
 - **建表**:锁内先插 CREATING 元数据行(先有状态载体,同 §9.1;`unique(project_id, table_name)` 同时拦截与现有表及 tombstone 行的同名冲突)→ 执行 `CREATE TABLE` → 写列元数据 → 置 ACTIVE。失败置 FAILED,同操作 ID 幂等重试
+- **改表**:锁内置 ALTERING(数据面短暂阻断——DDL 已生效而元数据未更新的窗口内,按旧元数据构建的查询会撞上新结构)→ 按 §9.2 检查点执行 → 成功回 ACTIVE;中断/失败置 CONFLICT(保持阻断),同操作 ID 探测式重试续跑成功后回 ACTIVE,或由对账处置
 - **删表**:置 DELETED + `deleteAfter`(数据面即刻阻断)→ 延迟清理任务到期物理 `DROP TABLE` 并**物理删除元数据行**——行删除后唯一键自然放开,名称即可复用(§9.3)
 - **删列**:请求带 `allowLossy=true` 后**立即物理 `DROP COLUMN`**,数据不可恢复,记审计日志;列不做延迟清理,列名可立即复用
-- CONFLICT 与 DELETED/FAILED/CREATING 状态的表数据面一律阻断(执行面为 Plan C)
+- 非 ACTIVE 状态(CREATING/ALTERING/FAILED/CONFLICT/DELETED)的表数据面一律阻断(执行面为 Plan C)
 
 ## 10. 数据源与数据库账号
 
@@ -333,13 +356,14 @@ CREATING → ACTIVE → DELETED(tombstone,deleteAfter = +N 天,默认 7,同 §9.
 | 请求体大小 | 1 MB |
 | 批量插入行数 | 1000 行 |
 | 过滤条件数量 | 每请求 20 个 |
-| SQL 执行超时 | 5 秒(JDBC queryTimeout) |
+| SQL 执行超时 | 5 秒(JDBC queryTimeout,仅数据面) |
+| DDL 执行超时 | 5 分钟(独立于数据面超时,超时后按 §9.2 探测式重试确认结果) |
 | 单项目连接池 | max 10;全服务总连接预算另设上限 |
 
 ### 表编辑器能力边界
 
 - 类型白名单:`bigint / int / decimal(p,s) / varchar(n≤4096) / text / boolean / date / datetime / json`
-- 默认值:常量或 `CURRENT_TIMESTAMP`
+- 默认值:类型化常量或 `CURRENT_TIMESTAMP`(仅 datetime 列),按 §7.3 类型化模型解析渲染;`text`/`json` 列不支持默认值
 - 约束:主键固定为自增 `id bigint`(建表自动生成);单列唯一、单列索引
 - 改表能力(全能档):加列、删列、改类型/长度、改可空/默认值/注释、单列唯一/索引增删、重命名列/表;契约见 §7.3,破坏性操作需 `allowLossy` 确认
 - **不支持**:复合主键/复合索引/复合唯一、外键、生成列(`baas_column` 模型即按此约束设计)
@@ -364,7 +388,7 @@ CREATING → ACTIVE → DELETED(tombstone,deleteAfter = +N 天,默认 7,同 §9.
 - **单元测试**(回归主防线):查询语法解析器、SQL 构建器、角色/ACL/owner 策略解析、JWT 与 key 校验
 - **集成测试**:Testcontainers 真 MySQL,覆盖「建项目状态机 → 建表 → CRUD 各操作符与语义细则 → signup/login/refresh/logout → ACL 与 owner 策略拦截 → key 吊销生效」全链路
 - **安全场景必测**:owner 伪造/转移(各角色 × INSERT/PATCH 携带 owner 列)、URL/apikey/JWT 三项目标识不一致、secret key 携带 JWT、Studio 跨项目越权(IDOR,替换 `{ref}`)、并发 refresh(grace 窗口内/外)、连续 JWT 轮换、**紧急轮换后原 current 与 previous 签发的 JWT 均立即 401 且 refresh token 仍可换新**、软删除后对账不复活、Cloud 与 Boot 两种形态的鉴权链各自生效
-- **Plan B(表管理与 DDL)必测**:类型兼容矩阵判定单测(无损/有损分类全覆盖);有损转换不带 `allowLossy` → 400、带且数据不兼容 → 409 不截断、可空→非空含 NULL 行 → 409;rename owner 列联动更新 `owner_column`、drop owner 列拒绝、`id` 列保护;tombstone 同名禁重建(建表与表重命名两条路径)、物理清理后名称可复用;对账六种情形(§9.4)各一例;DDL 锁互斥与操作 ID 幂等重放(Testcontainers 真 MySQL)
+- **Plan B(表管理与 DDL)必测**:类型兼容矩阵判定单测(无损/有损分类全覆盖);有损转换不带 `allowLossy` → 400、带且数据不兼容 → 409 不截断、可空→非空含 NULL 行 → 409;rename owner 列联动更新 `owner_column`、`id` 列保护;**drop owner 列 fail-closed**(ACL 同步全关、无越权窗口)与**取消 owner 配置强制关 ACL**;tombstone 同名禁重建(建表与表重命名两条路径)、物理清理后名称可复用;对账各情形(§9.4)各一例,**含 owner 约束破坏(列缺失/非 bigint/索引丢失)置 CONFLICT 不修正**;DDL 锁互斥、锁续租与锁丢失中止;幂等重放(hash 一致返回快照、**hash 不一致 409**)、`DDL_APPLIED` 断点探测式续跑;**DDL 注入尝试**(默认值/注释携带引号、注释符、子查询等恶意载荷,断言渲染后 DDL 无原样拼接)(Testcontainers 真 MySQL)
 - **交付物**:数据面静态 OpenAPI + 管理面 springdoc 文档,后续 MCP 插件以 7.3 为契约
 
 ## 15. 明确不进 MVP 的范围
@@ -389,7 +413,7 @@ BaaS 核心 MVP 拆为 5 份实施计划,每份独立产出可运行、可测试
 | 计划 | 范围 | 对应 spec 章节 | 依赖 | 状态(2026-07-18) |
 |---|---|---|---|---|
 | **A 项目底座与生命周期** | 模块骨架(`ai-work-baas`,端口 4010)、元数据库、AES-GCM 加密器、API Key 体系、项目状态机与延迟清理、项目连接池注册表、Studio 项目管理 API(含 IDOR 防护) | §4、§6、§8.1、§9.1/9.3、§10、§12.1 | — | **已实现**(PR #13 已合入 develop) |
-| **B 表管理与 DDL** | 建/改/删表(元数据 + 真实 DDL,改表为全能档:加/删列、改类型/长度、重命名列/表,含 `allowLossy` 确认与类型兼容矩阵)、Redis 串行锁 + 操作 ID 幂等(`baas_ddl_log`)、表状态机(§9.5)、表级 ACL 与 owner 列配置(bigint 校验/自动建索引/anon.insert 要求可空)、软删 tombstone 与同名禁重建、`information_schema` 对账 | §7.3(改表契约)、§8.2/8.3(配置面)、§9.2/9.4/9.5、§13(表编辑器边界与兼容矩阵) | A | 设计已在 v8 细化定稿;计划未写 |
+| **B 表管理与 DDL** | 建/改/删表(元数据 + 真实 DDL,改表为全能档:加/删列、改类型/长度、重命名列/表,含 `allowLossy` 确认与类型兼容矩阵)、Redis 串行锁 + 操作 ID 幂等(`baas_ddl_log`)、表状态机(§9.5)、表级 ACL 与 owner 列配置(bigint 校验/自动建索引/anon.insert 要求可空)、软删 tombstone 与同名禁重建、`information_schema` 对账 | §7.3(表管理契约)、§8.2/8.3(配置面)、§9.2/9.4/9.5、§13(表编辑器边界与兼容矩阵) | A | 设计细化至 v9(v8 后经一轮评审修订 2 P0/5 P1/1 P2),待复审;计划未写 |
 | **C 数据面 REST** | PostgREST 风格解析器与 SQL 构建器、`/rest/v1/{table}` 动态 CRUD 语义细则、ApiKeyAuthFilter + URL/apikey/JWT 三方一致性、owner 行策略注入、CORS Filter(先于鉴权、仅查元数据)、错误体映射、资源限制、Cloud/Boot 双形态入口落地、数据面静态 OpenAPI | §5、§7.1/7.4、§8.2/8.3(执行面)、§11、§12.2、§13 | A、B | 未写 |
 | **D 终端用户 Auth** | `/auth/v1/*`:signup/login、`_sessions`/`_refresh_tokens`、refresh 行锁事务 + 10 秒 grace 加密重放、logout/改密撤销会话、JWT 签发验签(kid 双版本)、常规/紧急轮换端点、防暴力限速 | §7.2、§6.1/6.2、§12.2 | A、C | 未写 |
 | **E Studio 前端** | ai-work-ui 的 BaaS 控制台:项目列表/详情、可视化表编辑器、ACL 与 owner 配置、API Key 管理(明文仅显示一次),遵循 ai-work-ui/DESIGN.md | §7.3 的界面化 | A、B(可与 C/D 并行) | 未写 |
@@ -412,6 +436,7 @@ MVP 之后(各自另行「设计 → 计划」,不属于上述 5 份):插件市�
 
 ## 17. 修订记录
 
+- **v9(2026-07-18)**:按 Plan B 设计评审(2 P0/5 P1/1 P2)修订。P0——① DDL 字面量注入缺口:默认值改为类型化模型(JSON 标量按列类型解析后重新渲染规范字面量,禁止原始 SQL 表达式,text/json 列不支持默认值),客户端字符串(默认值/注释)一律不拼接 DDL 原文、注释限长转义,`ddl_text` 默认值占位符脱敏(§7.3/§6.1);② 删 owner 列越权窗口:改为单一 fail-closed 操作(同锁内关全部非 service_role ACL + 清 owner_column + DROP),取消 owner 配置同样强制同步关闭全部 anon/authenticated ACL(§7.3/§8.3)。P1——③ 承认跨库非同事务事实,引入检查点 PREPARED→DDL_APPLIED→METADATA_APPLIED、表状态机增 ALTERING、失败探测式重试(查 information_schema 判定 DDL 是否生效后续跑,不盲目重放)(§9.2/§9.5);④ `RENAME TO` 作为 ALTER 子句并入同一条语句,消除与其他操作混用时的部分成功(§7.3/§9.2);⑤ 锁改为 TTL 60 秒 + watchdog 每 20 秒续租,检查点推进前校验锁持有,DDL 专用超时 5 分钟与数据面 5 秒分离(§9.2/§13);⑥ 幂等键绑定请求内容:(project_id, operation_id) 联合唯一 + operation_type/table_name/request_hash/result_snapshot,hash 不一致 409,ACL 补索引用确定性服务端 ID,注明 Plan A 已建 `baas_ddl_log` 需 ALTER 迁移(§6.1/§9.2);⑦ 对账覆盖默认值/注释/主键/自增/唯一/索引,owner 约束破坏(列缺失/非 bigint/索引丢失)置 CONFLICT 阻断、不做普通修正(§9.4)。P2——⑧ 补 Studio 契约细节:operationId 位置(body/query)、建表 DTO 与响应快照、删表幂等重放、unique 天然含索引、索引命名规范与重命名列同步 RENAME INDEX(§7.3)。§14 同步增补测试项。
 - **v8(2026-07-18)**:Plan B(表管理与 DDL)设计细化,经两轮逐节评审确认。① 改表定为**全能档**:加列、删列、改类型/长度、改可空/默认值/注释、单列唯一/索引增删、重命名列/表(§13);② 类型变更策略:维护无损转换集合,集合外一律要求 `allowLossy=true`,执行保持 MySQL 严格模式,数据不兼容 409 不静默截断(§13 兼容矩阵);③ 删列策略:带 `allowLossy` 确认后立即物理 DROP COLUMN,不做列级延迟清理(§9.5);④ 新增改表 PATCH 操作列表式契约:显式操作、同列单操作、`id` 列保护、owner_column 联动、表重命名约束(§7.3);⑤ 新增 §9.5 表状态机(CREATING/ACTIVE/FAILED/CONFLICT/DELETED,物理清理删除元数据行以复用名称);⑥ DDL 引擎细化:锁 key/过期/409 语义、幂等三态、多变更合并单条 ALTER(§9.2);⑦ ACL 配置面细则:纯元数据不走锁、owner 索引自动补建走 DDL 通道、取消 owner 不删索引(§8.3);⑧ 对账细化:六情形处理表、DDL 锁内执行、对账报告、定时默认关闭(§9.4);⑨ §14 增补 Plan B 必测项;§16.1 同步 A 已实现(PR #13)、B 设计定稿状态。
 - **v7(2026-07-18)**:措辞澄清,无功能变更。§7.3 跨项目管理员的授权载体由示例措辞「专门 upms 角色(如 `ROLE_BAAS_ADMIN`)」改为与 §16.2 已确认工程事实一致的「upms 权限码 `baas_admin` authority 直查」——平台角色 authority 形如 `ROLE_<数字id>`,字符串角色不可用,原示例曾在 PR #13 code review 中引起误判。
 - **v6(2026-07-17)**:新增 §16「实施规划与会话交接」——BaaS 核心 MVP 的 5 份实施计划拆分(A 底座/B 表管理/C 数据面/D Auth/E 前端)及依赖与状态、后续会话接手方法、计划编写标准、已确认工程事实清单;原修订记录顺延为 §17。规划性变更,不改动任何功能设计。
