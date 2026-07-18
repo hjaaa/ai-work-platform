@@ -405,9 +405,9 @@ public class TableManagementService {
         @Override
         public void validateInLock(DdlWorkContext context) {
             requireProjectActiveInLock(project.getId());
-            tableRow = findTableRow(project.getId(), tableName);
+            tableRow = resolveTableRow(context);
             if (tableRow == null) {
-                throw new TableNotFoundException();
+                throw new DdlConflictException("删表重试目标已不存在或已变化");
             }
             if (context.branch() == OwnershipBranch.CLAIM_PENDING) {
                 throw new DdlConflictException("删表操作不存在 PENDING 分支");
@@ -423,7 +423,9 @@ public class TableManagementService {
 
         @Override
         public void inOwnershipTx(DdlWorkContext context) {
-            patchDdlLog(context.logId(), tableRow.getId(), null);
+            if (context.branch() == OwnershipBranch.NEW_OPERATION) {
+                patchDdlLog(context.logId(), tableRow.getId(), null);
+            }
         }
 
         @Override
@@ -473,6 +475,26 @@ public class TableManagementService {
                 snapshot.put("cleanupOperationId", cleanup.getOperationId());
                 return snapshot;
             });
+        }
+
+        private BaasTable resolveTableRow(DdlWorkContext context) {
+            if (context.branch() == OwnershipBranch.NEW_OPERATION) {
+                BaasTable current = findTableRow(project.getId(), tableName);
+                if (current == null) {
+                    throw new TableNotFoundException();
+                }
+                return current;
+            }
+            BaasDdlLog existingLog = context.existingLog();
+            if (existingLog == null || existingLog.getTableId() == null) {
+                return null;
+            }
+            BaasTable original = tableMapper.selectById(existingLog.getTableId());
+            if (original == null || !project.getId().equals(original.getProjectId())
+                    || !tableName.equals(original.getTableName())) {
+                return null;
+            }
+            return original;
         }
 
     }

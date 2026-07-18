@@ -31,6 +31,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -85,7 +86,7 @@ class TableDropIntegrationTest extends PlanBProjectIntegrationTestSupport {
         assertThat(cleanup.getOperationType()).isEqualTo(DdlOperationType.CLEANUP_DROP.code());
         assertThat(cleanup.getTableId()).isEqualTo(tableId);
         assertThat(cleanup.getRequestHash()).isEqualTo(RequestFingerprint.cleanupDrop(project.getId(), tableId,
-                row.getDeleteAfter()));
+                LocalDateTime.parse(snapshot.get("deleteAfter").asText())));
         assertThat(cleanup.getOwnerToken()).isNull();
         assertThat(cleanup.getFenceEpoch()).isNull();
         BaasDdlLog drop = ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId);
@@ -174,6 +175,49 @@ class TableDropIntegrationTest extends PlanBProjectIntegrationTestSupport {
             .hasMessageContaining("UUID");
         assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), "not-a-uuid")).isNull();
         assertThat(tableRow(table).getStatus()).isEqualTo(TableStatus.ACTIVE.name());
+    }
+
+    @Test
+    void failedDropRetryNeverRebindsToSameNameRecreatedTable() {
+        String table = createTable("drop_reuse");
+        Long oldTableId = tableRow(table).getId();
+        String oldOperationId = UUID.randomUUID().toString();
+        seedFailedDrop(oldOperationId, table, oldTableId);
+
+        tableService.dropTable(project, table, UUID.randomUUID().toString());
+        rootJdbc.execute("DROP TABLE `" + project.getDbName() + "`.`" + table + "`");
+        tableMapper.deleteById(oldTableId);
+        createTable(table);
+        Long newTableId = tableRow(table).getId();
+        assertThat(newTableId).isNotEqualTo(oldTableId);
+
+        assertThatThrownBy(() -> tableService.dropTable(project, table, oldOperationId))
+            .isInstanceOf(DdlConflictException.class);
+        assertThat(tableRow(table).getId()).isEqualTo(newTableId);
+        assertThat(tableRow(table).getStatus()).isEqualTo(TableStatus.ACTIVE.name());
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), oldOperationId).getTableId())
+            .isEqualTo(oldTableId);
+        assertThat(ddlLogMapper.selectCount(Wrappers.<BaasDdlLog>lambdaQuery()
+            .eq(BaasDdlLog::getProjectId, project.getId())
+            .eq(BaasDdlLog::getTableId, newTableId)
+            .eq(BaasDdlLog::getOperationType, DdlOperationType.CLEANUP_DROP.code()))).isZero();
+    }
+
+    private void seedFailedDrop(String operationId, String tableName, Long tableId) {
+        BaasDdlLog log = new BaasDdlLog();
+        log.setProjectId(project.getId());
+        log.setOperationId(operationId);
+        log.setOperationType(DdlOperationType.DROP.code());
+        log.setTableName(tableName);
+        log.setTableId(tableId);
+        log.setRequestHash(RequestFingerprint.http("DELETE", "/studio/projects/" + project.getProjectRef()
+                + "/tables/" + tableName, DdlOperationType.DROP.code(), ""));
+        log.setStep(DdlStep.PREPARED.name());
+        log.setStatus(DdlLogStatus.FAILED.name());
+        log.setOwnerToken("failed-executor");
+        log.setFenceEpoch(1L);
+        log.setRetryCount(0);
+        ddlLogMapper.insert(log);
     }
 
 }

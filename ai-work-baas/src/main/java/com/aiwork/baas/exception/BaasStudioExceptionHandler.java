@@ -26,6 +26,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -73,7 +74,8 @@ public class BaasStudioExceptionHandler {
     }
 
     @ExceptionHandler({ BindException.class, MethodArgumentNotValidException.class,
-            HandlerMethodValidationException.class, ConstraintViolationException.class })
+            HandlerMethodValidationException.class, ConstraintViolationException.class,
+            MissingServletRequestParameterException.class })
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public R<Void> handleValidation(Exception exception) {
         log.warn("Studio request validation failed, type={}", exception.getClass().getSimpleName());

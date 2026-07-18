@@ -139,6 +139,15 @@ class StudioTableControllerTest {
     }
 
     @Test
+    void dropWithoutOperationIdReturnsBadRequestWithoutAccessLookup() throws Exception {
+        mockMvc.perform(delete("/studio/projects/" + PROJECT_REF + "/tables/orders"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.msg").value("请求参数校验失败"));
+
+        verifyNoInteractions(accessService, tableService);
+    }
+
+    @Test
     void foreignProjectStopsBeforeTableService() throws Exception {
         when(accessService.requireOwned(PROJECT_REF)).thenThrow(new ProjectNotFoundException());
 
