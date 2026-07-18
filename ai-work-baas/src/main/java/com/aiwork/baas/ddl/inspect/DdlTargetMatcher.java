@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** FAILED/陈旧 RUNNING 重试使用的完整物理目标匹配器;NEW_OPERATION 不得调用。 */
+/** 完整物理目标匹配器；NEW_OPERATION 执行前不得据此接管外部表，受控 DDL 后可用于终态确认。 */
 public final class DdlTargetMatcher {
 
     private DdlTargetMatcher() {

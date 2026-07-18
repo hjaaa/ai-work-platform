@@ -71,6 +71,19 @@ class DefaultValueRendererTest {
     }
 
     @Test
+    void decimalCanonicalUsesDeclaredScaleAndAllowsZeroWithoutIntegerDigits() {
+        var zero = DefaultValueRenderer.render(ColumnType.DECIMAL, 2, 2,
+                MAPPER.getNodeFactory().numberNode(new java.math.BigDecimal("0")));
+        var padded = DefaultValueRenderer.render(ColumnType.DECIMAL, 5, 2,
+                MAPPER.getNodeFactory().numberNode(new java.math.BigDecimal("1.2")));
+
+        assertThat(zero.ddlLiteral()).isEqualTo("0.00");
+        assertThat(zero.canonical()).isEqualTo("0.00");
+        assertThat(padded.ddlLiteral()).isEqualTo("1.20");
+        assertThat(padded.canonical()).isEqualTo("1.20");
+    }
+
+    @Test
     void decimalRejectsMissingOrInvalidTypeParams() {
         assertThatThrownBy(() -> DefaultValueRenderer.render(ColumnType.DECIMAL, null, 0,
                 MAPPER.getNodeFactory().numberNode(1)))

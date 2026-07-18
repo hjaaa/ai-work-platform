@@ -261,10 +261,7 @@ public class TableManagementService {
             }
             tableRow = existing;
             if (physical != null) {
-                List<LogicalColumn> expectedColumns = new ArrayList<>();
-                expectedColumns.add(idColumn());
-                expectedColumns.addAll(plans.stream().map(DdlRenderer.ColumnPlan::column).toList());
-                if (!DdlTargetMatcher.matches(physical, dto.tableName(), dto.comment(), expectedColumns)) {
+                if (!matchesExpectedTarget(physical)) {
                     throw new DdlConflictException("同名物理表与本次 CREATE 目标不一致，拒绝错误续跑");
                 }
                 ddlAlreadyApplied = true;
@@ -296,10 +293,15 @@ public class TableManagementService {
 
         @Override
         public ObjectNode perform(DdlWorkContext context) {
+            if (!ddlAlreadyApplied) {
+                context.projectJdbc().execute(rendered.sql());
+            }
+            PhysicalTable physical = SchemaInspector.readTable(context.projectJdbc(), project.getDbName(),
+                    dto.tableName());
+            if (!matchesExpectedTarget(physical)) {
+                throw new DdlConflictException("建表物理目标校验失败，拒绝写入成功终态");
+            }
             if (!context.stepReached(DdlStep.DDL_APPLIED)) {
-                if (!ddlAlreadyApplied) {
-                    context.projectJdbc().execute(rendered.sql());
-                }
                 context.advanceToDdlApplied();
             }
             return context.completeSuccess(() -> {
@@ -344,6 +346,13 @@ public class TableManagementService {
                     .eq(BaasTable::getStatus, TableStatus.CREATING.name())
                     .set(BaasTable::getStatus, TableStatus.FAILED.name()));
             }
+        }
+
+        private boolean matchesExpectedTarget(PhysicalTable physical) {
+            List<LogicalColumn> expectedColumns = new ArrayList<>();
+            expectedColumns.add(idColumn());
+            expectedColumns.addAll(plans.stream().map(DdlRenderer.ColumnPlan::column).toList());
+            return DdlTargetMatcher.matches(physical, dto.tableName(), dto.comment(), expectedColumns);
         }
 
     }

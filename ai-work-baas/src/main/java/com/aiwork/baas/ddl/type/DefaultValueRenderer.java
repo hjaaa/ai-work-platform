@@ -108,10 +108,12 @@ public final class DefaultValueRenderer {
         if (number.scale() > scale) {
             throw new BaasBadRequestException("默认值小数位超出列定义 scale");
         }
-        if (number.precision() - number.scale() > precision - scale) {
+        BigDecimal normalized = number.setScale(scale);
+        int integerDigits = Math.max(0, normalized.precision() - normalized.scale());
+        if (integerDigits > precision - scale) {
             throw new BaasBadRequestException("默认值整数位超出列定义精度");
         }
-        String text = number.toPlainString();
+        String text = normalized.toPlainString();
         return new Rendered(text, text);
     }
 
