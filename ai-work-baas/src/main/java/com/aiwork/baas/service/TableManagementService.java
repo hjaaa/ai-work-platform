@@ -44,6 +44,7 @@ import com.aiwork.baas.entity.BaasDdlLog;
 import com.aiwork.baas.entity.BaasProject;
 import com.aiwork.baas.entity.BaasTable;
 import com.aiwork.baas.entity.BaasTableAcl;
+import com.aiwork.baas.entity.enums.DdlLogStatus;
 import com.aiwork.baas.entity.enums.DdlOperationType;
 import com.aiwork.baas.entity.enums.DdlStep;
 import com.aiwork.baas.entity.enums.ProjectStatus;
@@ -64,8 +65,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -98,6 +101,9 @@ public class TableManagementService {
     private final CurrentUserProvider userProvider;
 
     private final ObjectMapper objectMapper;
+
+    @Value("${baas.ddl.tombstone-days:7}")
+    private int tombstoneDays;
 
     /** 所有权事务内补写日志行的目标表 ID 与脱敏 DDL(spec §6.1；两参均可为 null 表示不更新)。 */
     void patchDdlLog(Long logId, Long tableId, String sanitizedSql) {
@@ -229,6 +235,16 @@ public class TableManagementService {
                 tableName, null, hash, null, null);
         return engine.execute(spec, new AlterTableWork(this, project, tableName, dto, tableMapper, columnMapper,
                 aclMapper));
+    }
+
+    public ObjectNode dropTable(BaasProject project, String tableName, String operationId) {
+        OperationIdValidator.requireUuid(operationId);
+        requireIdentifier(tableName, "表名不合法");
+        String path = "/studio/projects/" + project.getProjectRef() + "/tables/" + tableName;
+        String hash = RequestFingerprint.http("DELETE", path, DdlOperationType.DROP.code(), "");
+        DdlOperationSpec spec = new DdlOperationSpec(project.getId(), operationId, DdlOperationType.DROP,
+                tableName, null, hash, null, null);
+        return engine.execute(spec, new DropTableWork(project, tableName));
     }
 
     private final class CreateTableWork implements DdlWork {
@@ -369,6 +385,94 @@ public class TableManagementService {
             expectedColumns.add(idColumn());
             expectedColumns.addAll(plans.stream().map(DdlRenderer.ColumnPlan::column).toList());
             return DdlTargetMatcher.matches(physical, dto.tableName(), dto.comment(), expectedColumns);
+        }
+
+    }
+
+    private final class DropTableWork implements DdlWork {
+
+        private final BaasProject project;
+
+        private final String tableName;
+
+        private BaasTable tableRow;
+
+        private DropTableWork(BaasProject project, String tableName) {
+            this.project = project;
+            this.tableName = tableName;
+        }
+
+        @Override
+        public void validateInLock(DdlWorkContext context) {
+            requireProjectActiveInLock(project.getId());
+            tableRow = findTableRow(project.getId(), tableName);
+            if (tableRow == null) {
+                throw new TableNotFoundException();
+            }
+            if (context.branch() == OwnershipBranch.CLAIM_PENDING) {
+                throw new DdlConflictException("删表操作不存在 PENDING 分支");
+            }
+            String status = tableRow.getStatus();
+            boolean droppable = TableStatus.ACTIVE.name().equals(status) || TableStatus.FAILED.name().equals(status)
+                    || TableStatus.CONFLICT.name().equals(status)
+                    || (context.branch() != OwnershipBranch.NEW_OPERATION && TableStatus.DELETED.name().equals(status));
+            if (!droppable) {
+                throw new DdlConflictException("表当前状态不允许删除: " + status);
+            }
+        }
+
+        @Override
+        public void inOwnershipTx(DdlWorkContext context) {
+            patchDdlLog(context.logId(), tableRow.getId(), null);
+        }
+
+        @Override
+        public ObjectNode perform(DdlWorkContext context) {
+            return context.completeSuccess(() -> {
+                BaasTable current = tableMapper.selectById(tableRow.getId());
+                LocalDateTime deleteAfter;
+                if (TableStatus.DELETED.name().equals(current.getStatus())) {
+                    deleteAfter = current.getDeleteAfter();
+                } else {
+                    deleteAfter = LocalDateTime.now().plusDays(tombstoneDays);
+                    int updated = tableMapper.update(null, Wrappers.<BaasTable>lambdaUpdate()
+                        .eq(BaasTable::getId, tableRow.getId())
+                        .in(BaasTable::getStatus, TableStatus.ACTIVE.name(), TableStatus.FAILED.name(),
+                                TableStatus.CONFLICT.name())
+                        .set(BaasTable::getStatus, TableStatus.DELETED.name())
+                        .set(BaasTable::getDeleteAfter, deleteAfter));
+                    if (updated != 1) {
+                        throw new DdlConflictException("删表状态竞争失败");
+                    }
+                }
+
+                BaasDdlLog cleanup = ddlLogMapper.selectOne(Wrappers.<BaasDdlLog>lambdaQuery()
+                    .eq(BaasDdlLog::getProjectId, project.getId())
+                    .eq(BaasDdlLog::getTableId, tableRow.getId())
+                    .eq(BaasDdlLog::getOperationType, DdlOperationType.CLEANUP_DROP.code()));
+                if (cleanup == null) {
+                    cleanup = new BaasDdlLog();
+                    cleanup.setProjectId(project.getId());
+                    cleanup.setOperationId(java.util.UUID.randomUUID().toString());
+                    cleanup.setOperationType(DdlOperationType.CLEANUP_DROP.code());
+                    cleanup.setTableName(tableName);
+                    cleanup.setTableId(tableRow.getId());
+                    cleanup.setRequestHash(
+                            RequestFingerprint.cleanupDrop(project.getId(), tableRow.getId(), deleteAfter));
+                    cleanup.setStep(DdlStep.PREPARED.name());
+                    cleanup.setStatus(DdlLogStatus.PENDING.name());
+                    cleanup.setRetryCount(0);
+                    ddlLogMapper.insert(cleanup);
+                }
+
+                auditDdl(project.getId(), "TABLE_DROP", "table=" + tableName, "HIGH");
+                ObjectNode snapshot = objectMapper.createObjectNode();
+                snapshot.put("tableName", tableName);
+                snapshot.put("status", TableStatus.DELETED.name());
+                snapshot.put("deleteAfter", deleteAfter.toString());
+                snapshot.put("cleanupOperationId", cleanup.getOperationId());
+                return snapshot;
+            });
         }
 
     }

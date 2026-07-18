@@ -39,6 +39,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -115,6 +116,26 @@ class StudioTableControllerTest {
         order.verify(accessService).requireOwned(PROJECT_REF);
         order.verify(tableService).alterTable(Mockito.eq(project), Mockito.eq("orders"), Mockito.argThat(dto ->
                 "新注释".equals(dto.comment())));
+    }
+
+    @Test
+    void dropChecksOwnershipBeforeDelegatingAndReturnsTombstoneSnapshot() throws Exception {
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        snapshot.put("tableName", "orders");
+        snapshot.put("status", "DELETED");
+        String operationId = "6f9e6d0e-b30c-4e20-8101-4d1b8cf1ee54";
+        when(accessService.requireOwned(PROJECT_REF)).thenReturn(project);
+        when(tableService.dropTable(project, "orders", operationId)).thenReturn(snapshot);
+
+        mockMvc.perform(delete("/studio/projects/" + PROJECT_REF + "/tables/orders")
+            .param("operationId", operationId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.tableName").value("orders"))
+            .andExpect(jsonPath("$.data.status").value("DELETED"));
+
+        InOrder order = inOrder(accessService, tableService);
+        order.verify(accessService).requireOwned(PROJECT_REF);
+        order.verify(tableService).dropTable(project, "orders", operationId);
     }
 
     @Test

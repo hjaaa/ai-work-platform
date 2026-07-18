@@ -29,12 +29,14 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -77,6 +79,13 @@ public class StudioTableController {
             @Valid @RequestBody TableAlterDTO alterDTO) {
         BaasProject project = accessService.requireOwned(projectRef);
         return R.ok(tableService.alterTable(project, tableName, alterDTO));
+    }
+
+    @DeleteMapping("/{table}")
+    public R<ObjectNode> drop(@PathVariable("ref") String projectRef, @PathVariable("table") String tableName,
+            @RequestParam("operationId") String operationId) {
+        BaasProject project = accessService.requireOwned(projectRef);
+        return R.ok(tableService.dropTable(project, tableName, operationId));
     }
 
 }
