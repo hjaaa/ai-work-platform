@@ -58,6 +58,8 @@ public class BaasProject {
 
     private String runtimeDbPasswordCipher;
 
+    private Long ddlFenceEpoch;
+
     private LocalDateTime deleteAfter;
 
     private LocalDateTime createTime;

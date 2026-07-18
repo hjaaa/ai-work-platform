@@ -48,6 +48,24 @@ public class BaasStudioExceptionHandler {
         return R.failed("项目不存在或无权访问");
     }
 
+    @ExceptionHandler(TableNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public R<Void> handleTableNotFound() {
+        return R.failed("表不存在");
+    }
+
+    @ExceptionHandler(BaasBadRequestException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public R<Void> handleBaasBadRequest(BaasBadRequestException exception) {
+        return R.failed(exception.getMessage());
+    }
+
+    @ExceptionHandler(DdlConflictException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public R<Void> handleDdlConflict(DdlConflictException exception) {
+        return R.failed(exception.getMessage());
+    }
+
     @ExceptionHandler({ BindException.class, MethodArgumentNotValidException.class,
             HandlerMethodValidationException.class, ConstraintViolationException.class })
     @ResponseStatus(HttpStatus.BAD_REQUEST)

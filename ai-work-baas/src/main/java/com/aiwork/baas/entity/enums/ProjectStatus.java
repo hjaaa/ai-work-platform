@@ -31,6 +31,8 @@ public enum ProjectStatus {
     PROVISIONING,
     /** 已启用。 */
     ACTIVE,
+    /** 系统表结构迁移中(数据面阻断,spec §9.1)。 */
+    MIGRATING,
     /** 开通失败。 */
     FAILED,
     /** 删除中。 */
