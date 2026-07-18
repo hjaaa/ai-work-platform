@@ -103,8 +103,11 @@ public final class LogicalModelMapper {
      */
     private static String checkExtra(PhysicalColumn column) {
         String extra = column.extra() == null ? "" : column.extra().toLowerCase(Locale.ROOT);
-        extra = extra.replace("default_generated", "").trim();
         if (extra.isEmpty()) {
+            return null;
+        }
+        if ("default_generated".equals(extra) && "datetime".equalsIgnoreCase(column.dataType())
+                && DefaultValueRenderer.CURRENT_TIMESTAMP.equalsIgnoreCase(column.columnDefault())) {
             return null;
         }
         if ("auto_increment".equals(extra) && column.isPrimaryKey()) {

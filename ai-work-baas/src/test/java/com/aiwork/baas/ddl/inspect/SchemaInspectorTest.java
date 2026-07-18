@@ -73,6 +73,11 @@ class SchemaInspectorTest {
         jdbc.execute("CREATE TABLE " + DB + ".with_trigger (id bigint NOT NULL PRIMARY KEY, n int) ENGINE=InnoDB");
         jdbc.execute(
                 "CREATE TRIGGER " + DB + ".trg BEFORE INSERT ON " + DB + ".with_trigger FOR EACH ROW SET NEW.n = 1");
+        jdbc.execute("CREATE TABLE " + DB + ".parent_table (id bigint NOT NULL PRIMARY KEY) ENGINE=InnoDB");
+        jdbc.execute("CREATE TABLE " + DB + ".child_table ("
+                + "id bigint NOT NULL PRIMARY KEY, parent_id bigint NOT NULL, "
+                + "CONSTRAINT fk_child_parent FOREIGN KEY (parent_id) REFERENCES " + DB + ".parent_table (id)"
+                + ") ENGINE=InnoDB");
     }
 
     @Test
@@ -139,6 +144,22 @@ class SchemaInspectorTest {
     }
 
     @Test
+    void onlyAllowsDefaultGeneratedForDatetimeCurrentTimestamp() {
+        PhysicalTable table = SchemaInspector.readTable(jdbc, DB, "normal_table");
+        PhysicalColumn created = table.findColumn("created");
+        assertThat(created.extra()).containsIgnoringCase("DEFAULT_GENERATED");
+        assertThat(LogicalModelMapper.toLogical(created, false, false).ok()).isTrue();
+
+        PhysicalColumn intDefault = new PhysicalColumn("number", "int", "int", null, 10L, 0L, null, true, "0",
+                "DEFAULT_GENERATED", null, null, "", "", "");
+        PhysicalColumn datetimeLiteral = new PhysicalColumn("scheduled", "datetime", "datetime", null, null, null,
+                0L, true, "2026-07-18 00:00:00", "DEFAULT_GENERATED", null, null, "", "", "");
+
+        assertThat(LogicalModelMapper.toLogical(intDefault, false, false).ok()).isFalse();
+        assertThat(LogicalModelMapper.toLogical(datetimeLiteral, false, false).ok()).isFalse();
+    }
+
+    @Test
     void displayWidthIntStillMapsToInt() {
         jdbc.execute("CREATE TABLE " + DB + ".legacy_width (id bigint NOT NULL PRIMARY KEY, n int) ENGINE=InnoDB");
         PhysicalTable table = SchemaInspector.readTable(jdbc, DB, "legacy_width");
@@ -170,6 +191,12 @@ class SchemaInspectorTest {
             assertThat(t.tableName()).isEqualTo("a_view");
             assertThat(t.tableType()).isEqualTo("VIEW");
         });
+    }
+
+    @Test
+    void detectsForeignKeysForRelatedTableOnly() {
+        assertThat(SchemaInspector.readTable(jdbc, DB, "child_table").hasForeignKeys()).isTrue();
+        assertThat(SchemaInspector.readTable(jdbc, DB, "normal_table").hasForeignKeys()).isFalse();
     }
 
 }
