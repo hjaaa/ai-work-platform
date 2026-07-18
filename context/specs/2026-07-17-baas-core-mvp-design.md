@@ -1,7 +1,7 @@
 # BaaS 核心 MVP 设计(ai-work-baas)
 
 - 日期:2026-07-17
-- 状态:v6,已按四轮评审意见修订,并附实施规划与会话交接(§16)
+- 状态:v7,已按四轮评审意见修订,并附实施规划与会话交接(§16)
 - 范围:「MySQL 版 BaaS 平台」首个子项目(核心 MVP,定位内部 Alpha)的设计文档,同时记录三个子项目的总体开发顺序决策
 
 ## 1. 背景与目标
@@ -167,7 +167,7 @@ PUT  /auth/v1/user/password                   修改密码:成功后撤销该用
 
 - 项目列表仅返回 `owner_user_id = 当前平台用户` 的项目
 - 所有 `/studio/projects/{ref}/**` 操作(详情、表、Key、用户、删除、对账)一律校验项目归属,不匹配返回 404(不泄露存在性)
-- 仅持有专门 upms 角色(如 `ROLE_BAAS_ADMIN`)的超级管理员可跨项目操作
+- 仅持有专门 upms 权限码 `baas_admin` 的超级管理员可跨项目操作(以 authority 字符串直查实现;平台角色 authority 形如 `ROLE_<数字id>`,不存在字符串角色,见 §16.2 工程事实)
 - `project_ref` 只是路由标识,**不作为授权凭据**
 
 ### 7.4 请求身份三态
@@ -343,6 +343,7 @@ MVP 之后(各自另行「设计 → 计划」,不属于上述 5 份):插件市�
 
 ## 17. 修订记录
 
+- **v7(2026-07-18)**:措辞澄清,无功能变更。§7.3 跨项目管理员的授权载体由示例措辞「专门 upms 角色(如 `ROLE_BAAS_ADMIN`)」改为与 §16.2 已确认工程事实一致的「upms 权限码 `baas_admin` authority 直查」——平台角色 authority 形如 `ROLE_<数字id>`,字符串角色不可用,原示例曾在 PR #13 code review 中引起误判。
 - **v6(2026-07-17)**:新增 §16「实施规划与会话交接」——BaaS 核心 MVP 的 5 份实施计划拆分(A 底座/B 表管理/C 数据面/D Auth/E 前端)及依赖与状态、后续会话接手方法、计划编写标准、已确认工程事实清单;原修订记录顺延为 §17。规划性变更,不改动任何功能设计。
 - **v5(2026-07-17)**:按第四轮评审修订。P0——JWT 紧急轮换改为独立状态转换:撤销全部 current 与 previous、生成新 current 且不保留 previous(原方案会让已泄露的 current 降级为 previous 继续被信任一个 access TTL);明确旧 access JWT 立即失效为预期代价、会话与 refresh token 不撤销、记高等级审计日志,§14 增加对应测试项。契约清理——表/用户管理路由改为集合/单资源标准形式,jwt-keys 补 emergency-rotate 端点(§7.3);API Key 摘要固定为 SHA-256,不再留 HMAC 选项(§12.1)。
 - **v4(2026-07-17)**:按第三轮评审修订。P0——refresh reuse grace 与哈希存储的矛盾:采用同事务数据库方案,`_refresh_tokens` 增加 `consumed_at / replacement_token_id / reuse_grace_until / replay_payload_ciphertext`,首次刷新在行锁事务内轮换并保存 AES-GCM 加密的完整响应(AAD 绑定 project+session+token),grace 内重放解密返回同一响应,超窗撤销会话,grace 后清除密文;同步修正 7.2 接口摘要与 grace 规则的措辞冲突。P1——Studio 项目路由改为集合/单资源标准形式并补 PATCH(§7.3);anon 在 owner 表上的读写统一追加 `owner IS NULL`,开启 anon.insert 时校验 owner 列可空(§8.3);JWT sub 明确为 bigint 十进制字符串并严格解析(§7.2);JWT Key 增加紧急轮换语义(§6.1);密文格式落为 `v1:{keyId}:{base64(iv|ciphertext|tag)}` + AAD 约定,API Key 改为 SHA-256/HMAC 摘要 + 常量时间比较、不走 AES(§12.1);CORS 预检由 CORS Filter 在 ApiKeyAuthFilter 之前仅查元数据处理,`*` 时 allowCredentials=false(§12.2);项目创建先落 PROVISIONING 记录再产生外部副作用(§9.1)。
