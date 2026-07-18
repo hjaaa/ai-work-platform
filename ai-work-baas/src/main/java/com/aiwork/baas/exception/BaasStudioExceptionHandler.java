@@ -66,6 +66,12 @@ public class BaasStudioExceptionHandler {
         return R.failed(exception.getMessage());
     }
 
+    @ExceptionHandler(DdlExecutionException.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public R<Void> handleDdlExecutionFailure() {
+        return R.failed("DDL 执行失败");
+    }
+
     @ExceptionHandler({ BindException.class, MethodArgumentNotValidException.class,
             HandlerMethodValidationException.class, ConstraintViolationException.class })
     @ResponseStatus(HttpStatus.BAD_REQUEST)
