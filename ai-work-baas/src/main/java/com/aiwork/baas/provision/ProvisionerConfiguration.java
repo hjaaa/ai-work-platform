@@ -37,12 +37,28 @@ public class ProvisionerConfiguration {
     private static final String MYSQL_DRIVER_CLASS_NAME = "com.mysql.cj.jdbc.Driver";
 
     @Bean
-    public ProjectProvisioner projectProvisioner(@Value("${baas.provisioner.url}") String url,
+    public ProvisionerDataSourceHolder provisionerDataSourceHolder(@Value("${baas.provisioner.url}") String url,
             @Value("${baas.provisioner.username}") String username,
             @Value("${baas.provisioner.password}") String password) {
         DriverManagerDataSource dataSource = new DriverManagerDataSource(url, username, password);
         dataSource.setDriverClassName(MYSQL_DRIVER_CLASS_NAME);
-        return new ProjectProvisioner(dataSource);
+        return new ProvisionerDataSourceHolder(dataSource);
+    }
+
+    @Bean
+    public ProjectProvisioner projectProvisioner(ProvisionerDataSourceHolder holder) {
+        return new ProjectProvisioner(holder.dataSource());
+    }
+
+    @Bean
+    public PhysicalPreconditions physicalPreconditions(ProvisionerDataSourceHolder holder) {
+        return PhysicalPreconditions.fromDataSource(holder.dataSource());
+    }
+
+    @Bean
+    public PhysicalPreconditionsHealthIndicator physicalPreconditionsHealthIndicator(
+            PhysicalPreconditions physicalPreconditions) {
+        return new PhysicalPreconditionsHealthIndicator(physicalPreconditions);
     }
 
 }

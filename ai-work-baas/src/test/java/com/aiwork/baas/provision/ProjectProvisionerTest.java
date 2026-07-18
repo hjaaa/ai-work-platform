@@ -75,7 +75,7 @@ class ProjectProvisionerTest {
     }
 
     @Test
-    void systemTablesUseUnsignedBigintIdsAndContainAuditTimestamps() {
+    void systemTablesUseSignedBigintIdsAndContainAuditTimestamps() {
         String databaseName = "baas_schema_ref";
         provisioner.createDatabase(databaseName);
         provisioner.initSystemTables(databaseName);
@@ -94,12 +94,12 @@ class ProjectProvisionerTest {
                     return columnTypes;
                 }, databaseName);
         assertThat(idColumnTypes).hasSize(6).containsAllEntriesOf(Map.of(
-                "_users.id", "bigint unsigned",
-                "_sessions.id", "bigint unsigned",
-                "_sessions.user_id", "bigint unsigned",
-                "_refresh_tokens.id", "bigint unsigned",
-                "_refresh_tokens.session_id", "bigint unsigned",
-                "_refresh_tokens.replacement_token_id", "bigint unsigned"));
+                "_users.id", "bigint",
+                "_sessions.id", "bigint",
+                "_sessions.user_id", "bigint",
+                "_refresh_tokens.id", "bigint",
+                "_refresh_tokens.session_id", "bigint",
+                "_refresh_tokens.replacement_token_id", "bigint"));
 
         Long commonFieldCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.columns "

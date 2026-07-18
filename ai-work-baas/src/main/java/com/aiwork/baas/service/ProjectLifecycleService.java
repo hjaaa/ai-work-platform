@@ -33,6 +33,7 @@ import com.aiwork.baas.mapper.BaasApiKeyMapper;
 import com.aiwork.baas.mapper.BaasAuditLogMapper;
 import com.aiwork.baas.mapper.BaasJwtKeyMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
+import com.aiwork.baas.provision.PhysicalPreconditions;
 import com.aiwork.baas.provision.ProjectProvisioner;
 import com.aiwork.baas.security.crypto.BaasCryptoService;
 import com.aiwork.baas.security.key.ApiKeyGenerator;
@@ -71,6 +72,8 @@ public class ProjectLifecycleService {
 
     private final ProjectProvisioner provisioner;
 
+    private final PhysicalPreconditions physicalPreconditions;
+
     private final ApiKeyGenerator keyGenerator;
 
     private final BaasCryptoService cryptoService;
@@ -84,6 +87,7 @@ public class ProjectLifecycleService {
 
     public CreatedProject createProject(String name, Long ownerUserId) {
         rejectAmbientTransaction();
+        physicalPreconditions.assertSatisfied();
         BaasProject project = transactionTemplate.execute(status -> {
             String projectRef = keyGenerator.generateProjectRef();
             BaasProject createdProject = new BaasProject();
@@ -107,6 +111,7 @@ public class ProjectLifecycleService {
 
     public CreatedProject retryProvision(Long projectId) {
         rejectAmbientTransaction();
+        physicalPreconditions.assertSatisfied();
         BaasProject project = projectMapper.selectById(projectId);
         if (project == null) {
             throw new IllegalStateException("project not found");
