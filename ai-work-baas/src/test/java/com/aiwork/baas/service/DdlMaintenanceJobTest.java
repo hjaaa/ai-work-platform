@@ -273,23 +273,31 @@ class DdlMaintenanceJobTest extends PlanBProjectIntegrationTestSupport {
                 altering.getTableName(), altering.getId(), "a".repeat(64), DdlStep.DDL_APPLIED, null);
         BaasTable aclApplied = insertTable("mt_stale_acl", TableStatus.ALTERING);
         BaasDdlLog acl = insertHttpLog(UUID.randomUUID().toString(), DdlOperationType.ACL_CONFIG,
-                aclApplied.getTableName(), aclApplied.getId(), "l".repeat(64), DdlStep.DDL_APPLIED, null);
+                aclApplied.getTableName(), aclApplied.getId(), "l".repeat(64), DdlStep.DDL_APPLIED,
+                "ALTER TABLE `db`.`mt_stale_acl` ADD INDEX `idx_owner_id` (`owner_id`)");
+        BaasTable aclPreparedWithDdl = insertTable("mt_stale_acl_d", TableStatus.ALTERING);
+        BaasDdlLog aclWithPreparedDdl = insertHttpLog(UUID.randomUUID().toString(), DdlOperationType.ACL_CONFIG,
+                aclPreparedWithDdl.getTableName(), aclPreparedWithDdl.getId(), "q".repeat(64), DdlStep.PREPARED,
+                "ALTER TABLE `db`.`mt_stale_acl_d` ADD INDEX `idx_owner_id` (`owner_id`)");
         BaasTable aclPrepared = insertTable("mt_stale_acl_p", TableStatus.ACTIVE);
         BaasDdlLog aclWithoutDdl = insertHttpLog(UUID.randomUUID().toString(), DdlOperationType.ACL_CONFIG,
                 aclPrepared.getTableName(), aclPrepared.getId(), "p".repeat(64), DdlStep.PREPARED, null);
         BaasTable dropping = insertTable("mt_stale_d", TableStatus.DELETED);
         BaasDdlLog drop = insertHttpLog(UUID.randomUUID().toString(), DdlOperationType.DROP,
                 dropping.getTableName(), dropping.getId(), "d".repeat(64), DdlStep.PREPARED, null);
-        List.of(create, alter, acl, aclWithoutDdl, drop).forEach(log -> makeLogStale(log.getId()));
+        List.of(create, alter, acl, aclWithPreparedDdl, aclWithoutDdl, drop)
+            .forEach(log -> makeLogStale(log.getId()));
 
         maintenanceJob.scanOnce();
 
-        assertThat(List.of(create, alter, acl, aclWithoutDdl, drop))
+        assertThat(List.of(create, alter, acl, aclWithPreparedDdl, aclWithoutDdl, drop))
             .allSatisfy(log -> assertThat(ddlLogMapper.selectById(log.getId()).getStatus())
                 .isEqualTo(DdlLogStatus.FAILED.name()));
         assertThat(tableMapper.selectById(creating.getId()).getStatus()).isEqualTo(TableStatus.FAILED.name());
         assertThat(tableMapper.selectById(altering.getId()).getStatus()).isEqualTo(TableStatus.CONFLICT.name());
         assertThat(tableMapper.selectById(aclApplied.getId()).getStatus()).isEqualTo(TableStatus.CONFLICT.name());
+        assertThat(tableMapper.selectById(aclPreparedWithDdl.getId()).getStatus())
+            .isEqualTo(TableStatus.CONFLICT.name());
         assertThat(tableMapper.selectById(aclPrepared.getId()).getStatus()).isEqualTo(TableStatus.ACTIVE.name());
         assertThat(tableMapper.selectById(dropping.getId()).getStatus()).isEqualTo(TableStatus.DELETED.name());
     }

@@ -18,7 +18,6 @@ import com.aiwork.baas.entity.BaasProject;
 import com.aiwork.baas.entity.BaasTable;
 import com.aiwork.baas.entity.enums.DdlLogStatus;
 import com.aiwork.baas.entity.enums.DdlOperationType;
-import com.aiwork.baas.entity.enums.DdlStep;
 import com.aiwork.baas.entity.enums.TableStatus;
 import com.aiwork.baas.exception.DdlConflictException;
 import com.aiwork.baas.mapper.BaasColumnMapper;
@@ -214,22 +213,14 @@ public class DdlMaintenanceJob {
                     "陈旧 create 表状态兜底竞争失败");
             return;
         }
-        if (type == DdlOperationType.ALTER || aclDdlApplied(type, current.getStep())) {
+        if (type == DdlOperationType.ALTER || aclHasDdlIntent(type, current.getDdlText())) {
             updateTableState(current.getTableId(), TableStatus.ALTERING, TableStatus.CONFLICT,
                     "陈旧 alter 表状态兜底竞争失败");
         }
     }
 
-    private boolean aclDdlApplied(DdlOperationType type, String step) {
-        if (type != DdlOperationType.ACL_CONFIG || step == null) {
-            return false;
-        }
-        try {
-            return DdlStep.valueOf(step).reached(DdlStep.DDL_APPLIED);
-        }
-        catch (IllegalArgumentException invalidStep) {
-            return false;
-        }
+    private boolean aclHasDdlIntent(DdlOperationType type, String ddlText) {
+        return type == DdlOperationType.ACL_CONFIG && ddlText != null && !ddlText.isBlank();
     }
 
     private void updateTableState(Long tableId, TableStatus expected, TableStatus target, String errorMessage) {

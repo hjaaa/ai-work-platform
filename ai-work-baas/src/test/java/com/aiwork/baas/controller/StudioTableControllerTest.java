@@ -22,6 +22,8 @@ package com.aiwork.baas.controller;
 import com.aiwork.baas.entity.BaasProject;
 import com.aiwork.baas.exception.BaasStudioExceptionHandler;
 import com.aiwork.baas.exception.ProjectNotFoundException;
+import com.aiwork.baas.exception.TableNotFoundException;
+import com.aiwork.baas.service.AclConfigService;
 import com.aiwork.baas.service.ProjectAccessService;
 import com.aiwork.baas.service.TableManagementService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -56,6 +58,8 @@ class StudioTableControllerTest {
 
     private TableManagementService tableService;
 
+    private AclConfigService aclService;
+
     private BaasProject project;
 
     private MockMvc mockMvc;
@@ -64,10 +68,11 @@ class StudioTableControllerTest {
     void setUp() {
         accessService = Mockito.mock(ProjectAccessService.class);
         tableService = Mockito.mock(TableManagementService.class);
+        aclService = Mockito.mock(AclConfigService.class);
         project = new BaasProject();
         project.setId(10L);
         project.setProjectRef(PROJECT_REF);
-        mockMvc = MockMvcBuilders.standaloneSetup(new StudioTableController(accessService, tableService))
+        mockMvc = MockMvcBuilders.standaloneSetup(new StudioTableController(accessService, tableService, aclService))
             .setControllerAdvice(new BaasStudioExceptionHandler())
             .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
             .build();
@@ -189,6 +194,73 @@ class StudioTableControllerTest {
             .andExpect(jsonPath("$.msg").value("请求参数校验失败"));
 
         verifyNoInteractions(accessService, tableService);
+    }
+
+    @Test
+    void getAndPutAclCheckOwnershipBeforeDelegatingAndReturnAclContract() throws Exception {
+        ObjectNode getSnapshot = objectMapper.createObjectNode();
+        getSnapshot.put("tableName", "orders");
+        getSnapshot.putNull("ownerColumn");
+        getSnapshot.putObject("acl").putObject("anon").put("select", false);
+        ObjectNode putSnapshot = getSnapshot.deepCopy();
+        putSnapshot.put("ownerColumn", "owner_id");
+        putSnapshot.put("aclClosedByOwnerCancel", false);
+        when(accessService.requireOwned(PROJECT_REF)).thenReturn(project);
+        when(aclService.getAcl(project, "orders")).thenReturn(getSnapshot);
+        when(aclService.putAcl(Mockito.eq(project), Mockito.eq("orders"), Mockito.any())).thenReturn(putSnapshot);
+
+        mockMvc.perform(get("/studio/projects/" + PROJECT_REF + "/tables/orders/acl"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.tableName").value("orders"))
+            .andExpect(jsonPath("$.data.ownerColumn").isEmpty())
+            .andExpect(jsonPath("$.data.acl.anon.select").value(false))
+            .andExpect(jsonPath("$.data.aclClosedByOwnerCancel").doesNotExist());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+            .put("/studio/projects/" + PROJECT_REF + "/tables/orders/acl")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"operationId\":\"6f9e6d0e-b30c-4e20-8101-4d1b8cf1ee54\","
+                    + "\"acl\":{\"anon\":{\"select\":false,\"insert\":false,\"update\":false,"
+                    + "\"delete\":false},\"authenticated\":{\"select\":true,\"insert\":false,"
+                    + "\"update\":false,\"delete\":false}},\"ownerColumn\":\"owner_id\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.ownerColumn").value("owner_id"))
+            .andExpect(jsonPath("$.data.aclClosedByOwnerCancel").value(false));
+
+        InOrder order = inOrder(accessService, aclService);
+        order.verify(accessService).requireOwned(PROJECT_REF);
+        order.verify(aclService).getAcl(project, "orders");
+        order.verify(accessService).requireOwned(PROJECT_REF);
+        order.verify(aclService).putAcl(Mockito.eq(project), Mockito.eq("orders"), Mockito.argThat(dto ->
+                "owner_id".equals(dto.ownerColumn()) && dto.acl().authenticated().select()));
+    }
+
+    @Test
+    void invalidAclOperationIdReturnsBadRequestBeforeOwnershipLookup() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+            .put("/studio/projects/" + PROJECT_REF + "/tables/orders/acl")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"operationId\":\"\",\"acl\":{\"anon\":{},\"authenticated\":{}}}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.msg").value("请求参数校验失败"));
+
+        verifyNoInteractions(accessService, tableService, aclService);
+    }
+
+    @Test
+    void foreignProjectAndMissingTableAclBothReturnNotFound() throws Exception {
+        when(accessService.requireOwned(PROJECT_REF)).thenThrow(new ProjectNotFoundException());
+
+        mockMvc.perform(get("/studio/projects/" + PROJECT_REF + "/tables/orders/acl"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.msg").value("项目不存在或无权访问"));
+        verifyNoInteractions(aclService);
+
+        Mockito.reset(accessService);
+        when(accessService.requireOwned(PROJECT_REF)).thenReturn(project);
+        when(aclService.getAcl(project, "missing")).thenThrow(new TableNotFoundException());
+        mockMvc.perform(get("/studio/projects/" + PROJECT_REF + "/tables/missing/acl"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.msg").value("表不存在"));
     }
 
 }

@@ -19,9 +19,11 @@
 
 package com.aiwork.baas.controller;
 
+import com.aiwork.baas.controller.dto.AclPutDTO;
 import com.aiwork.baas.controller.dto.TableAlterDTO;
 import com.aiwork.baas.controller.dto.TableCreateDTO;
 import com.aiwork.baas.entity.BaasProject;
+import com.aiwork.baas.service.AclConfigService;
 import com.aiwork.baas.service.ProjectAccessService;
 import com.aiwork.baas.service.TableManagementService;
 import com.aiwork.common.core.util.R;
@@ -34,6 +36,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -53,6 +56,8 @@ public class StudioTableController {
     private final ProjectAccessService accessService;
 
     private final TableManagementService tableService;
+
+    private final AclConfigService aclService;
 
     @GetMapping
     public R<ArrayNode> list(@PathVariable("ref") String projectRef) {
@@ -86,6 +91,20 @@ public class StudioTableController {
             @RequestParam("operationId") String operationId) {
         BaasProject project = accessService.requireOwned(projectRef);
         return R.ok(tableService.dropTable(project, tableName, operationId));
+    }
+
+    @GetMapping("/{table}/acl")
+    public R<ObjectNode> getAcl(@PathVariable("ref") String projectRef,
+            @PathVariable("table") String tableName) {
+        BaasProject project = accessService.requireOwned(projectRef);
+        return R.ok(aclService.getAcl(project, tableName));
+    }
+
+    @PutMapping("/{table}/acl")
+    public R<ObjectNode> putAcl(@PathVariable("ref") String projectRef, @PathVariable("table") String tableName,
+            @Valid @RequestBody AclPutDTO aclPutDTO) {
+        BaasProject project = accessService.requireOwned(projectRef);
+        return R.ok(aclService.putAcl(project, tableName, aclPutDTO));
     }
 
 }
