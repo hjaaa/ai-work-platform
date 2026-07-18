@@ -7,6 +7,9 @@ ALTER TABLE `baas_project`
   MODIFY COLUMN `status` varchar(16) NOT NULL COMMENT 'PROVISIONING/ACTIVE/MIGRATING/FAILED/DELETING/DELETED';
 
 ALTER TABLE `baas_ddl_log`
+  MODIFY COLUMN `id` bigint NOT NULL AUTO_INCREMENT,
+  MODIFY COLUMN `project_id` bigint NOT NULL,
+  MODIFY COLUMN `retry_count` int NOT NULL DEFAULT 0,
   MODIFY COLUMN `ddl_text` text NULL COMMENT '脱敏 DDL(默认值字面量以 ? 占位);纯元数据操作为 NULL',
   MODIFY COLUMN `status` varchar(16) NOT NULL COMMENT 'PENDING/RUNNING/SUCCESS/FAILED',
   ADD COLUMN `operation_type` varchar(16) NOT NULL DEFAULT 'create' COMMENT 'create/alter/drop/acl-config/cleanup-drop/reconcile' AFTER `project_id`,

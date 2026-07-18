@@ -38,7 +38,7 @@ CREATE TABLE `baas_project` (
 
 CREATE TABLE `baas_jwt_key` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `project_id` bigint NOT NULL,
+  `project_id` bigint unsigned NOT NULL,
   `kid` varchar(36) NOT NULL,
   `secret_cipher` varchar(512) NOT NULL COMMENT 'HS256 secret 密文',
   `status` varchar(16) NOT NULL COMMENT 'CURRENT/PREVIOUS/REVOKED',
