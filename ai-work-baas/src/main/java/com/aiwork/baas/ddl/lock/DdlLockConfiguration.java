@@ -38,6 +38,9 @@ public class DdlLockConfiguration {
 	public DdlLockManager ddlLockManager(StringRedisTemplate stringRedisTemplate,
 			@Value("${baas.ddl.lock-ttl-millis:60000}") long ttlMillis,
 			@Value("${baas.ddl.lock-renew-millis:20000}") long renewPeriodMillis) {
+		if (ttlMillis <= 0 || renewPeriodMillis <= 0 || renewPeriodMillis >= ttlMillis) {
+			throw new IllegalArgumentException("DDL_LOCK_CONFIGURATION_INVALID");
+		}
 		return new DdlLockManager(stringRedisTemplate, ttlMillis, renewPeriodMillis);
 	}
 

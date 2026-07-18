@@ -49,12 +49,18 @@ public class AdvisoryLockTemplate {
 
 	public <T> T executeWithLock(Long projectId, DdlConnectionCallback<T> callback) {
 		String name = lockName(projectId);
-		try (Connection connection = provisionerDataSource.getConnection()) {
+		Connection connection = null;
+		try {
+			connection = provisionerDataSource.getConnection();
 			if (!acquire(connection, name)) {
 				throw new DdlLockBusyException("该项目有 DDL 操作进行中(advisory lock busy)");
 			}
 			try {
 				return callback.doWithConnection(connection);
+			}
+			catch (InterruptedException interruptedException) {
+				Thread.currentThread().interrupt();
+				throw new IllegalStateException("DDL_LOCK_CALLBACK_INTERRUPTED");
 			}
 			catch (RuntimeException runtimeException) {
 				throw runtimeException;
@@ -68,6 +74,9 @@ public class AdvisoryLockTemplate {
 		}
 		catch (SQLException sqlException) {
 			throw new IllegalStateException("DDL_LOCK_INFRASTRUCTURE_FAILED");
+		}
+		finally {
+			closeQuietly(connection, name);
 		}
 	}
 
@@ -87,6 +96,19 @@ public class AdvisoryLockTemplate {
 		}
 		catch (Exception exception) {
 			log.warn("release advisory lock failed lockName={} errorType={}", name,
+					exception.getClass().getSimpleName());
+		}
+	}
+
+	private void closeQuietly(Connection connection, String name) {
+		if (connection == null) {
+			return;
+		}
+		try {
+			connection.close();
+		}
+		catch (Exception exception) {
+			log.warn("close advisory connection failed lockName={} errorType={}", name,
 					exception.getClass().getSimpleName());
 		}
 	}

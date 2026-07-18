@@ -23,7 +23,12 @@ import com.aiwork.baas.support.PlanBContainerSupport;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import javax.sql.DataSource;
+import java.lang.reflect.Proxy;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -105,11 +110,70 @@ class AdvisoryLockTemplateTest extends PlanBContainerSupport {
 		assertThat(template.<String>executeWithLock(204L, connection -> "ok")).isEqualTo("ok");
 	}
 
+	@Test
+	void callbackAndConnectionCloseFailuresDoNotExposeCauseOrSuppressedExceptions() throws Exception {
+		AdvisoryLockTemplate closeFailingTemplate = new AdvisoryLockTemplate(closeFailingDataSource());
+
+		assertThatThrownBy(() -> closeFailingTemplate.executeWithLock(205L, connection -> {
+			throw new Exception("secret callback metadata");
+		})).isInstanceOf(IllegalStateException.class)
+			.hasMessage("DDL_LOCK_CALLBACK_FAILED")
+			.hasNoCause()
+			.satisfies(exception -> assertThat(exception.getSuppressed()).isEmpty());
+	}
+
+	@Test
+	void interruptedCallbackRestoresInterruptFlagAndUsesStableError() {
+		try {
+			assertThatThrownBy(() -> template.executeWithLock(206L, connection -> {
+				throw new InterruptedException("secret interruption detail");
+			})).isInstanceOf(IllegalStateException.class)
+				.hasMessage("DDL_LOCK_CALLBACK_INTERRUPTED")
+				.hasNoCause()
+				.satisfies(exception -> assertThat(exception.getSuppressed()).isEmpty());
+			assertThat(Thread.currentThread().isInterrupted()).isTrue();
+		}
+		finally {
+			Thread.interrupted();
+		}
+		assertThat(template.<String>executeWithLock(206L, connection -> "released")).isEqualTo("released");
+	}
+
 	private static long queryLong(Connection connection, String sql) throws Exception {
 		try (var statement = connection.createStatement(); var resultSet = statement.executeQuery(sql)) {
 			assertThat(resultSet.next()).isTrue();
 			return resultSet.getLong(1);
 		}
+	}
+
+	private static DataSource closeFailingDataSource() {
+		ResultSet resultSet = proxy(ResultSet.class, (proxy, method, args) -> switch (method.getName()) {
+			case "next" -> true;
+			case "getInt" -> 1;
+			case "close" -> null;
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		PreparedStatement statement = proxy(PreparedStatement.class,
+				(proxy, method, args) -> switch (method.getName()) {
+					case "setString", "close" -> null;
+					case "executeQuery" -> resultSet;
+					default -> throw new UnsupportedOperationException(method.getName());
+				});
+		Connection connection = proxy(Connection.class, (proxy, method, args) -> switch (method.getName()) {
+			case "prepareStatement" -> statement;
+			case "close" -> throw new SQLException("secret close jdbc metadata");
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		return proxy(DataSource.class, (proxy, method, args) -> {
+			if ("getConnection".equals(method.getName())) {
+				return connection;
+			}
+			throw new UnsupportedOperationException(method.getName());
+		});
+	}
+
+	private static <T> T proxy(Class<T> type, java.lang.reflect.InvocationHandler handler) {
+		return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] { type }, handler));
 	}
 
 }
