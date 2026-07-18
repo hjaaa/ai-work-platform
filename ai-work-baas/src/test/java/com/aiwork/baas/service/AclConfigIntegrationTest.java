@@ -36,9 +36,11 @@ import com.aiwork.baas.exception.BaasBadRequestException;
 import com.aiwork.baas.exception.DdlConflictException;
 import com.aiwork.baas.mapper.BaasDdlLogMapper;
 import com.aiwork.baas.support.PlanBProjectIntegrationTestSupport;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,6 +48,11 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.reset;
 
 class AclConfigIntegrationTest extends PlanBProjectIntegrationTestSupport {
 
@@ -56,7 +63,7 @@ class AclConfigIntegrationTest extends PlanBProjectIntegrationTestSupport {
     @Autowired
     private AclConfigService aclService;
 
-    @Autowired
+    @MockitoSpyBean
     private TableManagementService tableService;
 
     @Autowired
@@ -160,6 +167,53 @@ class AclConfigIntegrationTest extends PlanBProjectIntegrationTestSupport {
             .isInstanceOf(DdlConflictException.class)
             .hasMessageContaining("物理列");
         assertAclPutRejectedWithoutSideEffects(table, dto);
+    }
+
+    @Test
+    void existingOrdinaryOwnerIndexCannotReplaceMetadataUniqueFlag() {
+        String table = createTableWithOwnerIndex("acl_idx_u2i", true);
+        rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table
+                + "` DROP INDEX `uk_owner_id`, ADD INDEX `idx_owner_id` (`owner_id`)");
+        AclPutDTO dto = put(READ_ONLY, READ_ONLY, "owner_id");
+
+        assertThatThrownBy(() -> aclService.putAcl(project, table, dto))
+            .isInstanceOf(DdlConflictException.class)
+            .hasMessageContaining("owner");
+
+        assertAclPutRejectedWithoutSideEffects(table, dto);
+        assertOwnerIndexFlags(table, true, false);
+        assertThat(indexIsUnique(table, "owner_id")).isFalse();
+    }
+
+    @Test
+    void existingUniqueOwnerIndexCannotReplaceMetadataIndexedFlag() {
+        String table = createTableWithOwnerIndex("acl_idx_i2u", false);
+        rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table
+                + "` DROP INDEX `idx_owner_id`, ADD UNIQUE INDEX `uk_owner_id` (`owner_id`)");
+        AclPutDTO dto = put(READ_ONLY, READ_ONLY, "owner_id");
+
+        assertThatThrownBy(() -> aclService.putAcl(project, table, dto))
+            .isInstanceOf(DdlConflictException.class)
+            .hasMessageContaining("owner");
+
+        assertAclPutRejectedWithoutSideEffects(table, dto);
+        assertOwnerIndexFlags(table, false, true);
+        assertThat(indexIsUnique(table, "owner_id")).isTrue();
+    }
+
+    @Test
+    void ownerConfigRejectsColumnCollationDriftWithoutSideEffects() {
+        String table = createTableWithOwnerCandidate("acl_col_coll", true);
+        rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table
+                + "` MODIFY `title` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL");
+        AclPutDTO dto = put(READ_ONLY, READ_ONLY, "owner_id");
+
+        assertThatThrownBy(() -> aclService.putAcl(project, table, dto))
+            .isInstanceOf(DdlConflictException.class)
+            .hasMessageContaining("基线");
+
+        assertAclPutRejectedWithoutSideEffects(table, dto);
+        assertThat(indexCountOn(table, "owner_id")).isZero();
     }
 
     @Test
@@ -400,6 +454,58 @@ class AclConfigIntegrationTest extends PlanBProjectIntegrationTestSupport {
     }
 
     @Test
+    void ownerIndexDeletedAfterInitialInspectionIsRejectedBeforeMetadataCommit() {
+        String table = createTableWithOwnerIndex("acl_race_drop", false);
+        BaasTable tableRow = tableService.findTableRow(project.getId(), table);
+        AclPutDTO dto = put(READ_ONLY, READ_ONLY, "owner_id");
+        doAnswer(invocation -> {
+            invocation.callRealMethod();
+            rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table
+                    + "` DROP INDEX `idx_owner_id`");
+            return null;
+        }).when(tableService).patchDdlLog(anyLong(), eq(tableRow.getId()), isNull());
+
+        try {
+            assertThatThrownBy(() -> aclService.putAcl(project, table, dto))
+                .isInstanceOf(DdlConflictException.class)
+                .hasMessageContaining("owner");
+        }
+        finally {
+            reset(tableService);
+        }
+
+        assertAclMetadataUnchanged(table, false, true);
+        assertThat(indexCountOn(table, "owner_id")).isZero();
+        assertFailedAclLog(dto);
+    }
+
+    @Test
+    void ownerIndexReplacedAfterInitialInspectionIsRejectedBeforeMetadataCommit() {
+        String table = createTableWithOwnerIndex("acl_race_repl", false);
+        BaasTable tableRow = tableService.findTableRow(project.getId(), table);
+        AclPutDTO dto = put(READ_ONLY, READ_ONLY, "owner_id");
+        doAnswer(invocation -> {
+            invocation.callRealMethod();
+            rootJdbc.execute("ALTER TABLE `" + project.getDbName() + "`.`" + table
+                    + "` DROP INDEX `idx_owner_id`, ADD UNIQUE INDEX `uk_owner_id` (`owner_id`)");
+            return null;
+        }).when(tableService).patchDdlLog(anyLong(), eq(tableRow.getId()), isNull());
+
+        try {
+            assertThatThrownBy(() -> aclService.putAcl(project, table, dto))
+                .isInstanceOf(DdlConflictException.class)
+                .hasMessageContaining("owner");
+        }
+        finally {
+            reset(tableService);
+        }
+
+        assertAclMetadataUnchanged(table, false, true);
+        assertThat(indexIsUnique(table, "owner_id")).isTrue();
+        assertFailedAclLog(dto);
+    }
+
+    @Test
     void getAclOmitsPutOnlyCancelFlag() {
         String table = createTableWithOwnerCandidate("acl_get", true);
         aclService.putAcl(project, table, put(READ_ONLY, READ_ONLY, null));
@@ -413,6 +519,13 @@ class AclConfigIntegrationTest extends PlanBProjectIntegrationTestSupport {
     private String createTableWithOwnerCandidate(String name, boolean ownerNullable) {
         tableService.createTable(project, new TableCreateDTO(UUID.randomUUID().toString(), name, null, List.of(
                 new ColumnDefinitionDTO("owner_id", "bigint", null, null, ownerNullable, null, false, false, null),
+                new ColumnDefinitionDTO("title", "varchar", 128, null, true, null, false, false, null))));
+        return name;
+    }
+
+    private String createTableWithOwnerIndex(String name, boolean unique) {
+        tableService.createTable(project, new TableCreateDTO(UUID.randomUUID().toString(), name, null, List.of(
+                new ColumnDefinitionDTO("owner_id", "bigint", null, null, true, null, unique, !unique, null),
                 new ColumnDefinitionDTO("title", "varchar", 128, null, true, null, false, false, null))));
         return name;
     }
@@ -431,6 +544,41 @@ class AclConfigIntegrationTest extends PlanBProjectIntegrationTestSupport {
         return rootJdbc.queryForObject("SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS "
                 + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME <> 'PRIMARY'", Long.class,
                 project.getDbName(), table);
+    }
+
+    private boolean indexIsUnique(String table, String column) {
+        Integer nonUnique = rootJdbc.queryForObject("SELECT NON_UNIQUE FROM information_schema.STATISTICS "
+                + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ? AND INDEX_NAME <> 'PRIMARY'",
+                Integer.class, project.getDbName(), table, column);
+        return nonUnique != null && nonUnique == 0;
+    }
+
+    private void assertOwnerIndexFlags(String table, boolean unique, boolean indexed) {
+        JsonNode owner = tableService.getTableSnapshot(project, table)
+            .withArray("columns")
+            .findParents("columnName")
+            .stream()
+            .filter(node -> "owner_id".equals(node.get("columnName").asText()))
+            .findFirst()
+            .orElseThrow();
+        assertThat(owner.get("unique").asBoolean()).isEqualTo(unique);
+        assertThat(owner.get("indexed").asBoolean()).isEqualTo(indexed);
+    }
+
+    private void assertAclMetadataUnchanged(String table, boolean unique, boolean indexed) {
+        ObjectNode snapshot = tableService.getTableSnapshot(project, table);
+        assertThat(snapshot.get("ownerColumn").isNull()).isTrue();
+        assertThat(snapshot.at("/acl/anon/select").asBoolean()).isFalse();
+        assertThat(snapshot.at("/acl/authenticated/select").asBoolean()).isFalse();
+        assertOwnerIndexFlags(table, unique, indexed);
+        assertThat(snapshot.get("status").asText()).isEqualTo(TableStatus.ACTIVE.name());
+    }
+
+    private void assertFailedAclLog(AclPutDTO dto) {
+        BaasDdlLog logRecord = ddlLogMapper.selectByProjectAndOperation(project.getId(), dto.operationId());
+        assertThat(logRecord).isNotNull();
+        assertThat(logRecord.getStatus()).isEqualTo(DdlLogStatus.FAILED.name());
+        assertThat(logRecord.getStep()).isEqualTo(DdlStep.PREPARED.name());
     }
 
     private void assertAclPutRejectedWithoutSideEffects(String table, AclPutDTO dto) {

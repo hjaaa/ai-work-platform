@@ -34,6 +34,7 @@ import com.aiwork.baas.ddl.inspect.LogicalModelMapper;
 import com.aiwork.baas.ddl.inspect.MappingOutcome;
 import com.aiwork.baas.ddl.inspect.PhysicalColumn;
 import com.aiwork.baas.ddl.inspect.PhysicalIndex;
+import com.aiwork.baas.ddl.inspect.PhysicalStructureAdmission;
 import com.aiwork.baas.ddl.inspect.PhysicalTable;
 import com.aiwork.baas.ddl.inspect.SchemaInspector;
 import com.aiwork.baas.ddl.render.DdlRenderer;
@@ -215,7 +216,7 @@ public class AclConfigService {
                 return;
             }
             PhysicalTable physical = readManagedPhysicalTable(context);
-            OwnerIndexMapping ownerMapping = inspectPhysicalStructure(physical);
+            OwnerIndexMapping ownerMapping = inspectPhysicalStructure(physical, persistedDdlIntent);
             prepareIndexOperation(physical, ownerMapping.logicalColumn(), ownerMapping.index());
         }
 
@@ -239,10 +240,7 @@ public class AclConfigService {
             if (physical == null) {
                 throw new DdlConflictException("项目库中不存在该表,请先对账处理");
             }
-            if (!"BASE TABLE".equals(physical.tableType()) || !"InnoDB".equals(physical.engine())
-                    || !"Dynamic".equals(physical.rowFormat())
-                    || !"utf8mb4_general_ci".equals(physical.collation()) || physical.hasTriggers()
-                    || physical.hasForeignKeys() || physical.hasCheckConstraints()) {
+            if (!PhysicalStructureAdmission.hasRequiredBaseline(physical)) {
                 throw new DdlConflictException("物理表不满足 ACTIVE 基线,请先对账处理");
             }
             return physical;
@@ -322,17 +320,16 @@ public class AclConfigService {
             if (indexOperation) {
                 applyOrVerifyIndex(context);
             }
+            if (dto.ownerColumn() != null) {
+                verifyFinalOwnerStructure(context);
+            }
             return context.completeSuccess(() -> applyMetadataAndSnapshot(indexOperation));
         }
 
         private void applyOrVerifyIndex(DdlWorkContext context) {
             if (!context.stepReached(DdlStep.DDL_APPLIED)) {
-                PhysicalTable physical = SchemaInspector.readTable(context.projectJdbc(), project.getDbName(),
-                        tableName);
-                if (physical == null) {
-                    throw new DdlConflictException("ACL 补索引物理表不存在");
-                }
-                OwnerIndexMapping ownerMapping = inspectPhysicalStructure(physical);
+                PhysicalTable physical = readManagedPhysicalTable(context);
+                OwnerIndexMapping ownerMapping = inspectPhysicalStructure(physical, persistedDdlIntent);
                 if (ownerMapping.index() == null) {
                     if (!needIndex || renderedDdl == null) {
                         throw new DdlConflictException("ACL 补索引目标在执行前发生漂移");
@@ -347,19 +344,25 @@ public class AclConfigService {
         }
 
         private void verifyOwnerIndex(DdlWorkContext context) {
-            PhysicalTable physical = SchemaInspector.readTable(context.projectJdbc(), project.getDbName(), tableName);
-            if (physical == null) {
-                throw new DdlConflictException("ACL owner 单列索引物理目标校验失败");
-            }
-            OwnerIndexMapping ownerMapping = inspectPhysicalStructure(physical);
+            PhysicalTable physical = readManagedPhysicalTable(context);
+            OwnerIndexMapping ownerMapping = inspectPhysicalStructure(physical, true);
             if (ownerMapping.index() == null) {
                 throw new DdlConflictException("ACL owner 单列索引物理目标校验失败");
+            }
+        }
+
+        private void verifyFinalOwnerStructure(DdlWorkContext context) {
+            PhysicalTable physical = readManagedPhysicalTable(context);
+            OwnerIndexMapping ownerMapping = inspectPhysicalStructure(physical, indexOperation);
+            if (ownerMapping.index() == null) {
+                throw new DdlConflictException("ACL owner 单列索引最终校验失败");
             }
             ownerUnique = ownerMapping.index().unique();
             ownerIndexed = !ownerUnique;
         }
 
-        private OwnerIndexMapping inspectPhysicalStructure(PhysicalTable physical) {
+        private OwnerIndexMapping inspectPhysicalStructure(PhysicalTable physical,
+                boolean allowPendingOwnerIndex) {
             List<BaasColumn> metadataColumns = columnMapper.selectList(Wrappers.<BaasColumn>lambdaQuery()
                 .eq(BaasColumn::getTableId, tableRow.getId())
                 .orderByAsc(BaasColumn::getId));
@@ -401,6 +404,7 @@ public class AclConfigService {
                 LogicalColumn logical = outcome.value();
                 if (metadata.getColumnName().equals(dto.ownerColumn())) {
                     validateOwnerColumn(metadata, logical);
+                    validateOwnerIndexFlags(metadata, logical, index, allowPendingOwnerIndex);
                     ownerMapping = new OwnerIndexMapping(logical, index);
                 }
                 else if (!matchesMetadata(metadata, logical)) {
@@ -411,6 +415,19 @@ public class AclConfigService {
                 throw new BaasBadRequestException("owner 列不存在或元数据不唯一: " + dto.ownerColumn());
             }
             return ownerMapping;
+        }
+
+        private void validateOwnerIndexFlags(BaasColumn metadata, LogicalColumn physical, PhysicalIndex index,
+                boolean allowPendingOwnerIndex) {
+            boolean flagsMatch = Objects.equals(Boolean.TRUE.equals(metadata.getUnique()), physical.unique())
+                    && Objects.equals(Boolean.TRUE.equals(metadata.getIndexed()), physical.indexed());
+            if (index == null || flagsMatch) {
+                return;
+            }
+            if (allowPendingOwnerIndex && !index.unique()) {
+                return;
+            }
+            throw new DdlConflictException("owner 索引 flags 与平台元数据不一致,请先对账处理");
         }
 
         private boolean matchesMetadata(BaasColumn metadata, LogicalColumn physical) {
