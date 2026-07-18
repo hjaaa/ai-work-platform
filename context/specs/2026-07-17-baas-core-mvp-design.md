@@ -1,7 +1,7 @@
 # BaaS 核心 MVP 设计(ai-work-baas)
 
 - 日期:2026-07-17
-- 状态:v26;v1~v5 经四轮整体评审定稿,v6 附实施规划与会话交接(§16),v8 补齐 Plan B(表管理与 DDL)设计细化,v9~v25 按 Plan B 十七轮设计评审修订,v26 为四维系统性自查修订
+- 状态:v27;v1~v5 经四轮整体评审定稿,v6 附实施规划与会话交接(§16),v8 补齐 Plan B(表管理与 DDL)设计细化,v9~v25 按 Plan B 十七轮设计评审修订,v26 为四维系统性自查修订,v27 为 Plan B 实施计划复审闭环修订
 - 范围:「MySQL 版 BaaS 平台」首个子项目(核心 MVP,定位内部 Alpha)的设计文档,同时记录三个子项目的总体开发顺序决策
 
 ## 1. 背景与目标
@@ -159,6 +159,7 @@ PUT  /auth/v1/user/password                   修改密码:成功后撤销该用
 /studio/projects/{ref}/users               GET 终端用户列表
 /studio/projects/{ref}/users/{userId}      DELETE 删除终端用户
 /studio/projects/{ref}/reconcile           POST 触发表结构对账
+/studio/projects/{ref}/system-tables/migrate POST 管理员手动触发系统表迁移
 ```
 
 管理面沿用平台 `R<T>` 响应与 springdoc 文档;数据面提供**静态** OpenAPI(描述查询语法契约,不做 per-project 动态反射)。项目 CORS 白名单(`allowed_origins`)通过 `PATCH /studio/projects/{ref}` 配置。
@@ -203,6 +204,7 @@ PUT  /auth/v1/user/password                   修改密码:成功后撤销该用
 - 所有 `/studio/projects/{ref}/**` 操作(详情、表、Key、用户、删除、对账)一律校验项目归属,不匹配返回 404(不泄露存在性)
 - 仅持有专门 upms 权限码 `baas_admin` 的超级管理员可跨项目操作(以 authority 字符串直查实现;平台角色 authority 形如 `ROLE_<数字id>`,不存在字符串角色,见 §16.2 工程事实)
 - `project_ref` 只是路由标识,**不作为授权凭据**
+- **系统表手动迁移契约**:`POST /studio/projects/{ref}/system-tables/migrate` 仅 `baas_admin` 可调用,非管理员统一 404 不泄露项目存在性;请求不携带 operationId(迁移以项目状态 + 版本化 manifest + 逐表 epoch 检查点幂等),锁忙返回 409;仅 ACTIVE/FAILED 且 manifest 精确匹配已知 legacy 版本时执行,当前版返回 `{status:"ACTIVE", migrated:false}`,迁移成功返回 `{status:"ACTIVE", migrated:true}`,结构不属于当前版或已知 legacy 版返回 409 且不执行 ALTER,越界或执行失败按 §9.1 置 FAILED 并返回 409。路由同步执行至本轮迁移完成或明确失败,不返回“已受理”式假成功
 
 ### 7.4 请求身份三态
 
@@ -457,7 +459,7 @@ BaaS 核心 MVP 拆为 5 份实施计划,每份独立产出可运行、可测试
 | 计划 | 范围 | 对应 spec 章节 | 依赖 | 状态(2026-07-18) |
 |---|---|---|---|---|
 | **A 项目底座与生命周期** | 模块骨架(`ai-work-baas`,端口 4010)、元数据库、AES-GCM 加密器、API Key 体系、项目状态机与延迟清理、项目连接池注册表、Studio 项目管理 API(含 IDOR 防护) | §4、§6、§8.1、§9.1/9.3、§10、§12.1 | — | **已实现**(PR #13 已合入 develop) |
-| **B 表管理与 DDL** | 建/改/删表(元数据 + 真实 DDL,改表为全能档:加/删列、改类型/长度、重命名列/表,含 `allowLossy` 确认与类型兼容矩阵)、Redis 串行锁 + 操作 ID 幂等(`baas_ddl_log`)、表状态机(§9.5)、表级 ACL 与 owner 列配置(bigint 校验/自动建索引/anon.insert 要求可空)、软删 tombstone 与同名禁重建、`information_schema` 对账 | §7.3(表管理契约)、§8.2/8.3(配置面)、§9.2/9.4/9.5、§13(表编辑器边界与兼容矩阵) | A | 设计细化至 v25(v8 后经十七轮评审修订,v25 消除十七轮 3 P1;范围含项目删除/清理取锁改造、项目级 epoch fencing、ACTIVE 准入谓词与 EXTRA 集合、类型规范化与参数矩阵、索引名分配器与索引准入矩阵、物理基线 fail-closed、系统表 manifest 与 MIGRATING 迁移),待复审(v26 已完成四维系统性自查);计划未写 |
+| **B 表管理与 DDL** | 建/改/删表(元数据 + 真实 DDL,改表为全能档:加/删列、改类型/长度、重命名列/表,含 `allowLossy` 确认与类型兼容矩阵)、Redis 串行锁 + 操作 ID 幂等(`baas_ddl_log`)、表状态机(§9.5)、表级 ACL 与 owner 列配置(bigint 校验/自动建索引/anon.insert 要求可空)、软删 tombstone 与同名禁重建、`information_schema` 对账 | §7.3(表管理契约)、§8.2/8.3(配置面)、§9.2/9.4/9.5、§13(表编辑器边界与兼容矩阵) | A | 设计细化至 v27,实施计划 `docs/superpowers/plans/2026-07-18-baas-plan-b-table-ddl.md` 已生成并按首轮复审修订,待实施 |
 | **C 数据面 REST** | PostgREST 风格解析器与 SQL 构建器、`/rest/v1/{table}` 动态 CRUD 语义细则、ApiKeyAuthFilter + URL/apikey/JWT 三方一致性、owner 行策略注入、CORS Filter(先于鉴权、仅查元数据)、错误体映射、资源限制、Cloud/Boot 双形态入口落地、数据面静态 OpenAPI | §5、§7.1/7.4、§8.2/8.3(执行面)、§11、§12.2、§13 | A、B | 未写 |
 | **D 终端用户 Auth** | `/auth/v1/*`:signup/login、`_sessions`/`_refresh_tokens`、refresh 行锁事务 + 10 秒 grace 加密重放、logout/改密撤销会话、JWT 签发验签(kid 双版本)、常规/紧急轮换端点、防暴力限速 | §7.2、§6.1/6.2、§12.2 | A、C | 未写 |
 | **E Studio 前端** | ai-work-ui 的 BaaS 控制台:项目列表/详情、可视化表编辑器、ACL 与 owner 配置、API Key 管理(明文仅显示一次),遵循 ai-work-ui/DESIGN.md | §7.3 的界面化 | A、B(可与 C/D 并行) | 未写 |
@@ -484,6 +486,7 @@ MVP 之后(各自另行「设计 → 计划」,不属于上述 5 份):插件市�
 
 ## 17. 修订记录
 
+- **v27(2026-07-18)**:闭环 Plan B 实施计划首轮复审中的管理 API 契约缺口。§7.3 正式加入 `POST /studio/projects/{ref}/system-tables/migrate`:仅 `baas_admin`,非管理员 404,锁忙/非法 manifest/迁移失败 409,同步返回 `status/migrated`,不使用 operationId(依赖项目状态、manifest 与 epoch 检查点幂等);§16.1 同步 Plan B 计划已生成并进入实施前修订状态。
 - **v26(2026-07-18)**:四维系统性自查修订(状态机完备性/锁与事务顺序/information_schema 映射完整性/测试覆盖对齐),11 处发现一次性修复。状态机——① FAILED→ACTIVE(重试成功)与 FAILED/CONFLICT→DELETED 出边补全,FAILED/CONFLICT 表允许删除以释放表名,cleanup 改用 DROP TABLE IF EXISTS(§9.5/§9.2);② HTTP 操作陈旧 RUNNING 兜底:请求体不持久化、调度器无法代跑,锁失效超阈值(默认 10 分钟)后 CAS 置 FAILED 并按类型落表状态,同 ID 重试仍可续跑(§9.2);③ MIGRATING 触发入口定为启动后台扫描 + 手动,并参与项目级 epoch(§9.1/§9.2);④ §9.2 锁内分类补 SUCCESS(返回快照)与活跃 RUNNING(409)两类,删表状态集定为 ACTIVE/FAILED/CONFLICT。锁与事务——⑤ 消除 §9.2「GET_LOCK 与 DDL 同连接」与 §9.3「专用管理连接」的矛盾:统一为同一条 Provisioner 数据源物理连接(DDL 本就由 Provisioner 执行,天然不受项目池 drain 波及);⑥ acl-config 补索引分支明确置 ALTERING、纯开关不改表状态(§8.3)。映射——⑦ date/datetime 仅 DATETIME_PRECISION=0 可映射;⑧ int/bigint 显示宽度忽略(int(11) 等价 int,不按字面误拒)(§13);⑨ 对账范围限定 ACTIVE/CONFLICT 表,防「库无表」规则误伤 FAILED/CREATING(§9.4)。§14 增补上述全部测试项。
 - **v25(2026-07-18)**:按 Plan B 十七轮复审(3 P1)修订。① 锁内校验先按日志分支分类(§9.2):固定顺序改为「双层锁 → 锁内重读日志分类(无记录/FAILED/陈旧 RUNNING/PENDING)→ 按分支重读结构并校验该分支允许的状态集(新操作仅 ACTIVE、建表重试 CREATING/FAILED、改表重试 ALTERING/CONFLICT、cleanup DELETED 且到期)→ 所有权事务」——统一前置 ACTIVE 会误杀恢复路径,笼统放行又会命中损坏表/tombstone;PENDING 认领改为先锁内复核再 CAS,消除与总顺序的矛盾;② 系统表校验与 signed 迁移闭环(§9.1/§6.2):版本化系统表 manifest(列/类型含 signedness/NULL/默认值/EXTRA/主键自增/索引形状/物理基线)全量比对,精确匹配当前版通过、精确匹配已知历史版(Plan A unsigned 版)自动迁移、其他偏差置 FAILED;项目状态机增 **MIGRATING**(阻断数据面),迁移在项目双层锁下逐表检查点执行,ALTER 前校验 unsigned 数据未超 signed 上限,崩溃按 information_schema 续跑;③ 列 EXTRA 允许集合(§9.4):id 仅 auto_increment、datetime CURRENT_TIMESTAMP 默认值的 DEFAULT_GENERATED 规范化不产生漂移、普通列仅空 EXTRA、on update CURRENT_TIMESTAMP 及其他未建模属性 CONFLICT/REJECTED_IMPORT,对账/导入/续跑共用。§14 增补:四类恢复路径不被误杀、系统表 manifest 与迁移闭环五例、EXTRA 拦截与无漂移。
 - **v24(2026-07-18)**:按 Plan B 十六轮复审(3 P1)修订。① 物理前置由声明改为 fail-closed 校验(§9.1):启动/Provisioner 初始化查 `@@innodb_page_size` ≠ 16384 → readiness 失败并禁止建项目与 Plan B DDL(小页面键长上限更低,按 3072 校验会放行必然失败的索引);建库后回读 SCHEMATA 字符集(IF NOT EXISTS 不修正已存在库);系统表 DDL 显式完整物理基线并回读表与字符串列(IF NOT EXISTS 可能命中预存表,且对账跳过 `_` 表无人兜底),不符修正或置 FAILED、不得 ACTIVE;② 依赖现状的校验纳入 §9.2 锁内固定顺序:顺序改为「Redis → GET_LOCK → 再验 Redis → 锁内重读并计算最终结构 → 索引/owner/表状态校验 → 日志所有权事务」,纯 DTO 静态校验可锁外预检但不得作为执行依据(§9.2/§13);③ 类型参数矩阵定稿(§13):int/bigint 无参数、一律渲染 signed;decimal 1≤p≤65、0≤s≤min(30,p);varchar 1≤length≤4096;其余类型无参数;数值默认值须在目标列值域内;UNSIGNED/ZEROFILL 不建模、外部结构拒绝映射;**`_users.id` 定为 signed bigint**——实测 Plan A 系统表为 bigint unsigned 且缺显式基线,Plan B 须改建表模板并迁移存量(§6.2,§16.2 记录改造点)。§14 增补:物理前置三例、锁内重查并发索引上限、类型参数与 signedness 用例。
