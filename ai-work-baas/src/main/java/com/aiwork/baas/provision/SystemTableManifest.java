@@ -42,7 +42,7 @@ public final class SystemTableManifest {
 
     public enum MatchResult {
 
-        MATCH_CURRENT, MATCH_LEGACY_PLAN_A, MISMATCH
+        MATCH_CURRENT, MATCH_LEGACY_PLAN_A, MATCH_MIXED, MISMATCH
 
     }
 
@@ -103,10 +103,12 @@ public final class SystemTableManifest {
     }
 
     public static MatchResult compare(Map<String, PhysicalTable> tables) {
+        boolean anyCurrent = false;
         boolean anyLegacy = false;
         for (String tableName : SYSTEM_TABLE_NAMES) {
             PhysicalTable table = tables.get(tableName);
             if (tableMatches(tableName, table, false)) {
+                anyCurrent = true;
                 continue;
             }
             if (tableMatches(tableName, table, true)) {
@@ -114,6 +116,9 @@ public final class SystemTableManifest {
                 continue;
             }
             return MatchResult.MISMATCH;
+        }
+        if (anyCurrent && anyLegacy) {
+            return MatchResult.MATCH_MIXED;
         }
         return anyLegacy ? MatchResult.MATCH_LEGACY_PLAN_A : MatchResult.MATCH_CURRENT;
     }

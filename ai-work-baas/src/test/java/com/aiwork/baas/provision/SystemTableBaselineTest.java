@@ -91,6 +91,16 @@ class SystemTableBaselineTest {
     }
 
     @Test
+    void partiallyUpgradedLegacyTablesAreExplicitlyMixed() {
+        provisioner.createDatabase("baas_mixed1");
+        LegacySystemTables.create(rootJdbc, "baas_mixed1");
+        rootJdbc.execute(SystemTableManifest.legacyMigrationSql("baas_mixed1", "_users"));
+
+        assertThat(SystemTableManifest.compare(readSystemTables("baas_mixed1")))
+            .isEqualTo(SystemTableManifest.MatchResult.MATCH_MIXED);
+    }
+
+    @Test
     void unknownDriftIsMismatchAndInitFails() {
         provisioner.createDatabase("baas_drift1");
         rootJdbc.execute("CREATE TABLE baas_drift1._users (id bigint NOT NULL AUTO_INCREMENT, "

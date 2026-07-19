@@ -15,9 +15,13 @@ import com.aiwork.baas.ddl.engine.DdlFencingGuard;
 import com.aiwork.baas.ddl.lock.ProjectDdlLockExecutor;
 import com.aiwork.baas.entity.BaasProject;
 import com.aiwork.baas.exception.DdlConflictException;
+import com.aiwork.baas.mapper.BaasApiKeyMapper;
+import com.aiwork.baas.mapper.BaasAuditLogMapper;
+import com.aiwork.baas.mapper.BaasJwtKeyMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
 import com.aiwork.baas.provision.PhysicalPreconditions;
 import com.aiwork.baas.provision.ProvisionerDataSourceHolder;
+import com.aiwork.baas.security.CurrentUserProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -100,8 +104,10 @@ class SystemTableMigrationServiceTest {
             ProjectDdlLockExecutor lockExecutor, PhysicalPreconditions preconditions, boolean enabled) {
         when(projectMapper.selectList(any())).thenReturn(java.util.List.of());
         ProvisionerDataSourceHolder holder = new ProvisionerDataSourceHolder(new DriverManagerDataSource());
-        return new SystemTableMigrationService(projectMapper, lockExecutor, mock(DdlFencingGuard.class),
-                preconditions, mock(TransactionTemplate.class), holder, enabled);
+        return new SystemTableMigrationService(projectMapper, mock(BaasApiKeyMapper.class),
+                mock(BaasJwtKeyMapper.class), mock(BaasAuditLogMapper.class), lockExecutor,
+                mock(DdlFencingGuard.class), preconditions, mock(TransactionTemplate.class),
+                mock(CurrentUserProvider.class), holder, enabled);
     }
 
 }

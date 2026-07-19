@@ -17,14 +17,24 @@ import com.aiwork.baas.ddl.inspect.SchemaInspector;
 import com.aiwork.baas.ddl.lock.DdlLockBusyException;
 import com.aiwork.baas.ddl.lock.LockHandle;
 import com.aiwork.baas.ddl.lock.ProjectDdlLockExecutor;
+import com.aiwork.baas.entity.BaasApiKey;
+import com.aiwork.baas.entity.BaasAuditLog;
+import com.aiwork.baas.entity.BaasJwtKey;
 import com.aiwork.baas.entity.BaasProject;
+import com.aiwork.baas.entity.enums.JwtKeyStatus;
+import com.aiwork.baas.entity.enums.KeyType;
 import com.aiwork.baas.entity.enums.ProjectStatus;
+import com.aiwork.baas.entity.enums.ProvisionStep;
 import com.aiwork.baas.exception.DdlConflictException;
+import com.aiwork.baas.mapper.BaasApiKeyMapper;
+import com.aiwork.baas.mapper.BaasAuditLogMapper;
+import com.aiwork.baas.mapper.BaasJwtKeyMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
 import com.aiwork.baas.provision.IdentifierValidator;
 import com.aiwork.baas.provision.PhysicalPreconditions;
 import com.aiwork.baas.provision.ProvisionerDataSourceHolder;
 import com.aiwork.baas.provision.SystemTableManifest;
+import com.aiwork.baas.security.CurrentUserProvider;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -49,7 +59,25 @@ import java.util.concurrent.atomic.AtomicReference;
 @Service
 public class SystemTableMigrationService {
 
+    private static final Long SYSTEM_OPERATOR_USER_ID = 0L;
+
+    private static final String AUDIT_SUCCESS = "SYSTEM_TABLE_MIGRATION_SUCCESS";
+
+    private static final String AUDIT_FAILED = "SYSTEM_TABLE_MIGRATION_FAILED";
+
+    private enum MigrationSource {
+
+        MANUAL, BACKGROUND_ACTIVE, BACKGROUND_RESUME
+
+    }
+
     private final BaasProjectMapper projectMapper;
+
+    private final BaasApiKeyMapper apiKeyMapper;
+
+    private final BaasJwtKeyMapper jwtKeyMapper;
+
+    private final BaasAuditLogMapper auditLogMapper;
 
     private final ProjectDdlLockExecutor lockExecutor;
 
@@ -59,19 +87,27 @@ public class SystemTableMigrationService {
 
     private final TransactionTemplate transactionTemplate;
 
+    private final CurrentUserProvider userProvider;
+
     private final JdbcTemplate provisionerJdbc;
 
     private final boolean startupScanEnabled;
 
-    public SystemTableMigrationService(BaasProjectMapper projectMapper, ProjectDdlLockExecutor lockExecutor,
-            DdlFencingGuard fencingGuard, PhysicalPreconditions physicalPreconditions,
-            TransactionTemplate transactionTemplate, ProvisionerDataSourceHolder holder,
+    public SystemTableMigrationService(BaasProjectMapper projectMapper, BaasApiKeyMapper apiKeyMapper,
+            BaasJwtKeyMapper jwtKeyMapper, BaasAuditLogMapper auditLogMapper,
+            ProjectDdlLockExecutor lockExecutor, DdlFencingGuard fencingGuard,
+            PhysicalPreconditions physicalPreconditions, TransactionTemplate transactionTemplate,
+            CurrentUserProvider userProvider, ProvisionerDataSourceHolder holder,
             @Value("${baas.migration.startup-scan-enabled:true}") boolean startupScanEnabled) {
         this.projectMapper = projectMapper;
+        this.apiKeyMapper = apiKeyMapper;
+        this.jwtKeyMapper = jwtKeyMapper;
+        this.auditLogMapper = auditLogMapper;
         this.lockExecutor = lockExecutor;
         this.fencingGuard = fencingGuard;
         this.physicalPreconditions = physicalPreconditions;
         this.transactionTemplate = transactionTemplate;
+        this.userProvider = userProvider;
         this.provisionerJdbc = new JdbcTemplate(holder.dataSource());
         this.startupScanEnabled = startupScanEnabled;
     }
@@ -99,11 +135,11 @@ public class SystemTableMigrationService {
             .in(BaasProject::getStatus, ProjectStatus.ACTIVE, ProjectStatus.MIGRATING))) {
             try {
                 if (project.getStatus() == ProjectStatus.MIGRATING) {
-                    resumeMigration(project);
+                    executeMigration(project, MigrationSource.BACKGROUND_RESUME, SYSTEM_OPERATOR_USER_ID);
                 }
                 else if (SystemTableManifest.compare(readSystemTables(project.getDbName()))
                         != SystemTableManifest.MatchResult.MATCH_CURRENT) {
-                    migrate(project);
+                    executeMigration(project, MigrationSource.BACKGROUND_ACTIVE, SYSTEM_OPERATOR_USER_ID);
                 }
             }
             catch (RuntimeException failure) {
@@ -122,11 +158,17 @@ public class SystemTableMigrationService {
         if (project == null || project.getId() == null) {
             throw new DdlConflictException("项目当前状态不允许系统表迁移");
         }
+        return executeMigration(project, MigrationSource.MANUAL, userProvider.currentUserId());
+    }
+
+    private SystemTableMigrationResult executeMigration(BaasProject project, MigrationSource source,
+            Long operatorUserId) {
         AtomicReference<SystemTableMigrationResult> committedResult = new AtomicReference<>();
         try {
             physicalPreconditions.assertSatisfied();
             return lockExecutor.execute(project.getId(), (handle, connection) -> {
-                SystemTableMigrationResult result = doMigrateInLock(project, handle, connection, false);
+                SystemTableMigrationResult result = doMigrateInLock(project, handle, connection, source,
+                        operatorUserId);
                 committedResult.set(result);
                 return result;
             });
@@ -147,43 +189,53 @@ public class SystemTableMigrationService {
         }
     }
 
-    private void resumeMigration(BaasProject project) {
-        try {
-            lockExecutor.execute(project.getId(),
-                    (handle, connection) -> doMigrateInLock(project, handle, connection, true));
-        }
-        catch (RuntimeException failure) {
-            log.warn("system table migration resume failed projectId={} errorType={}", project.getId(),
-                    failure.getClass().getSimpleName());
-        }
-    }
-
     private SystemTableMigrationResult doMigrateInLock(BaasProject project, LockHandle handle,
-            Connection connection, boolean resume) {
+            Connection connection, MigrationSource source, Long operatorUserId) {
         BaasProject current = projectMapper.selectById(project.getId());
-        boolean manualState = current != null && (current.getStatus() == ProjectStatus.ACTIVE
-                || current.getStatus() == ProjectStatus.FAILED);
-        boolean resumeState = current != null && resume && current.getStatus() == ProjectStatus.MIGRATING;
-        if (!manualState && !resumeState) {
+        if (!isSourceAllowed(current, source)) {
             throw new DdlConflictException("项目当前状态不允许系统表迁移");
         }
 
         IdentifierValidator.validate(current.getDbName());
         JdbcTemplate lockedJdbc = SchemaInspector.jdbcFor(connection);
-        Map<String, PhysicalTable> tables = preflight(current, handle, lockedJdbc);
+        Map<String, PhysicalTable> tables = readPreflightTables(current, handle, lockedJdbc, source,
+                operatorUserId);
         SystemTableManifest.MatchResult manifest = SystemTableManifest.compare(tables);
+        if (manifest == SystemTableManifest.MatchResult.MISMATCH
+                || (current.getStatus() == ProjectStatus.ACTIVE
+                        && manifest == SystemTableManifest.MatchResult.MATCH_MIXED)) {
+            recordPreflightFailure(current, handle, source, operatorUserId);
+            throw new DdlConflictException("系统表结构不属于当前版或已知 legacy 版本");
+        }
         if (manifest == SystemTableManifest.MatchResult.MATCH_CURRENT) {
-            return recoverCurrentProject(current, handle);
+            return recoverCurrentProject(current, handle, source, operatorUserId);
+        }
+        boolean overflow;
+        try {
+            overflow = hasUnsignedOverflow(current, lockedJdbc, tables);
+        }
+        catch (RuntimeException failure) {
+            recordPreflightFailure(current, handle, source, operatorUserId);
+            log.warn("system table migration preflight failed projectId={} errorType={}", current.getId(),
+                    failure.getClass().getSimpleName());
+            throw new DdlConflictException("系统表迁移失败");
+        }
+        if (overflow) {
+            recordPreflightFailure(current, handle, source, operatorUserId);
+            throw new DdlConflictException("系统表存在超出 signed bigint 范围的数据");
         }
 
         lockExecutor.assertStillHeld(handle);
         long epoch = transitionWithEpoch(current.getId(), current.getStatus(), ProjectStatus.MIGRATING);
+        int migratedTableCount = 0;
         try {
             for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
+                lockExecutor.assertStillHeld(handle);
                 PhysicalTable table = SchemaInspector.readTable(lockedJdbc, current.getDbName(), tableName);
                 if (SystemTableManifest.tableMatches(tableName, table, false)) {
                     continue;
                 }
+                lockExecutor.assertStillHeld(handle);
                 lockedJdbc.execute(SystemTableManifest.legacyMigrationSql(current.getDbName(), tableName));
                 PhysicalTable migrated = SchemaInspector.readTable(lockedJdbc, current.getDbName(), tableName);
                 if (!SystemTableManifest.tableMatches(tableName, migrated, false)) {
@@ -191,13 +243,15 @@ public class SystemTableMigrationService {
                 }
                 lockExecutor.assertStillHeld(handle);
                 epoch = advanceEpochCheckpoint(current.getId(), epoch);
+                migratedTableCount++;
             }
             lockExecutor.assertStillHeld(handle);
-            transitionVerified(current.getId(), epoch, ProjectStatus.MIGRATING, ProjectStatus.ACTIVE);
+            transitionVerifiedWithAudit(current.getId(), epoch, ProjectStatus.MIGRATING,
+                    ProjectStatus.ACTIVE, source, operatorUserId, migratedTableCount);
             return new SystemTableMigrationResult(ProjectStatus.ACTIVE.name(), true);
         }
         catch (RuntimeException failure) {
-            markFailedVerified(current.getId(), epoch, handle);
+            markFailedVerified(current.getId(), epoch, handle, source, operatorUserId, migratedTableCount);
             if (failure instanceof DdlConflictException conflict) {
                 throw conflict;
             }
@@ -205,34 +259,56 @@ public class SystemTableMigrationService {
         }
     }
 
-    private Map<String, PhysicalTable> preflight(BaasProject current, LockHandle handle, JdbcTemplate lockedJdbc) {
+    private boolean isSourceAllowed(BaasProject current, MigrationSource source) {
+        if (current == null) {
+            return false;
+        }
+        return switch (source) {
+            case MANUAL -> current.getStatus() == ProjectStatus.ACTIVE
+                    || (current.getStatus() == ProjectStatus.FAILED && isConfirmedMigrationFailure(current));
+            case BACKGROUND_ACTIVE -> current.getStatus() == ProjectStatus.ACTIVE;
+            case BACKGROUND_RESUME -> current.getStatus() == ProjectStatus.MIGRATING;
+        };
+    }
+
+    private boolean isConfirmedMigrationFailure(BaasProject current) {
+        if (!ProvisionStep.API_KEYS.name().equals(current.getProvisionStep())
+                || activeKeyCount(current.getId(), KeyType.PUBLISHABLE) == 0
+                || activeKeyCount(current.getId(), KeyType.SECRET) == 0
+                || jwtKeyMapper.selectCount(Wrappers.<BaasJwtKey>lambdaQuery()
+                    .eq(BaasJwtKey::getProjectId, current.getId())
+                    .eq(BaasJwtKey::getStatus, JwtKeyStatus.CURRENT)) == 0) {
+            return false;
+        }
+        BaasAuditLog latestMigrationAudit = auditLogMapper.selectOne(Wrappers.<BaasAuditLog>lambdaQuery()
+            .eq(BaasAuditLog::getProjectId, current.getId())
+            .in(BaasAuditLog::getAction, AUDIT_SUCCESS, AUDIT_FAILED)
+            .orderByDesc(BaasAuditLog::getId)
+            .last("LIMIT 1"));
+        return latestMigrationAudit != null && AUDIT_FAILED.equals(latestMigrationAudit.getAction());
+    }
+
+    private long activeKeyCount(Long projectId, KeyType keyType) {
+        return apiKeyMapper.selectCount(Wrappers.<BaasApiKey>lambdaQuery()
+            .eq(BaasApiKey::getProjectId, projectId)
+            .eq(BaasApiKey::getKeyType, keyType)
+            .eq(BaasApiKey::getStatus, "ACTIVE"));
+    }
+
+    private Map<String, PhysicalTable> readPreflightTables(BaasProject current, LockHandle handle,
+            JdbcTemplate lockedJdbc, MigrationSource source, Long operatorUserId) {
         try {
-            Map<String, PhysicalTable> tables = readSystemTables(lockedJdbc, current.getDbName());
-            SystemTableManifest.MatchResult manifest = SystemTableManifest.compare(tables);
-            if (manifest == SystemTableManifest.MatchResult.MISMATCH) {
-                markFailedFromPreflight(current, handle);
-                throw new DdlConflictException("系统表结构不属于当前版或已知 legacy 版本");
-            }
-            if (manifest == SystemTableManifest.MatchResult.MATCH_LEGACY_PLAN_A) {
-                assertNoOverflow(current, handle, lockedJdbc, tables);
-            }
-            return tables;
-        }
-        catch (DdlConflictException conflict) {
-            throw conflict;
-        }
-        catch (DdlLockBusyException lost) {
-            throw lost;
+            return readSystemTables(lockedJdbc, current.getDbName());
         }
         catch (RuntimeException failure) {
-            markFailedFromPreflight(current, handle);
+            recordPreflightFailure(current, handle, source, operatorUserId);
             log.warn("system table migration preflight failed projectId={} errorType={}", current.getId(),
                     failure.getClass().getSimpleName());
             throw new DdlConflictException("系统表迁移失败");
         }
     }
 
-    private void assertNoOverflow(BaasProject current, LockHandle handle, JdbcTemplate lockedJdbc,
+    private boolean hasUnsignedOverflow(BaasProject current, JdbcTemplate lockedJdbc,
             Map<String, PhysicalTable> tables) {
         for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
             if (SystemTableManifest.tableMatches(tableName, tables.get(tableName), false)) {
@@ -241,39 +317,39 @@ public class SystemTableMigrationService {
             Long overflow = lockedJdbc.queryForObject(
                     SystemTableManifest.unsignedBoundsCheckSql(current.getDbName(), tableName), Long.class);
             if (overflow != null && overflow > 0) {
-                markFailedFromPreflight(current, handle);
-                throw new DdlConflictException("系统表存在超出 signed bigint 范围的数据");
+                return true;
             }
         }
+        return false;
     }
 
-    private SystemTableMigrationResult recoverCurrentProject(BaasProject current, LockHandle handle) {
+    private SystemTableMigrationResult recoverCurrentProject(BaasProject current, LockHandle handle,
+            MigrationSource source, Long operatorUserId) {
         if (current.getStatus() != ProjectStatus.ACTIVE) {
             lockExecutor.assertStillHeld(handle);
-            transitionWithEpoch(current.getId(), current.getStatus(), ProjectStatus.ACTIVE);
+            transitionWithEpochAndAudit(current.getId(), current.getStatus(), ProjectStatus.ACTIVE,
+                    source, operatorUserId, 0, true);
         }
         return new SystemTableMigrationResult(ProjectStatus.ACTIVE.name(), false);
     }
 
-    private void markFailedFromPreflight(BaasProject current, LockHandle handle) {
+    private void recordPreflightFailure(BaasProject current, LockHandle handle, MigrationSource source,
+            Long operatorUserId) {
         if (current.getStatus() != ProjectStatus.FAILED) {
             lockExecutor.assertStillHeld(handle);
-            transitionWithEpoch(current.getId(), current.getStatus(), ProjectStatus.FAILED);
+            transitionWithEpochAndAudit(current.getId(), current.getStatus(), ProjectStatus.FAILED,
+                    source, operatorUserId, 0, false);
         }
     }
 
-    private void markFailedVerified(Long projectId, long heldEpoch, LockHandle handle) {
+    private void markFailedVerified(Long projectId, long heldEpoch, LockHandle handle,
+            MigrationSource source, Long operatorUserId, int migratedTableCount) {
         lockExecutor.assertStillHeld(handle);
         transactionTemplate.executeWithoutResult(status -> {
             fencingGuard.verifyEpochInTx(projectId, heldEpoch);
             fencingGuard.incrementEpochInTx(projectId);
-            int updated = projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
-                .eq(BaasProject::getId, projectId)
-                .eq(BaasProject::getStatus, ProjectStatus.MIGRATING)
-                .set(BaasProject::getStatus, ProjectStatus.FAILED));
-            if (updated != 1) {
-                throw new IllegalStateException("project migration failure transition race");
-            }
+            updateStatus(projectId, ProjectStatus.MIGRATING, ProjectStatus.FAILED);
+            audit(projectId, operatorUserId, source, false, migratedTableCount);
         });
     }
 
@@ -298,18 +374,45 @@ public class SystemTableMigrationService {
         });
     }
 
-    private void transitionVerified(Long projectId, long heldEpoch, ProjectStatus from, ProjectStatus to) {
+    private void transitionVerifiedWithAudit(Long projectId, long heldEpoch, ProjectStatus from,
+            ProjectStatus to, MigrationSource source, Long operatorUserId, int migratedTableCount) {
         transactionTemplate.executeWithoutResult(status -> {
             fencingGuard.verifyEpochInTx(projectId, heldEpoch);
             fencingGuard.incrementEpochInTx(projectId);
-            int updated = projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
-                .eq(BaasProject::getId, projectId)
-                .eq(BaasProject::getStatus, from)
-                .set(BaasProject::getStatus, to));
-            if (updated != 1) {
-                throw new IllegalStateException("project status transition race: " + from + " -> " + to);
-            }
+            updateStatus(projectId, from, to);
+            audit(projectId, operatorUserId, source, true, migratedTableCount);
         });
+    }
+
+    private void transitionWithEpochAndAudit(Long projectId, ProjectStatus from, ProjectStatus to,
+            MigrationSource source, Long operatorUserId, int migratedTableCount, boolean success) {
+        transactionTemplate.executeWithoutResult(status -> {
+            fencingGuard.incrementEpochInTx(projectId);
+            updateStatus(projectId, from, to);
+            audit(projectId, operatorUserId, source, success, migratedTableCount);
+        });
+    }
+
+    private void updateStatus(Long projectId, ProjectStatus from, ProjectStatus to) {
+        int updated = projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
+            .eq(BaasProject::getId, projectId)
+            .eq(BaasProject::getStatus, from)
+            .set(BaasProject::getStatus, to));
+        if (updated != 1) {
+            throw new IllegalStateException("project status transition race: " + from + " -> " + to);
+        }
+    }
+
+    private void audit(Long projectId, Long operatorUserId, MigrationSource source,
+            boolean success, int migratedTableCount) {
+        BaasAuditLog auditLog = new BaasAuditLog();
+        auditLog.setProjectId(projectId);
+        auditLog.setOperatorUserId(operatorUserId);
+        auditLog.setAction(success ? AUDIT_SUCCESS : AUDIT_FAILED);
+        auditLog.setDetail("source=" + source.name() + ",result=" + (success ? "SUCCESS" : "FAILED")
+                + ",migratedTables=" + migratedTableCount);
+        auditLog.setLevel(success ? "INFO" : "HIGH");
+        auditLogMapper.insert(auditLog);
     }
 
     private Map<String, PhysicalTable> readSystemTables(String dbName) {
