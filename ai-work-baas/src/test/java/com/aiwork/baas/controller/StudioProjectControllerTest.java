@@ -33,6 +33,8 @@ import com.aiwork.baas.service.ProjectAccessService;
 import com.aiwork.baas.service.ProjectKeyService;
 import com.aiwork.baas.service.ProjectLifecycleService;
 import com.aiwork.baas.service.ReconcileService;
+import com.aiwork.baas.service.SystemTableMigrationResult;
+import com.aiwork.baas.service.SystemTableMigrationService;
 import com.aiwork.common.core.jackson.AiWorkJavaTimeModule;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -51,6 +53,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -74,6 +77,8 @@ class StudioProjectControllerTest {
     private CurrentUserProvider userProvider;
 
     private ReconcileService reconcileService;
+
+    private SystemTableMigrationService migrationService;
 
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new AiWorkJavaTimeModule());
 
@@ -104,11 +109,12 @@ class StudioProjectControllerTest {
         keyService = Mockito.mock(ProjectKeyService.class);
         userProvider = Mockito.mock(CurrentUserProvider.class);
         reconcileService = Mockito.mock(ReconcileService.class);
+        migrationService = Mockito.mock(SystemTableMigrationService.class);
         when(userProvider.currentUserId()).thenReturn(1L);
         mockMvc = MockMvcBuilders
             .standaloneSetup(
                     new StudioProjectController(lifecycleService, accessService, keyService, userProvider,
-                            reconcileService))
+                            reconcileService, migrationService))
             .setControllerAdvice(new BaasStudioExceptionHandler())
             .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
             .build();
@@ -339,6 +345,33 @@ class StudioProjectControllerTest {
             .andExpect(jsonPath("$.msg").value("请求参数校验失败"));
 
         Mockito.verifyNoInteractions(accessService, reconcileService);
+    }
+
+    @Test
+    void nonAdminCannotTriggerSystemTableMigrationEvenForOwnedProject() throws Exception {
+        BaasProject owned = project(10L, PROJECT_REF, 1L);
+        when(accessService.requireOwned(PROJECT_REF)).thenReturn(owned);
+        when(userProvider.isBaasAdmin()).thenReturn(false);
+
+        mockMvc.perform(post("/studio/projects/" + PROJECT_REF + "/system-tables/migrate"))
+            .andExpect(status().isNotFound());
+
+        verifyNoInteractions(migrationService);
+    }
+
+    @Test
+    void adminGetsSynchronousMigrationResult() throws Exception {
+        BaasProject owned = project(10L, PROJECT_REF, 1L);
+        when(accessService.requireOwned(PROJECT_REF)).thenReturn(owned);
+        when(userProvider.isBaasAdmin()).thenReturn(true);
+        when(migrationService.migrate(owned)).thenReturn(new SystemTableMigrationResult("ACTIVE", true));
+
+        mockMvc.perform(post("/studio/projects/" + PROJECT_REF + "/system-tables/migrate"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+            .andExpect(jsonPath("$.data.migrated").value(true));
+
+        verify(migrationService).migrate(owned);
     }
 
     @Test

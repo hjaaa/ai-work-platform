@@ -21,12 +21,12 @@ package com.aiwork.baas.provision;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 
-final class LegacySystemTables {
+public final class LegacySystemTables {
 
     private LegacySystemTables() {
     }
 
-    static void create(JdbcTemplate jdbc, String dbName) {
+    public static void create(JdbcTemplate jdbc, String dbName) {
         jdbc.execute(("CREATE TABLE `%s`._users (id bigint unsigned NOT NULL AUTO_INCREMENT, "
                 + "email varchar(255) NOT NULL, password_hash varchar(100) NOT NULL, raw_meta json DEFAULT NULL, "
                 + "create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, "
