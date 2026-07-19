@@ -70,6 +70,9 @@ class AlterTableWork implements DdlWork {
 
     private static final String STRICT_SQL_MODE = "STRICT_ALL_TABLES";
 
+    /** MySQL 服务层将 PRIMARY 也计入最多 64 个 key 的限制。 */
+    private static final int MYSQL_MAX_TOTAL_INDEXES = 64;
+
     private static final String OWNER_DROP_INTENT_MARKER = "/* BAAS_INTENT:ACL_CLOSED_BY_OWNER_DROP */";
 
     private final TableManagementService service;
@@ -310,6 +313,12 @@ class AlterTableWork implements DdlWork {
             .filter(column -> column.unique() || column.indexed())
             .count();
         IndexAdmission.validateFinalStructure(finalColumns, finalIndexCount);
+        long finalTotalIndexCount = finalColumns.stream()
+            .filter(column -> column.pk() || column.unique() || column.indexed())
+            .count();
+        if (finalTotalIndexCount > MYSQL_MAX_TOTAL_INDEXES) {
+            throw new BaasBadRequestException("索引总数超过 MySQL 上限 " + MYSQL_MAX_TOTAL_INDEXES);
+        }
     }
 
     private void prepareModifyPlans(Map<String, BaasColumn> byName) {
