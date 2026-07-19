@@ -35,7 +35,7 @@ class IndexAdmissionTest {
     }
 
     @Test
-    void finalStructureRevalidatesEverythingIncludingCount() {
+    void finalStructureRevalidatesEverythingIncludingSecondaryCount() {
         LogicalColumn indexedWide = new LogicalColumn("wide", ColumnType.VARCHAR, 769, null, true, null, false,
                 false, false, true, null);
         assertThatThrownBy(() -> IndexAdmission.validateFinalStructure(List.of(indexedWide), 1))
@@ -45,6 +45,13 @@ class IndexAdmissionTest {
                 false, null);
         assertThatCode(() -> IndexAdmission.validateFinalStructure(List.of(plain), 64)).doesNotThrowAnyException();
         assertThatThrownBy(() -> IndexAdmission.validateFinalStructure(List.of(plain), 65))
+            .isInstanceOf(BaasBadRequestException.class);
+    }
+
+    @Test
+    void totalIndexLimitCountsPrimarySeparately() {
+        assertThatCode(() -> IndexAdmission.validateTotalIndexCount(64)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> IndexAdmission.validateTotalIndexCount(65))
             .isInstanceOf(BaasBadRequestException.class);
     }
 

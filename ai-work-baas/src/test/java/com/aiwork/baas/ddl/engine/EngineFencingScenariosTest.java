@@ -1,42 +1,61 @@
 package com.aiwork.baas.ddl.engine;
 
 import com.aiwork.baas.LifecycleTestApplication;
+import com.aiwork.baas.controller.dto.AclConfigDTO;
+import com.aiwork.baas.controller.dto.AclPutDTO;
+import com.aiwork.baas.controller.dto.AclRoleDTO;
+import com.aiwork.baas.controller.dto.ColumnDefinitionDTO;
+import com.aiwork.baas.controller.dto.ReconcileTriggerDTO;
+import com.aiwork.baas.controller.dto.TableAlterDTO;
+import com.aiwork.baas.controller.dto.TableCreateDTO;
+import com.aiwork.baas.ddl.lock.AdvisoryLockTemplate;
 import com.aiwork.baas.ddl.lock.DdlLockManager;
+import com.aiwork.baas.entity.BaasAuditLog;
 import com.aiwork.baas.entity.BaasDdlLog;
 import com.aiwork.baas.entity.BaasProject;
 import com.aiwork.baas.entity.BaasTable;
-import com.aiwork.baas.entity.BaasTableAcl;
 import com.aiwork.baas.entity.enums.DdlLogStatus;
 import com.aiwork.baas.entity.enums.DdlOperationType;
 import com.aiwork.baas.entity.enums.DdlStep;
-import com.aiwork.baas.entity.enums.ProjectStatus;
 import com.aiwork.baas.entity.enums.TableStatus;
 import com.aiwork.baas.exception.DdlConflictException;
+import com.aiwork.baas.mapper.BaasAuditLogMapper;
 import com.aiwork.baas.mapper.BaasDdlLogMapper;
-import com.aiwork.baas.mapper.BaasProjectMapper;
-import com.aiwork.baas.mapper.BaasTableAclMapper;
 import com.aiwork.baas.mapper.BaasTableMapper;
+import com.aiwork.baas.service.AclConfigService;
 import com.aiwork.baas.service.DdlMaintenanceJob;
+import com.aiwork.baas.service.ProjectLifecycleService;
+import com.aiwork.baas.service.ReconcileService;
+import com.aiwork.baas.service.TableManagementService;
 import com.aiwork.baas.support.PlanBContainerSupport;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.reset;
 
 @SpringBootTest(classes = LifecycleTestApplication.class,
         properties = { "spring.config.import=", "spring.cloud.nacos.discovery.enabled=false",
@@ -46,20 +65,28 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    @Autowired
+    private static final AclRoleDTO ALL_OFF = new AclRoleDTO(false, false, false, false);
+
+    @MockitoSpyBean
     private DdlExecutionEngine engine;
 
     @Autowired
     private StringRedisTemplate redisTemplate;
 
     @Autowired
-    private DdlFencingGuard fencingGuard;
+    private DdlLockManager lockManager;
 
     @Autowired
-    private TransactionTemplate transactionTemplate;
+    private ProjectLifecycleService lifecycleService;
 
     @Autowired
-    private BaasProjectMapper projectMapper;
+    private TableManagementService tableService;
+
+    @Autowired
+    private ReconcileService reconcileService;
+
+    @Autowired
+    private AclConfigService aclService;
 
     @Autowired
     private BaasDdlLogMapper ddlLogMapper;
@@ -68,10 +95,28 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
     private BaasTableMapper tableMapper;
 
     @Autowired
-    private BaasTableAclMapper aclMapper;
+    private BaasAuditLogMapper auditLogMapper;
 
     @Autowired
     private DdlMaintenanceJob maintenanceJob;
+
+    private JdbcTemplate rootJdbc;
+
+    private CompletionPause activePause;
+
+    @BeforeEach
+    void prepareJdbc() {
+        rootJdbc = new JdbcTemplate(mysqlDataSource());
+    }
+
+    @AfterEach
+    void releasePauseAndResetSpy() {
+        if (activePause != null) {
+            activePause.resume();
+            activePause = null;
+        }
+        reset(engine);
+    }
 
     @DynamicPropertySource
     static void registerPlanBProperties(DynamicPropertyRegistry registry) {
@@ -88,184 +133,267 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
         registry.add("server.servlet.context-path", () -> "");
     }
 
-    private BaasProject newProject() {
-        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-        BaasProject project = new BaasProject();
-        project.setProjectRef(suffix);
-        project.setName("fencing");
-        project.setDbName("baas_fencing_" + suffix);
-        project.setStatus(ProjectStatus.ACTIVE);
-        project.setOwnerUserId(1L);
-        project.setDdlFenceEpoch(0L);
-        projectMapper.insert(project);
-        return project;
-    }
-
-    private DdlOperationSpec spec(BaasProject project, String operationId, String hash) {
-        return new DdlOperationSpec(project.getId(), operationId, DdlOperationType.CREATE, "demo", null, hash,
-                null, "CREATE TABLE ...(?)");
-    }
-
-    /** §14「A 在写平台元数据前停顿」:A 暂停于 completeSuccess 前,丢 Redis 锁,B 接管完成,A 恢复被守卫拒绝。 */
+    /**
+     * A 在完成入口失去双锁并暂停，B 真接管完成后，A 的元数据、检查点与终态写入均被拒绝。
+     */
     @Test
-    void pausedExecutorFencedOutAfterTakeover() throws Exception {
+    void pausedExecutorFencedOutAfterSuccessorCompletes() throws Exception {
         BaasProject project = newProject();
         String operationId = UUID.randomUUID().toString();
         String hash = "a".repeat(64);
+        CompletionPause pause = pauseBeforeComplete(operationId);
+        AtomicInteger metadataWriteCount = new AtomicInteger();
+        AtomicReference<Throwable> checkpointFailure = new AtomicReference<>();
+        AtomicReference<Throwable> terminalFailure = new AtomicReference<>();
+        AtomicReference<Throwable> executorFailure = new AtomicReference<>();
 
-        CountDownLatch aReachedPerform = new CountDownLatch(1);
-        CountDownLatch aMayContinue = new CountDownLatch(1);
-        AtomicReference<Throwable> aFailure = new AtomicReference<>();
-
-        DdlWork pausingWork = new DdlWork() {
+        DdlWork staleWork = new DdlWork() {
             @Override
             public void validateInLock(DdlWorkContext context) {
             }
 
             @Override
-            public ObjectNode perform(DdlWorkContext context) throws Exception {
-                aReachedPerform.countDown();
-                aMayContinue.await(30, TimeUnit.SECONDS);
-                return context.completeSuccess(() -> MAPPER.createObjectNode().put("executor", "A"));
+            public ObjectNode perform(DdlWorkContext context) {
+                StaleExecutorException firstFailure;
+                try {
+                    context.completeSuccess(() -> {
+                        metadataWriteCount.incrementAndGet();
+                        return MAPPER.createObjectNode().put("executor", "A");
+                    });
+                    throw new AssertionError("陈旧执行者的首次完成不应成功");
+                }
+                catch (StaleExecutorException stale) {
+                    firstFailure = stale;
+                }
+                try {
+                    context.advanceToDdlApplied();
+                }
+                catch (Throwable throwable) {
+                    checkpointFailure.set(throwable);
+                }
+                try {
+                    context.completeSuccess(() -> {
+                        metadataWriteCount.incrementAndGet();
+                        return MAPPER.createObjectNode().put("executor", "A-late");
+                    });
+                }
+                catch (Throwable throwable) {
+                    terminalFailure.set(throwable);
+                }
+                throw firstFailure;
             }
         };
 
-        Thread executorA = new Thread(() -> {
-            try {
-                engine.execute(spec(project, operationId, hash), pausingWork);
-            } catch (Throwable throwable) {
-                aFailure.set(throwable);
-            }
-        }, "ddl-fencing-executor-a");
-        executorA.start();
-        assertThat(aReachedPerform.await(30, TimeUnit.SECONDS)).isTrue();
+        Thread executorA = startThread("ddl-fencing-executor-a",
+                () -> engine.execute(spec(project, operationId, hash), staleWork), executorFailure);
+        pause.awaitPaused();
 
-        // 模拟 A 的 Redis 租约过期(watchdog 停顿):直接删 key;A 的 advisory lock 仍被持有,
-        // 因此 B 必须等 A 的连接结束——先放行 A 让其撞守卫失败,advisory 随之释放
-        redisTemplate.delete(DdlLockManager.lockKey(project.getId()));
-        aMayContinue.countDown();
-        executorA.join(30000);
-        assertThat(aFailure.get()).isInstanceOf(StaleExecutorException.class);
+        TestWorks.RecordingWork successorWork = new TestWorks.RecordingWork();
+        ObjectNode successorSnapshot;
+        try {
+            successorSnapshot = engine.execute(spec(project, operationId, hash), successorWork);
+            assertThat(executorA.isAlive()).isTrue();
+        }
+        finally {
+            pause.resume();
+            executorA.join(30000);
+        }
 
-        // 日志仍为 RUNNING(A 的终态写入被拒),B 以同 ID 接管续跑成功
-        BaasDdlLog leftover = ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId);
-        assertThat(leftover.getStatus()).isEqualTo(DdlLogStatus.RUNNING.name());
-        TestWorks.RecordingWork workB = new TestWorks.RecordingWork();
-        ObjectNode snapshot = engine.execute(spec(project, operationId, hash), workB);
-        assertThat(workB.observedBranch).isEqualTo(OwnershipBranch.TAKE_OVER_RUNNING);
-        assertThat(snapshot.get("performs").asInt()).isEqualTo(1);
+        assertThat(executorA.isAlive()).isFalse();
+        pause.assertHealthy();
+        assertThat(successorWork.observedBranch).isEqualTo(OwnershipBranch.TAKE_OVER_RUNNING);
+        assertThat(successorSnapshot.get("performs").asInt()).isEqualTo(1);
+        assertThat(executorFailure.get()).isInstanceOf(StaleExecutorException.class);
+        assertThat(checkpointFailure.get()).isInstanceOf(StaleExecutorException.class);
+        assertThat(terminalFailure.get()).isInstanceOf(StaleExecutorException.class);
+        assertThat(metadataWriteCount.get()).isZero();
+        BaasDdlLog completed = ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId);
+        assertThat(completed.getStatus()).isEqualTo(DdlLogStatus.SUCCESS.name());
+        assertThat(completed.getStep()).isEqualTo(DdlStep.METADATA_APPLIED.name());
+        assertThat(completed.getFenceEpoch()).isEqualTo(2L);
+        assertThat(completed.getResultSnapshot()).contains("\"performs\":1").doesNotContain("executor");
     }
 
-    /** §14「跨 operationId 项目级 epoch fencing」——reconcile-vs-ALTER 形态。 */
+    /**
+     * 旧 reconcile 捕获原物理快照后暂停；新 ALTER 完成后，旧快照不得回写覆盖新列元数据。
+     */
     @Test
-    void staleExecutorAcrossOperationIdsRolledBackByProjectEpoch() {
+    void staleReconcileCannotOverwriteNewerAlter() throws Exception {
         BaasProject project = newProject();
-        // A:手工建立所有权(epoch=1 的 RUNNING 日志,模拟已丢双锁的旧执行者)
-        transactionTemplate.executeWithoutResult(status -> fencingGuard.incrementEpochInTx(project.getId()));
-        BaasDdlLog logA = new BaasDdlLog();
-        logA.setProjectId(project.getId());
-        logA.setOperationId(UUID.randomUUID().toString());
-        logA.setOperationType(DdlOperationType.RECONCILE.code());
-        logA.setRequestHash("r".repeat(64));
-        logA.setStep(DdlStep.PREPARED.name());
-        logA.setStatus(DdlLogStatus.RUNNING.name());
-        logA.setOwnerToken("executor-a");
-        logA.setFenceEpoch(1L);
-        logA.setRetryCount(0);
-        ddlLogMapper.insert(logA);
+        tableService.createTable(project, new TableCreateDTO(UUID.randomUUID().toString(), "reconcile_fence",
+                null, List.of(new ColumnDefinitionDTO("title", "varchar", 32, null, true, null, false, false,
+                        null))));
+        String reconcileOperationId = UUID.randomUUID().toString();
+        String alterOperationId = UUID.randomUUID().toString();
+        CompletionPause pause = pauseBeforeComplete(reconcileOperationId);
+        AtomicReference<Throwable> reconcileFailure = new AtomicReference<>();
+        Thread staleReconcile = startThread("ddl-stale-reconcile",
+                () -> reconcileService.manualReconcile(project, new ReconcileTriggerDTO(reconcileOperationId)),
+                reconcileFailure);
+        pause.awaitPaused();
 
-        // B:不同 operationId 的完整引擎执行(epoch → 2)
-        engine.execute(spec(project, UUID.randomUUID().toString(), "b".repeat(64)), new TestWorks.RecordingWork());
-        assertThat(projectMapper.selectById(project.getId()).getDdlFenceEpoch()).isEqualTo(2L);
+        try {
+            tableService.alterTable(project, "reconcile_fence",
+                    new TableAlterDTO(alterOperationId, null, null, "newer-alter", null, null,
+                            List.of(new ColumnDefinitionDTO("title", "varchar", 64, null, true, null, false,
+                                    false, null)), null));
+            assertColumnLength(project, "reconcile_fence", "title", 64);
+            assertThat(staleReconcile.isAlive()).isTrue();
+        }
+        finally {
+            pause.resume();
+            staleReconcile.join(30000);
+        }
 
-        // A 恢复:owner_token 守卫恒过(自己的日志行),但项目 epoch 不匹配 → 整笔回滚
-        BaasTable ghost = new BaasTable();
-        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
-            ghost.setProjectId(project.getId());
-            ghost.setTableName("stale_write");
-            ghost.setStatus(TableStatus.ACTIVE.name());
-            tableMapper.insert(ghost);
-            fencingGuard.verifyEpochInTx(project.getId(), 1L);
-        })).isInstanceOf(StaleExecutorException.class);
-        assertThat(tableMapper.selectCount(Wrappers.<BaasTable>lambdaQuery()
-                .eq(BaasTable::getProjectId, project.getId())
-                .eq(BaasTable::getTableName, "stale_write"))).isZero();
+        assertThat(staleReconcile.isAlive()).isFalse();
+        pause.assertHealthy();
+        assertThat(reconcileFailure.get()).isInstanceOf(StaleExecutorException.class);
+        assertColumnLength(project, "reconcile_fence", "title", 64);
+        ObjectNode snapshot = tableService.getTableSnapshot(project, "reconcile_fence");
+        assertThat(snapshot.get("comment").asText()).isEqualTo("newer-alter");
+        assertThat(snapshot.get("status").asText()).isEqualTo(TableStatus.ACTIVE.name());
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), reconcileOperationId).getStatus())
+                .isEqualTo(DdlLogStatus.RUNNING.name());
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), alterOperationId).getStatus())
+                .isEqualTo(DdlLogStatus.SUCCESS.name());
+        assertThat(auditLogMapper.selectCount(Wrappers.<BaasAuditLog>lambdaQuery()
+                .eq(BaasAuditLog::getProjectId, project.getId())
+                .eq(BaasAuditLog::getAction, "DDL_RECONCILE")
+                .like(BaasAuditLog::getDetail, reconcileOperationId))).isZero();
     }
 
-    /** §14「ACL 关闭-vs-开启」形态:陈旧的 ACL 关闭事务不得覆盖新完成的开启。 */
+    /** 旧 ACL 关闭在完成入口暂停；新 ACL 开启完成后，旧事务不得反向覆盖。 */
     @Test
-    void staleAclCloseRolledBackKeepsNewerOpen() {
+    void staleAclCloseCannotOverwriteNewerOpen() throws Exception {
         BaasProject project = newProject();
-        BaasTable table = new BaasTable();
-        table.setProjectId(project.getId());
-        table.setTableName("acl_fence");
-        table.setStatus(TableStatus.ACTIVE.name());
-        tableMapper.insert(table);
-        BaasTableAcl acl = new BaasTableAcl();
-        acl.setTableId(table.getId());
-        acl.setRole("anon");
-        acl.setCanSelect(true);
-        acl.setCanInsert(false);
-        acl.setCanUpdate(false);
-        acl.setCanDelete(false);
-        aclMapper.insert(acl);
-        // 新执行者已把 epoch 推到 1
-        transactionTemplate.executeWithoutResult(status -> fencingGuard.incrementEpochInTx(project.getId()));
+        tableService.createTable(project, new TableCreateDTO(UUID.randomUUID().toString(), "acl_fence", null,
+                List.of(new ColumnDefinitionDTO("title", "varchar", 64, null, true, null, false, false, null))));
+        AclRoleDTO initial = new AclRoleDTO(true, false, false, false);
+        aclService.putAcl(project, "acl_fence", aclPut(UUID.randomUUID().toString(), initial, initial));
+        String closeOperationId = UUID.randomUUID().toString();
+        String openOperationId = UUID.randomUUID().toString();
+        CompletionPause pause = pauseBeforeComplete(closeOperationId);
+        AtomicReference<Throwable> closeFailure = new AtomicReference<>();
+        Thread staleClose = startThread("ddl-stale-acl-close",
+                () -> aclService.putAcl(project, "acl_fence", aclPut(closeOperationId, ALL_OFF, ALL_OFF)),
+                closeFailure);
+        pause.awaitPaused();
 
-        // 陈旧执行者(持有 epoch=0)试图关闭 ACL → 整笔回滚
-        assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
-            aclMapper.update(null, Wrappers.<BaasTableAcl>lambdaUpdate()
-                    .eq(BaasTableAcl::getId, acl.getId())
-                    .set(BaasTableAcl::getCanSelect, false));
-            fencingGuard.verifyEpochInTx(project.getId(), 0L);
-        })).isInstanceOf(StaleExecutorException.class);
-        assertThat(aclMapper.selectById(acl.getId()).getCanSelect()).isTrue();
+        AclRoleDTO anonOpen = new AclRoleDTO(true, true, false, false);
+        AclRoleDTO authenticatedOpen = new AclRoleDTO(true, false, true, true);
+        try {
+            aclService.putAcl(project, "acl_fence", aclPut(openOperationId, anonOpen, authenticatedOpen));
+            assertThat(staleClose.isAlive()).isTrue();
+        }
+        finally {
+            pause.resume();
+            staleClose.join(30000);
+        }
+
+        assertThat(staleClose.isAlive()).isFalse();
+        pause.assertHealthy();
+        assertThat(closeFailure.get()).isInstanceOf(StaleExecutorException.class);
+        ObjectNode acl = aclService.getAcl(project, "acl_fence");
+        assertThat(acl.at("/acl/anon/select").asBoolean()).isTrue();
+        assertThat(acl.at("/acl/anon/insert").asBoolean()).isTrue();
+        assertThat(acl.at("/acl/anon/update").asBoolean()).isFalse();
+        assertThat(acl.at("/acl/anon/delete").asBoolean()).isFalse();
+        assertThat(acl.at("/acl/authenticated/select").asBoolean()).isTrue();
+        assertThat(acl.at("/acl/authenticated/insert").asBoolean()).isFalse();
+        assertThat(acl.at("/acl/authenticated/update").asBoolean()).isTrue();
+        assertThat(acl.at("/acl/authenticated/delete").asBoolean()).isTrue();
+        assertThat(acl.get("ownerColumn").isNull()).isTrue();
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), closeOperationId).getStatus())
+                .isEqualTo(DdlLogStatus.RUNNING.name());
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), openOperationId).getStatus())
+                .isEqualTo(DdlLogStatus.SUCCESS.name());
     }
 
-    /** §14「并发 FAILED 重试仅一个执行者成功」:Redis 锁互斥保证单赢家,输家 409。 */
+    /** FAILED 重试：赢家在 perform 内等待输家拿到 409，整个竞争仅由 latch 排序。 */
     @Test
-    void concurrentFailedRetrySingleWinner() throws Exception {
+    void concurrentFailedRetrySingleWinnerWithoutTimingSleep() throws Exception {
         BaasProject project = newProject();
         String operationId = UUID.randomUUID().toString();
-        String hash = "a".repeat(64);
+        String hash = "b".repeat(64);
         TestWorks.RecordingWork failing = new TestWorks.RecordingWork();
         failing.failPerform.set(true);
         assertThatThrownBy(() -> engine.execute(spec(project, operationId, hash), failing))
                 .isInstanceOf(IllegalStateException.class);
 
-        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch startWinner = new CountDownLatch(1);
+        CountDownLatch winnerInPerform = new CountDownLatch(1);
+        CountDownLatch loserConflict = new CountDownLatch(1);
         AtomicInteger successCount = new AtomicInteger();
         AtomicInteger conflictCount = new AtomicInteger();
-        AtomicReference<Throwable> unexpectedFailure = new AtomicReference<>();
-        Runnable retry = () -> {
-            try {
-                start.await(10, TimeUnit.SECONDS);
-                TestWorks.RecordingWork work = new TestWorks.RecordingWork();
-                work.pauseInPerformMillis = 300;
-                engine.execute(spec(project, operationId, hash), work);
-                successCount.incrementAndGet();
-            } catch (DdlConflictException conflict) {
-                conflictCount.incrementAndGet();
-            } catch (Throwable throwable) {
-                unexpectedFailure.compareAndSet(null, throwable);
+        AtomicReference<OwnershipBranch> winnerBranch = new AtomicReference<>();
+        AtomicReference<Throwable> winnerFailure = new AtomicReference<>();
+        AtomicReference<Throwable> loserFailure = new AtomicReference<>();
+
+        DdlWork winnerWork = new DdlWork() {
+            @Override
+            public void validateInLock(DdlWorkContext context) {
+                winnerBranch.set(context.branch());
+            }
+
+            @Override
+            public ObjectNode perform(DdlWorkContext context) throws Exception {
+                winnerInPerform.countDown();
+                if (!loserConflict.await(30, TimeUnit.SECONDS)) {
+                    throw new AssertionError("输家未在赢家完成前拿到 409");
+                }
+                context.advanceToDdlApplied();
+                return context.completeSuccess(() -> MAPPER.createObjectNode().put("winner", true));
             }
         };
-        Thread first = new Thread(retry, "ddl-failed-retry-first");
-        Thread second = new Thread(retry, "ddl-failed-retry-second");
-        first.start();
-        second.start();
-        start.countDown();
-        first.join(30000);
-        second.join(30000);
 
-        assertThat(unexpectedFailure.get()).isNull();
+        Thread winner = new Thread(() -> {
+            ready.countDown();
+            try {
+                startWinner.await(30, TimeUnit.SECONDS);
+                engine.execute(spec(project, operationId, hash), winnerWork);
+                successCount.incrementAndGet();
+            }
+            catch (Throwable throwable) {
+                winnerFailure.set(throwable);
+            }
+        }, "ddl-failed-retry-winner");
+        Thread loser = new Thread(() -> {
+            ready.countDown();
+            try {
+                if (!winnerInPerform.await(30, TimeUnit.SECONDS)) {
+                    throw new AssertionError("赢家未进入 perform");
+                }
+                engine.execute(spec(project, operationId, hash), new TestWorks.RecordingWork());
+            }
+            catch (DdlConflictException conflict) {
+                conflictCount.incrementAndGet();
+                loserConflict.countDown();
+            }
+            catch (Throwable throwable) {
+                loserFailure.set(throwable);
+                loserConflict.countDown();
+            }
+        }, "ddl-failed-retry-loser");
+        winner.start();
+        loser.start();
+        assertThat(ready.await(30, TimeUnit.SECONDS)).isTrue();
+        startWinner.countDown();
+        winner.join(30000);
+        loser.join(30000);
+
+        assertThat(winner.isAlive()).isFalse();
+        assertThat(loser.isAlive()).isFalse();
+        assertThat(winnerFailure.get()).isNull();
+        assertThat(loserFailure.get()).isNull();
+        assertThat(winnerBranch.get()).isEqualTo(OwnershipBranch.RETRY_FAILED);
         assertThat(successCount.get()).isEqualTo(1);
         assertThat(conflictCount.get()).isEqualTo(1);
         assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId).getRetryCount())
                 .isEqualTo(1);
     }
 
-    /** §14「cleanup DROP 已执行而终态提交前崩溃」:DDL_APPLIED 断点接管续跑,只补元数据。 */
+    /** cleanup DROP 已执行而终态提交前崩溃：DDL_APPLIED 断点接管续跑，只补元数据。 */
     @Test
     void cleanupResumesFromDdlAppliedCheckpoint() {
         BaasProject project = newProject();
@@ -285,7 +413,7 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
         cleanup.setStep(DdlStep.DDL_APPLIED.name());
         cleanup.setStatus(DdlLogStatus.RUNNING.name());
         cleanup.setOwnerToken("dead");
-        cleanup.setFenceEpoch(0L);
+        cleanup.setFenceEpoch(project.getDdlFenceEpoch());
         cleanup.setRetryCount(0);
         ddlLogMapper.insert(cleanup);
 
@@ -293,6 +421,126 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
 
         assertThat(ddlLogMapper.selectById(cleanup.getId()).getStatus()).isEqualTo(DdlLogStatus.SUCCESS.name());
         assertThat(tableMapper.selectById(table.getId())).isNull();
+    }
+
+    private BaasProject newProject() {
+        String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        return lifecycleService.createProject("fencing-" + suffix, 1L).project();
+    }
+
+    private DdlOperationSpec spec(BaasProject project, String operationId, String hash) {
+        return new DdlOperationSpec(project.getId(), operationId, DdlOperationType.CREATE, "demo", null, hash,
+                null, "CREATE TABLE ...(?)");
+    }
+
+    private AclPutDTO aclPut(String operationId, AclRoleDTO anon, AclRoleDTO authenticated) {
+        return new AclPutDTO(operationId, new AclConfigDTO(anon, authenticated), null);
+    }
+
+    private void assertColumnLength(BaasProject project, String tableName, String columnName, int expected) {
+        Long physicalLength = rootJdbc.queryForObject("SELECT CHARACTER_MAXIMUM_LENGTH "
+                + "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                Long.class, project.getDbName(), tableName, columnName);
+        assertThat(physicalLength).isEqualTo((long) expected);
+        JsonNode metadataColumn = tableService.getTableSnapshot(project, tableName)
+            .withArray("columns")
+            .findParents("columnName")
+            .stream()
+            .filter(node -> columnName.equals(node.get("columnName").asText()))
+            .findFirst()
+            .orElseThrow();
+        assertThat(metadataColumn.get("length").asInt()).isEqualTo(expected);
+    }
+
+    private Thread startThread(String name, Runnable task, AtomicReference<Throwable> failure) {
+        Thread thread = new Thread(() -> {
+            try {
+                task.run();
+            }
+            catch (Throwable throwable) {
+                failure.set(throwable);
+            }
+        }, name);
+        thread.start();
+        return thread;
+    }
+
+    private CompletionPause pauseBeforeComplete(String operationId) {
+        CompletionPause pause = new CompletionPause(operationId);
+        activePause = pause;
+        doAnswer(invocation -> {
+            DdlWorkContext context = invocation.getArgument(0);
+            if (pause.matches(context)) {
+                releaseOwnershipAndPause(context, pause);
+            }
+            return invocation.callRealMethod();
+        }).when(engine).completeSuccess(any(), any());
+        return pause;
+    }
+
+    private void releaseOwnershipAndPause(DdlWorkContext context, CompletionPause pause) throws Throwable {
+        try {
+            String lockKey = DdlLockManager.lockKey(context.spec().projectId());
+            String currentOwner = redisTemplate.opsForValue().get(lockKey);
+            if (!context.ownerToken().equals(currentOwner)) {
+                throw new AssertionError("暂停前 Redis owner_token 不属于 A");
+            }
+            Integer advisoryReleased = context.projectJdbc().queryForObject("SELECT RELEASE_LOCK(?)", Integer.class,
+                    AdvisoryLockTemplate.lockName(context.spec().projectId()));
+            if (!Integer.valueOf(1).equals(advisoryReleased)) {
+                throw new AssertionError("A 未真实持有 advisory lock");
+            }
+            lockManager.release(context.lockHandle());
+            if (redisTemplate.opsForValue().get(lockKey) != null) {
+                throw new AssertionError("A 的 Redis owner_token 未真实释放");
+            }
+        }
+        catch (Throwable throwable) {
+            pause.failure.set(throwable);
+            pause.reached.countDown();
+            throw throwable;
+        }
+        pause.reached.countDown();
+        if (!pause.resume.await(30, TimeUnit.SECONDS)) {
+            AssertionError timeout = new AssertionError("A 在完成入口等待 B 超时");
+            pause.failure.set(timeout);
+            throw timeout;
+        }
+    }
+
+    private static final class CompletionPause {
+
+        private final String operationId;
+
+        private final AtomicBoolean matched = new AtomicBoolean();
+
+        private final CountDownLatch reached = new CountDownLatch(1);
+
+        private final CountDownLatch resume = new CountDownLatch(1);
+
+        private final AtomicReference<Throwable> failure = new AtomicReference<>();
+
+        private CompletionPause(String operationId) {
+            this.operationId = operationId;
+        }
+
+        private boolean matches(DdlWorkContext context) {
+            return operationId.equals(context.spec().operationId()) && matched.compareAndSet(false, true);
+        }
+
+        private void awaitPaused() throws InterruptedException {
+            assertThat(reached.await(30, TimeUnit.SECONDS)).isTrue();
+            assertHealthy();
+        }
+
+        private void resume() {
+            resume.countDown();
+        }
+
+        private void assertHealthy() {
+            assertThat(failure.get()).isNull();
+        }
+
     }
 
 }

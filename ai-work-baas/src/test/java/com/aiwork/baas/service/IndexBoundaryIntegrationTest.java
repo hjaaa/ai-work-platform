@@ -1,9 +1,13 @@
 package com.aiwork.baas.service;
 
+import com.aiwork.baas.controller.dto.AclConfigDTO;
+import com.aiwork.baas.controller.dto.AclPutDTO;
+import com.aiwork.baas.controller.dto.AclRoleDTO;
 import com.aiwork.baas.controller.dto.ColumnDefinitionDTO;
 import com.aiwork.baas.controller.dto.TableAlterDTO;
 import com.aiwork.baas.controller.dto.TableCreateDTO;
 import com.aiwork.baas.ddl.lock.AdvisoryLockTemplate;
+import com.aiwork.baas.entity.enums.DdlLogStatus;
 import com.aiwork.baas.exception.BaasBadRequestException;
 import com.aiwork.baas.exception.DdlConflictException;
 import com.aiwork.baas.mapper.BaasDdlLogMapper;
@@ -28,6 +32,9 @@ class IndexBoundaryIntegrationTest extends PlanBProjectIntegrationTestSupport {
     private TableManagementService tableService;
 
     @Autowired
+    private AclConfigService aclService;
+
+    @Autowired
     private BaasDdlLogMapper ddlLogMapper;
 
     @Autowired
@@ -36,6 +43,32 @@ class IndexBoundaryIntegrationTest extends PlanBProjectIntegrationTestSupport {
     @Override
     protected String projectNamePrefix() {
         return "idxb";
+    }
+
+    @Test
+    void createWithSixtyThreeSecondaryIndexesSucceedsAtTotalKeyLimit() {
+        String operationId = UUID.randomUUID().toString();
+
+        tableService.createTable(project,
+                new TableCreateDTO(operationId, "idx_create_63", null, indexedColumns(63)));
+
+        assertThat(totalIndexCount("idx_create_63")).isEqualTo(64L);
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId).getStatus())
+                .isEqualTo(DdlLogStatus.SUCCESS.name());
+    }
+
+    @Test
+    void createWithSixtyFourSecondaryIndexesRejectedWithoutLogOrPhysicalTable() {
+        String operationId = UUID.randomUUID().toString();
+
+        assertThatThrownBy(() -> tableService.createTable(project,
+                new TableCreateDTO(operationId, "idx_create_64", null, indexedColumns(64))))
+                .isInstanceOf(BaasBadRequestException.class);
+
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId)).isNull();
+        assertThat(rootJdbc.queryForObject("SELECT COUNT(*) FROM information_schema.TABLES "
+                + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'idx_create_64'", Long.class, project.getDbName()))
+                .isZero();
     }
 
     @Test
@@ -69,12 +102,38 @@ class IndexBoundaryIntegrationTest extends PlanBProjectIntegrationTestSupport {
     void wideningIndexedVarcharBeyond768Rejected() {
         tableService.createTable(project, new TableCreateDTO(UUID.randomUUID().toString(), "idx_wide", null,
                 List.of(new ColumnDefinitionDTO("v", "varchar", 768, null, true, null, false, true, null))));
+        String operationId = UUID.randomUUID().toString();
+        List<String> indexNamesBefore = indexNamesOn("idx_wide", "v");
 
         assertThatThrownBy(() -> tableService.alterTable(project, "idx_wide",
-                new TableAlterDTO(UUID.randomUUID().toString(), null, null, null, null, null,
+                new TableAlterDTO(operationId, null, null, null, null, null,
                         List.of(new ColumnDefinitionDTO("v", "varchar", 800, null, true, null, false, true, null)),
                         null)))
                 .isInstanceOf(BaasBadRequestException.class);
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId)).isNull();
+        assertThat(rootJdbc.queryForObject("SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS "
+                + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'idx_wide' AND COLUMN_NAME = 'v'", Long.class,
+                project.getDbName())).isEqualTo(768L);
+        assertThat(indexNamesOn("idx_wide", "v")).isEqualTo(indexNamesBefore);
+    }
+
+    @Test
+    void aclOwnerIndexAtSixtyFifthTotalKeyRejectedWithoutSideEffects() {
+        List<ColumnDefinitionDTO> columns = new ArrayList<>(indexedColumns(63));
+        columns.add(new ColumnDefinitionDTO("owner_id", "bigint", null, null, true, null, false, false, null));
+        tableService.createTable(project,
+                new TableCreateDTO(UUID.randomUUID().toString(), "idx_acl_limit", null, columns));
+        String operationId = UUID.randomUUID().toString();
+        AclRoleDTO allOff = new AclRoleDTO(false, false, false, false);
+        AclPutDTO dto = new AclPutDTO(operationId, new AclConfigDTO(allOff, allOff), "owner_id");
+
+        assertThatThrownBy(() -> aclService.putAcl(project, "idx_acl_limit", dto))
+                .isInstanceOf(BaasBadRequestException.class);
+
+        assertThat(ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId)).isNull();
+        assertThat(totalIndexCount("idx_acl_limit")).isEqualTo(64L);
+        assertThat(indexNamesOn("idx_acl_limit", "owner_id")).isEmpty();
+        assertThat(tableService.getTableSnapshot(project, "idx_acl_limit").get("ownerColumn").isNull()).isTrue();
     }
 
     @Test
@@ -139,6 +198,26 @@ class IndexBoundaryIntegrationTest extends PlanBProjectIntegrationTestSupport {
             holder.join(20000);
         }
         assertThat(holderFailure.get()).isNull();
+    }
+
+    private List<ColumnDefinitionDTO> indexedColumns(int count) {
+        List<ColumnDefinitionDTO> columns = new ArrayList<>();
+        for (int i = 1; i <= count; i++) {
+            columns.add(new ColumnDefinitionDTO("c%02d".formatted(i), "int", null, null, true, null, false, true,
+                    null));
+        }
+        return columns;
+    }
+
+    private long totalIndexCount(String table) {
+        return rootJdbc.queryForObject("SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS "
+                + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?", Long.class, project.getDbName(), table);
+    }
+
+    private List<String> indexNamesOn(String table, String column) {
+        return rootJdbc.queryForList("SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS "
+                + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ? ORDER BY INDEX_NAME",
+                String.class, project.getDbName(), table, column);
     }
 
 }

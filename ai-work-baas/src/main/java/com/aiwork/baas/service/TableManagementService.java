@@ -208,8 +208,12 @@ public class TableManagementService {
             }
             plans.add(toColumnPlan(columnDto));
         }
+        int secondaryIndexCount = (int) plans.stream()
+            .filter(plan -> plan.column().unique() || plan.column().indexed())
+            .count();
         IndexAdmission.validateFinalStructure(plans.stream().map(DdlRenderer.ColumnPlan::column).toList(),
-                (int) plans.stream().filter(plan -> plan.column().unique() || plan.column().indexed()).count());
+                secondaryIndexCount);
+        IndexAdmission.validateTotalIndexCount(secondaryIndexCount + 1);
 
         DdlRenderer.RenderedDdl rendered = DdlRenderer.renderCreateTable(project.getDbName(), dto.tableName(),
                 dto.comment(), plans);

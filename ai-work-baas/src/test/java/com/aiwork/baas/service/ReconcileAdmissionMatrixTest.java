@@ -5,11 +5,14 @@ import com.aiwork.baas.entity.BaasTable;
 import com.aiwork.baas.mapper.BaasTableMapper;
 import com.aiwork.baas.support.PlanBProjectIntegrationTestSupport;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -42,8 +45,8 @@ class ReconcileAdmissionMatrixTest extends PlanBProjectIntegrationTestSupport {
         rootJdbc.execute("CREATE TABLE `" + db + "`.ra_fk (id bigint NOT NULL AUTO_INCREMENT, p bigint, "
                 + "PRIMARY KEY (id), KEY idx_p (p), CONSTRAINT fk_ra FOREIGN KEY (p) REFERENCES `" + db
                 + "`.ra_parent (id))" + baseline);
-        rootJdbc.execute("CREATE TABLE `" + db + "`.ra_cpk (a bigint NOT NULL, b bigint NOT NULL, "
-                + "PRIMARY KEY (a, b))" + baseline);
+        rootJdbc.execute("CREATE TABLE `" + db + "`.ra_cpk (id bigint NOT NULL AUTO_INCREMENT, "
+                + "other bigint NOT NULL, PRIMARY KEY (id, other))" + baseline);
         rootJdbc.execute("CREATE TABLE `" + db + "`.ra_inv (id bigint NOT NULL AUTO_INCREMENT, n int, "
                 + "PRIMARY KEY (id), KEY idx_n (n) INVISIBLE)" + baseline);
         rootJdbc.execute("CREATE TABLE `" + db + "`.ra_desc (id bigint NOT NULL AUTO_INCREMENT, n int, "
@@ -58,15 +61,28 @@ class ReconcileAdmissionMatrixTest extends PlanBProjectIntegrationTestSupport {
         ObjectNode report = reconcileService.manualReconcile(project,
                 new ReconcileTriggerDTO(UUID.randomUUID().toString()));
 
-        String rejected = report.get("rejectedImports").toString();
-        for (String name : List.of("ra_dt6", "ra_tiny4", "ra_gen", "ra_fk", "ra_cpk", "ra_inv", "ra_desc",
-                "ra_ft", "ra_func", "RA_UPPER")) {
-            assertThat(rejected).contains(name);
+        Map<String, String> rejected = new LinkedHashMap<>();
+        for (JsonNode item : report.withArray("rejectedImports")) {
+            rejected.put(item.get("tableName").asText(), item.get("reason").asText());
+        }
+        Map<String, String> expected = Map.ofEntries(
+                Map.entry("ra_dt6", "datetime 小数秒精度不可映射: t"),
+                Map.entry("ra_tiny4", "tinyint 变体不可映射为 boolean: tinyint"),
+                Map.entry("ra_gen", "生成列不可映射: g"),
+                Map.entry("ra_fk", "存在外键"),
+                Map.entry("ra_cpk", "主键不变量破坏(要求唯一主键 id bigint 自增)"),
+                Map.entry("ra_inv", "索引不可映射为单列布尔模型: idx_n"),
+                Map.entry("ra_desc", "索引不可映射为单列布尔模型: idx_n"),
+                Map.entry("ra_ft", "索引不可映射为单列布尔模型: ft_v"),
+                Map.entry("ra_func", "索引不可映射为单列布尔模型: idx_f"),
+                Map.entry("RA_UPPER", "表标识符非法: RA_UPPER"));
+        assertThat(rejected).isEqualTo(expected);
+        for (String name : expected.keySet()) {
             assertThat(tableMapper.selectCount(Wrappers.<BaasTable>lambdaQuery()
                     .eq(BaasTable::getProjectId, project.getId())
                     .eq(BaasTable::getTableName, name))).isZero();
         }
-        assertThat(report.get("imported").toString()).contains("ra_parent");
+        assertThat(report.withArray("imported")).extracting(JsonNode::asText).containsExactly("ra_parent");
     }
 
 }

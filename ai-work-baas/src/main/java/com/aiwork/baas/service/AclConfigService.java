@@ -79,9 +79,6 @@ public class AclConfigService {
 
     private static final List<String> ACL_ROLES = List.of("anon", "authenticated");
 
-    /** MySQL 服务层将 PRIMARY 也计入最多 64 个 key 的限制。 */
-    private static final int MYSQL_MAX_TOTAL_INDEXES = 64;
-
     private static final AclRoleDTO ALL_OFF = new AclRoleDTO(false, false, false, false);
 
     private final DdlExecutionEngine engine;
@@ -276,9 +273,7 @@ public class AclConfigService {
             if (existingIndex == null) {
                 IndexAdmission.validateColumnIndexRequest(ColumnType.BIGINT, null, false, true);
                 IndexAdmission.validateFinalStructure(List.of(owner), physical.secondaryIndexes().size() + 1);
-                if (physical.indexes().size() + 1 > MYSQL_MAX_TOTAL_INDEXES) {
-                    throw new BaasBadRequestException("索引总数超过 MySQL 上限 " + MYSQL_MAX_TOTAL_INDEXES);
-                }
+                IndexAdmission.validateTotalIndexCount(physical.indexes().size() + 1);
                 Set<String> existingNames = physical.secondaryIndexes()
                     .stream()
                     .map(PhysicalIndex::indexName)

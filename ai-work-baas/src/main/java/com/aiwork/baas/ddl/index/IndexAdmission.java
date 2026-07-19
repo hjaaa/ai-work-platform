@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * 索引准入矩阵(spec §13):text/json 禁索引;varchar 键长 length×4 ≤ 3072(即 ≤768);
- * 最终二级索引总数 ≤ 64。任一不过 400、不记日志、不执行 DDL。
+ * 最终二级索引总数与总 key 数分别 ≤ 64。任一不过 400、不记日志、不执行 DDL。
  *
  * @author ai-work
  * @date 2026/07/18
@@ -16,6 +16,8 @@ import java.util.List;
 public final class IndexAdmission {
 
     public static final int MAX_SECONDARY_INDEXES = 64;
+
+    public static final int MAX_TOTAL_INDEXES = 64;
 
     public static final int MAX_VARCHAR_INDEX_LENGTH = 768;
 
@@ -44,6 +46,13 @@ public final class IndexAdmission {
         }
         if (finalSecondaryIndexCount > MAX_SECONDARY_INDEXES) {
             throw new BaasBadRequestException("二级索引总数超过 InnoDB 上限 " + MAX_SECONDARY_INDEXES);
+        }
+    }
+
+    /** MySQL 服务层把 PRIMARY 计入 key 总数；CREATE/ALTER/ACL owner 补索引共用此校验。 */
+    public static void validateTotalIndexCount(int finalTotalIndexCount) {
+        if (finalTotalIndexCount > MAX_TOTAL_INDEXES) {
+            throw new BaasBadRequestException("索引总数超过 MySQL 上限 " + MAX_TOTAL_INDEXES);
         }
     }
 
