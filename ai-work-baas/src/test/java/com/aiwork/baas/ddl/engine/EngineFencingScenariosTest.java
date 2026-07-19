@@ -54,6 +54,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.reset;
 
@@ -69,6 +70,9 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
 
     @MockitoSpyBean
     private DdlExecutionEngine engine;
+
+    @MockitoSpyBean
+    private DdlFencingGuard fencingGuard;
 
     @Autowired
     private StringRedisTemplate redisTemplate;
@@ -104,6 +108,8 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
 
     private CompletionPause activePause;
 
+    private final ThreadLocal<DdlWorkContext> completingContext = new ThreadLocal<>();
+
     @BeforeEach
     void prepareJdbc() {
         rootJdbc = new JdbcTemplate(mysqlDataSource());
@@ -115,7 +121,8 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
             activePause.resume();
             activePause = null;
         }
-        reset(engine);
+        completingContext.remove();
+        reset(engine, fencingGuard);
     }
 
     @DynamicPropertySource
@@ -133,15 +140,13 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
         registry.add("server.servlet.context-path", () -> "");
     }
 
-    /**
-     * A 在完成入口失去双锁并暂停，B 真接管完成后，A 的元数据、检查点与终态写入均被拒绝。
-     */
+    /** A 通过锁校验、进入 epoch 校验前失去双锁并暂停；B 真接管完成后，A 的迟到写均被拒绝。 */
     @Test
     void pausedExecutorFencedOutAfterSuccessorCompletes() throws Exception {
         BaasProject project = newProject();
         String operationId = UUID.randomUUID().toString();
         String hash = "a".repeat(64);
-        CompletionPause pause = pauseBeforeComplete(operationId);
+        CompletionPause pause = pauseBeforeEpochVerification(operationId);
         AtomicInteger metadataWriteCount = new AtomicInteger();
         AtomicReference<Throwable> checkpointFailure = new AtomicReference<>();
         AtomicReference<Throwable> terminalFailure = new AtomicReference<>();
@@ -201,17 +206,21 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
 
         assertThat(executorA.isAlive()).isFalse();
         pause.assertHealthy();
+        pause.assertReachedEpochVerification();
         assertThat(successorWork.observedBranch).isEqualTo(OwnershipBranch.TAKE_OVER_RUNNING);
         assertThat(successorSnapshot.get("performs").asInt()).isEqualTo(1);
-        assertThat(executorFailure.get()).isInstanceOf(StaleExecutorException.class);
+        assertThat(executorFailure.get()).isInstanceOf(StaleExecutorException.class)
+            .hasMessageContaining("项目 epoch 已推进");
         assertThat(checkpointFailure.get()).isInstanceOf(StaleExecutorException.class);
         assertThat(terminalFailure.get()).isInstanceOf(StaleExecutorException.class);
-        assertThat(metadataWriteCount.get()).isZero();
+        assertThat(metadataWriteCount.get()).as("epoch 不匹配时不得执行 A 的 metadata supplier").isZero();
         BaasDdlLog completed = ddlLogMapper.selectByProjectAndOperation(project.getId(), operationId);
         assertThat(completed.getStatus()).isEqualTo(DdlLogStatus.SUCCESS.name());
         assertThat(completed.getStep()).isEqualTo(DdlStep.METADATA_APPLIED.name());
         assertThat(completed.getFenceEpoch()).isEqualTo(2L);
-        assertThat(completed.getResultSnapshot()).contains("\"performs\":1").doesNotContain("executor");
+        assertThat(completed.getResultSnapshot()).as("A 的 finishGuarded 不得覆盖 B 的终态快照")
+            .contains("\"performs\":1")
+            .doesNotContain("executor");
     }
 
     /**
@@ -225,7 +234,7 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
                         null))));
         String reconcileOperationId = UUID.randomUUID().toString();
         String alterOperationId = UUID.randomUUID().toString();
-        CompletionPause pause = pauseBeforeComplete(reconcileOperationId);
+        CompletionPause pause = pauseBeforeEpochVerification(reconcileOperationId);
         AtomicReference<Throwable> reconcileFailure = new AtomicReference<>();
         Thread staleReconcile = startThread("ddl-stale-reconcile",
                 () -> reconcileService.manualReconcile(project, new ReconcileTriggerDTO(reconcileOperationId)),
@@ -247,7 +256,9 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
 
         assertThat(staleReconcile.isAlive()).isFalse();
         pause.assertHealthy();
-        assertThat(reconcileFailure.get()).isInstanceOf(StaleExecutorException.class);
+        pause.assertReachedEpochVerification();
+        assertThat(reconcileFailure.get()).isInstanceOf(StaleExecutorException.class)
+            .hasMessageContaining("项目 epoch 已推进");
         assertColumnLength(project, "reconcile_fence", "title", 64);
         ObjectNode snapshot = tableService.getTableSnapshot(project, "reconcile_fence");
         assertThat(snapshot.get("comment").asText()).isEqualTo("newer-alter");
@@ -262,7 +273,7 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
                 .like(BaasAuditLog::getDetail, reconcileOperationId))).isZero();
     }
 
-    /** 旧 ACL 关闭在完成入口暂停；新 ACL 开启完成后，旧事务不得反向覆盖。 */
+    /** 旧 ACL 关闭在 epoch 校验前暂停；新 ACL 开启完成后，旧事务不得反向覆盖。 */
     @Test
     void staleAclCloseCannotOverwriteNewerOpen() throws Exception {
         BaasProject project = newProject();
@@ -272,7 +283,7 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
         aclService.putAcl(project, "acl_fence", aclPut(UUID.randomUUID().toString(), initial, initial));
         String closeOperationId = UUID.randomUUID().toString();
         String openOperationId = UUID.randomUUID().toString();
-        CompletionPause pause = pauseBeforeComplete(closeOperationId);
+        CompletionPause pause = pauseBeforeEpochVerification(closeOperationId);
         AtomicReference<Throwable> closeFailure = new AtomicReference<>();
         Thread staleClose = startThread("ddl-stale-acl-close",
                 () -> aclService.putAcl(project, "acl_fence", aclPut(closeOperationId, ALL_OFF, ALL_OFF)),
@@ -292,7 +303,9 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
 
         assertThat(staleClose.isAlive()).isFalse();
         pause.assertHealthy();
-        assertThat(closeFailure.get()).isInstanceOf(StaleExecutorException.class);
+        pause.assertReachedEpochVerification();
+        assertThat(closeFailure.get()).isInstanceOf(StaleExecutorException.class)
+            .hasMessageContaining("项目 epoch 已推进");
         ObjectNode acl = aclService.getAcl(project, "acl_fence");
         assertThat(acl.at("/acl/anon/select").asBoolean()).isTrue();
         assertThat(acl.at("/acl/anon/insert").asBoolean()).isTrue();
@@ -465,16 +478,28 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
         return thread;
     }
 
-    private CompletionPause pauseBeforeComplete(String operationId) {
+    private CompletionPause pauseBeforeEpochVerification(String operationId) {
         CompletionPause pause = new CompletionPause(operationId);
         activePause = pause;
         doAnswer(invocation -> {
             DdlWorkContext context = invocation.getArgument(0);
-            if (pause.matches(context)) {
+            completingContext.set(context);
+            try {
+                return invocation.callRealMethod();
+            }
+            finally {
+                completingContext.remove();
+            }
+        }).when(engine).completeSuccess(any(), any());
+        doAnswer(invocation -> {
+            DdlWorkContext context = completingContext.get();
+            if (context != null && pause.matches(context)) {
+                context.assertLockStillHeld();
+                pause.reachedEpochVerification.set(true);
                 releaseOwnershipAndPause(context, pause);
             }
             return invocation.callRealMethod();
-        }).when(engine).completeSuccess(any(), any());
+        }).when(fencingGuard).verifyEpochInTx(any(), anyLong());
         return pause;
     }
 
@@ -502,7 +527,7 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
         }
         pause.reached.countDown();
         if (!pause.resume.await(30, TimeUnit.SECONDS)) {
-            AssertionError timeout = new AssertionError("A 在完成入口等待 B 超时");
+            AssertionError timeout = new AssertionError("A 在 epoch 校验入口等待 B 超时");
             pause.failure.set(timeout);
             throw timeout;
         }
@@ -519,6 +544,8 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
         private final CountDownLatch resume = new CountDownLatch(1);
 
         private final AtomicReference<Throwable> failure = new AtomicReference<>();
+
+        private final AtomicBoolean reachedEpochVerification = new AtomicBoolean();
 
         private CompletionPause(String operationId) {
             this.operationId = operationId;
@@ -539,6 +566,10 @@ class EngineFencingScenariosTest extends PlanBContainerSupport {
 
         private void assertHealthy() {
             assertThat(failure.get()).isNull();
+        }
+
+        private void assertReachedEpochVerification() {
+            assertThat(reachedEpochVerification.get()).isTrue();
         }
 
     }
