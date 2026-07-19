@@ -136,6 +136,27 @@ class DdlExecutionEngineTest {
     }
 
     @Test
+    void resolvedOperationSpecIsComputedOnlyAfterProjectLockIsHeld() {
+        BaasProject project = newProject();
+        String operationId = UUID.randomUUID().toString();
+        AtomicBoolean resolvedUnderLock = new AtomicBoolean(false);
+        TestWorks.RecordingWork work = new TestWorks.RecordingWork();
+
+        ObjectNode snapshot = engine.executeResolved(project.getId(), () -> {
+            LockHandle competing = lockManager.tryAcquire(project.getId());
+            resolvedUnderLock.set(competing == null);
+            if (competing != null) {
+                lockManager.release(competing);
+            }
+            return spec(project, operationId, "a".repeat(64));
+        }, ignored -> work);
+
+        assertThat(resolvedUnderLock).isTrue();
+        assertThat(snapshot.get("performs").asInt()).isEqualTo(1);
+        assertThat(work.observedBranch).isEqualTo(OwnershipBranch.NEW_OPERATION);
+    }
+
+    @Test
     void successReplayReturnsSnapshotWithoutTakingLock() {
         BaasProject project = newProject();
         String operationId = UUID.randomUUID().toString();

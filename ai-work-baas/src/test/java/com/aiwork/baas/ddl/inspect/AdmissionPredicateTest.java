@@ -135,6 +135,21 @@ class AdmissionPredicateTest {
     }
 
     @Test
+    void defaultsOutsideTypedLogicalModelFailClosed() {
+        PhysicalColumn invalidBoolean = new PhysicalColumn("vip", "tinyint", "tinyint(1)", null, 3L, 0L,
+                null, true, "2", "", null, null, "", "", "");
+        assertRejected(DATABASE, table(List.of(idColumn(), invalidBoolean), List.of(primaryIndex())), "默认值");
+
+        PhysicalColumn invalidDatetime = new PhysicalColumn("created", "datetime", "datetime", null, null,
+                null, 0L, true, "2026-02-30 12:00:00", "", null, null, "", "", "");
+        assertRejected(DATABASE, table(List.of(idColumn(), invalidDatetime), List.of(primaryIndex())), "默认值");
+
+        PhysicalColumn invalidVarchar = new PhysicalColumn("label", "varchar", "varchar(64)", 64L, null,
+                null, null, true, "CURRENT_TIMESTAMP()", "", "utf8mb4", "utf8mb4_general_ci", "", "", "");
+        assertRejected(DATABASE, table(List.of(idColumn(), invalidVarchar), List.of(primaryIndex())), "默认值");
+    }
+
+    @Test
     void nonMappableAndDuplicateIndexesFailClosed() {
         PhysicalColumn name = varcharColumn("name", 300L);
         PhysicalTable base = table(List.of(idColumn(), name), List.of(primaryIndex()));

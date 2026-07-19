@@ -23,6 +23,7 @@ import com.aiwork.baas.ddl.type.ColumnType;
 import com.aiwork.baas.ddl.type.ColumnTypeValidator;
 import com.aiwork.baas.ddl.type.DefaultValueRenderer;
 import com.aiwork.baas.ddl.type.LogicalColumn;
+import com.aiwork.baas.exception.BaasBadRequestException;
 
 import java.util.Locale;
 
@@ -89,7 +90,13 @@ public final class LogicalModelMapper {
             }
         }
 
-        String defaultValue = normalizeDefault(type, column);
+        String defaultValue;
+        try {
+            defaultValue = DefaultValueRenderer.normalizePhysical(type, length, scale, column.columnDefault());
+        }
+        catch (BaasBadRequestException exception) {
+            return MappingOutcome.reject("物理默认值不可映射: " + column.columnName() + ", " + exception.getMessage());
+        }
         return MappingOutcome
             .success(new LogicalColumn(column.columnName(), type, length, scale, column.nullable(), defaultValue,
                     column.isPrimaryKey(), column.isAutoIncrement(), unique, indexed, emptyToNull(column.comment())));
@@ -114,20 +121,6 @@ public final class LogicalModelMapper {
             return null;
         }
         return "列 EXTRA 属性不可映射: " + column.extra();
-    }
-
-    private static String normalizeDefault(ColumnType type, PhysicalColumn column) {
-        String raw = column.columnDefault();
-        if (raw == null) {
-            return null;
-        }
-        if (type == ColumnType.BOOLEAN) {
-            return "0".equals(raw) ? "false" : "1".equals(raw) ? "true" : raw;
-        }
-        if (type == ColumnType.DATETIME && DefaultValueRenderer.CURRENT_TIMESTAMP.equalsIgnoreCase(raw)) {
-            return DefaultValueRenderer.CURRENT_TIMESTAMP;
-        }
-        return raw;
     }
 
     private static String emptyToNull(String text) {

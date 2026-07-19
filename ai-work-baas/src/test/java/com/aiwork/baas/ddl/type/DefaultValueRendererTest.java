@@ -182,4 +182,18 @@ class DefaultValueRendererTest {
             .isInstanceOf(BaasBadRequestException.class);
     }
 
+    @Test
+    void physicalDefaultsReuseTypedCanonicalizationRules() {
+        assertThat(DefaultValueRenderer.normalizePhysical(ColumnType.BOOLEAN, null, null, "0")).isEqualTo("false");
+        assertThat(DefaultValueRenderer.normalizePhysical(ColumnType.BOOLEAN, null, null, "1")).isEqualTo("true");
+        assertThat(DefaultValueRenderer.normalizePhysical(ColumnType.DECIMAL, 5, 2, "1.2")).isEqualTo("1.20");
+        assertThat(DefaultValueRenderer.normalizePhysical(ColumnType.DATETIME, null, null, "current_timestamp"))
+            .isEqualTo("CURRENT_TIMESTAMP");
+        assertThatThrownBy(() -> DefaultValueRenderer.normalizePhysical(ColumnType.BOOLEAN, null, null, "2"))
+            .isInstanceOf(BaasBadRequestException.class);
+        assertThatThrownBy(() -> DefaultValueRenderer.normalizePhysical(ColumnType.DATETIME, null, null,
+                "2026-02-30 12:00:00"))
+            .isInstanceOf(BaasBadRequestException.class);
+    }
+
 }

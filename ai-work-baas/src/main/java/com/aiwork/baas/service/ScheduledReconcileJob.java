@@ -6,13 +6,8 @@
 
 package com.aiwork.baas.service;
 
-import com.aiwork.baas.ddl.RequestFingerprint;
-import com.aiwork.baas.entity.BaasDdlLog;
 import com.aiwork.baas.entity.BaasProject;
-import com.aiwork.baas.entity.enums.DdlLogStatus;
-import com.aiwork.baas.entity.enums.DdlOperationType;
 import com.aiwork.baas.entity.enums.ProjectStatus;
-import com.aiwork.baas.mapper.BaasDdlLogMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
 import com.aiwork.baas.provision.PhysicalPreconditions;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
@@ -23,7 +18,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-import java.util.UUID;
 
 /**
  * 定时对账(spec §9.4,默认关闭):优先复用遗留 SCHEDULED FAILED 或陈旧 RUNNING 记录。
@@ -41,8 +35,6 @@ public class ScheduledReconcileJob {
     private final ReconcileService reconcileService;
 
     private final BaasProjectMapper projectMapper;
-
-    private final BaasDdlLogMapper ddlLogMapper;
 
     @Value("${baas.reconcile.scheduled-enabled:false}")
     private boolean enabled;
@@ -63,30 +55,13 @@ public class ScheduledReconcileJob {
             .orderByAsc(BaasProject::getId));
         for (BaasProject project : projects) {
             try {
-                reconcileProject(project);
+                reconcileService.scheduledReconcile(project);
             }
             catch (Exception exception) {
                 log.warn("scheduled reconcile skipped projectId={} errorType={}", project.getId(),
                         exception.getClass().getSimpleName());
             }
         }
-    }
-
-    private void reconcileProject(BaasProject project) {
-        BaasDdlLog leftover = ddlLogMapper.selectOne(Wrappers.<BaasDdlLog>lambdaQuery()
-            .eq(BaasDdlLog::getProjectId, project.getId())
-            .eq(BaasDdlLog::getOperationType, DdlOperationType.RECONCILE.code())
-            .eq(BaasDdlLog::getTriggerSource, ReconcileService.TRIGGER_SCHEDULED)
-            .in(BaasDdlLog::getStatus, DdlLogStatus.RUNNING.name(), DdlLogStatus.FAILED.name())
-            .last("ORDER BY update_time ASC, id ASC LIMIT 1"));
-        if (leftover != null) {
-            reconcileService.reconcile(project, leftover.getOperationId(), ReconcileService.TRIGGER_SCHEDULED,
-                    leftover.getRequestHash());
-            return;
-        }
-        String operationId = UUID.randomUUID().toString();
-        reconcileService.reconcile(project, operationId, ReconcileService.TRIGGER_SCHEDULED,
-                RequestFingerprint.scheduledReconcile(project.getId(), operationId));
     }
 
 }

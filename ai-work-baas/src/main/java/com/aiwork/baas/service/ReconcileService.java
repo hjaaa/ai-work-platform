@@ -21,6 +21,7 @@ import com.aiwork.baas.ddl.inspect.PhysicalTable;
 import com.aiwork.baas.ddl.inspect.SchemaInspector;
 import com.aiwork.baas.ddl.type.ColumnType;
 import com.aiwork.baas.ddl.type.LogicalColumn;
+import com.aiwork.baas.entity.BaasAuditLog;
 import com.aiwork.baas.entity.BaasColumn;
 import com.aiwork.baas.entity.BaasDdlLog;
 import com.aiwork.baas.entity.BaasProject;
@@ -31,10 +32,12 @@ import com.aiwork.baas.entity.enums.DdlOperationType;
 import com.aiwork.baas.entity.enums.TableStatus;
 import com.aiwork.baas.exception.BaasBadRequestException;
 import com.aiwork.baas.exception.DdlConflictException;
+import com.aiwork.baas.mapper.BaasAuditLogMapper;
 import com.aiwork.baas.mapper.BaasColumnMapper;
 import com.aiwork.baas.mapper.BaasDdlLogMapper;
 import com.aiwork.baas.mapper.BaasTableAclMapper;
 import com.aiwork.baas.mapper.BaasTableMapper;
+import com.aiwork.baas.security.CurrentUserProvider;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -48,6 +51,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.UUID;
 
 /**
  * 表结构对账(spec §9.4):范围仅表结构,以项目库 information_schema 为准。
@@ -64,6 +68,11 @@ public class ReconcileService {
 
     public static final String TRIGGER_SCHEDULED = "SCHEDULED";
 
+    /** 定时任务的显式系统审计主体，不冒充项目 owner。 */
+    private static final Long SYSTEM_OPERATOR_USER_ID = 0L;
+
+    private static final String AUDIT_ACTION = "DDL_RECONCILE";
+
     private static final List<String> ACL_ROLES = List.of("anon", "authenticated");
 
     private static final Set<String> TRIGGER_SOURCES = Set.of(TRIGGER_MANUAL, TRIGGER_SCHEDULED);
@@ -79,6 +88,10 @@ public class ReconcileService {
     private final BaasTableAclMapper aclMapper;
 
     private final BaasDdlLogMapper ddlLogMapper;
+
+    private final BaasAuditLogMapper auditLogMapper;
+
+    private final CurrentUserProvider userProvider;
 
     private final ObjectMapper objectMapper;
 
@@ -100,7 +113,39 @@ public class ReconcileService {
         OperationIdValidator.requireUuid(operationId);
         DdlOperationSpec spec = new DdlOperationSpec(project.getId(), operationId, DdlOperationType.RECONCILE,
                 null, null, requestHash, triggerSource, null);
-        return engine.execute(spec, new ReconcileWork(project, triggerSource, operationId));
+        Long operatorUserId = TRIGGER_SCHEDULED.equals(triggerSource) ? SYSTEM_OPERATOR_USER_ID
+                : userProvider.currentUserId();
+        return engine.execute(spec, new ReconcileWork(project, triggerSource, operationId, operatorUserId));
+    }
+
+    /** 锁内解析遗留 SCHEDULED 操作，存在则原 ID 接管/重试，否则创建本轮新操作。 */
+    public ObjectNode scheduledReconcile(BaasProject project) {
+        if (project == null) {
+            throw new BaasBadRequestException("定时对账项目不能为空");
+        }
+        return engine.executeResolved(project.getId(), () -> resolveScheduledSpec(project),
+                spec -> new ReconcileWork(project, TRIGGER_SCHEDULED, spec.operationId(), SYSTEM_OPERATOR_USER_ID));
+    }
+
+    private DdlOperationSpec resolveScheduledSpec(BaasProject project) {
+        BaasDdlLog leftover = ddlLogMapper.selectOne(Wrappers.<BaasDdlLog>lambdaQuery()
+            .eq(BaasDdlLog::getProjectId, project.getId())
+            .eq(BaasDdlLog::getOperationType, DdlOperationType.RECONCILE.code())
+            .eq(BaasDdlLog::getTriggerSource, TRIGGER_SCHEDULED)
+            .in(BaasDdlLog::getStatus, DdlLogStatus.RUNNING.name(), DdlLogStatus.FAILED.name())
+            .last("ORDER BY update_time ASC, id ASC LIMIT 1"));
+        if (leftover != null) {
+            OperationIdValidator.requireUuid(leftover.getOperationId());
+            return scheduledSpec(project, leftover.getOperationId(), leftover.getRequestHash());
+        }
+        String operationId = UUID.randomUUID().toString();
+        return scheduledSpec(project, operationId,
+                RequestFingerprint.scheduledReconcile(project.getId(), operationId));
+    }
+
+    private DdlOperationSpec scheduledSpec(BaasProject project, String operationId, String requestHash) {
+        return new DdlOperationSpec(project.getId(), operationId, DdlOperationType.RECONCILE, null, null,
+                requestHash, TRIGGER_SCHEDULED, null);
     }
 
     private final class ReconcileWork implements DdlWork {
@@ -111,10 +156,13 @@ public class ReconcileService {
 
         private final String operationId;
 
-        private ReconcileWork(BaasProject project, String triggerSource, String operationId) {
+        private final Long operatorUserId;
+
+        private ReconcileWork(BaasProject project, String triggerSource, String operationId, Long operatorUserId) {
             this.project = project;
             this.triggerSource = triggerSource;
             this.operationId = operationId;
+            this.operatorUserId = operatorUserId;
         }
 
         @Override
@@ -144,7 +192,25 @@ public class ReconcileService {
                 .orderByAsc(BaasTable::getTableName)
                 .orderByAsc(BaasTable::getId));
             context.assertLockStillHeld();
-            return context.completeSuccess(() -> applyRules(physicalSnapshot, metadataTables));
+            return context.completeSuccess(() -> {
+                ObjectNode report = applyRules(physicalSnapshot, metadataTables);
+                audit(report);
+                return report;
+            });
+        }
+
+        private void audit(ObjectNode report) {
+            String detail = "operationId=" + operationId + ",trigger=" + triggerSource + ",corrected="
+                    + report.get("corrected").size() + ",imported=" + report.get("imported").size()
+                    + ",recovered=" + report.get("recovered").size() + ",conflicts="
+                    + report.get("conflicts").size() + ",rejectedImports=" + report.get("rejectedImports").size();
+            BaasAuditLog auditLog = new BaasAuditLog();
+            auditLog.setProjectId(project.getId());
+            auditLog.setOperatorUserId(operatorUserId);
+            auditLog.setAction(AUDIT_ACTION);
+            auditLog.setDetail(detail);
+            auditLog.setLevel("INFO");
+            auditLogMapper.insert(auditLog);
         }
 
         private FinalPhysicalSnapshot readFinalPhysicalSnapshot(DdlWorkContext context) {

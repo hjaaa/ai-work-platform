@@ -21,6 +21,7 @@ package com.aiwork.baas.ddl.type;
 
 import com.aiwork.baas.exception.BaasBadRequestException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -84,6 +85,34 @@ public final class DefaultValueRenderer {
         };
     }
 
+    /**
+     * information_schema 的默认值复用管理 API 类型化规则规范化，确保对账不会落入 API 无法重放的值。
+     * @param type 逻辑列类型
+     * @param length 长度或精度
+     * @param scale 小数位
+     * @param physicalValue information_schema.COLUMNS.COLUMN_DEFAULT
+     * @return 元数据规范值，无默认值返回 null
+     */
+    public static String normalizePhysical(ColumnType type, Integer length, Integer scale, String physicalValue) {
+        if (physicalValue == null) {
+            return null;
+        }
+        JsonNode value;
+        try {
+            value = switch (type) {
+                case INT, BIGINT -> JsonNodeFactory.instance.numberNode(new BigInteger(physicalValue));
+                case DECIMAL -> JsonNodeFactory.instance.numberNode(new BigDecimal(physicalValue));
+                case BOOLEAN -> physicalBoolean(physicalValue);
+                case DATE, DATETIME, VARCHAR, TEXT, JSON -> JsonNodeFactory.instance.textNode(physicalValue);
+            };
+        }
+        catch (NumberFormatException exception) {
+            throw new BaasBadRequestException(type.code() + " 物理默认值不是合法数值");
+        }
+        Rendered rendered = render(type, length, scale, value);
+        return rendered == null ? null : rendered.canonical();
+    }
+
     public static String escapeStringLiteral(String raw) {
         return raw.replace("\\", "\\\\").replace("'", "''");
     }
@@ -122,6 +151,14 @@ public final class DefaultValueRenderer {
             throw new BaasBadRequestException("boolean 列默认值必须为 JSON true/false");
         }
         return value.booleanValue() ? new Rendered("TRUE", "true") : new Rendered("FALSE", "false");
+    }
+
+    private static JsonNode physicalBoolean(String value) {
+        return switch (value) {
+            case "0" -> JsonNodeFactory.instance.booleanNode(false);
+            case "1" -> JsonNodeFactory.instance.booleanNode(true);
+            default -> throw new BaasBadRequestException("boolean 物理默认值仅允许 0/1");
+        };
     }
 
     private static Rendered date(JsonNode value) {

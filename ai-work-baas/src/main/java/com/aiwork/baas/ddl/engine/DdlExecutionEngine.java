@@ -42,6 +42,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.Connection;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -100,6 +101,31 @@ public class DdlExecutionEngine {
         try {
             return lockExecutor.execute(spec.projectId(),
                     (handle, connection) -> runInLock(spec, work, handle, connection));
+        }
+        catch (DdlLockBusyException busy) {
+            throw new DdlConflictException("该项目有 DDL 操作进行中");
+        }
+    }
+
+    /**
+     * 取得项目双层锁后才解析本轮操作描述，供调度器基于锁内最终日志现状选择重试、接管或新建。
+     * @param projectId 项目 ID
+     * @param specResolver 锁内操作描述解析器
+     * @param workFactory 根据最终操作描述创建工作单元
+     * @return 操作结果快照
+     */
+    public ObjectNode executeResolved(Long projectId, Supplier<DdlOperationSpec> specResolver,
+            Function<DdlOperationSpec, DdlWork> workFactory) {
+        physicalPreconditions.assertSatisfied();
+        try {
+            return lockExecutor.execute(projectId, (handle, connection) -> {
+                DdlOperationSpec spec = Objects.requireNonNull(specResolver.get(), "resolved ddl spec");
+                if (!Objects.equals(projectId, spec.projectId())) {
+                    throw new IllegalArgumentException("resolved ddl spec project mismatch");
+                }
+                DdlWork work = Objects.requireNonNull(workFactory.apply(spec), "resolved ddl work");
+                return runInLock(spec, work, handle, connection);
+            });
         }
         catch (DdlLockBusyException busy) {
             throw new DdlConflictException("该项目有 DDL 操作进行中");
