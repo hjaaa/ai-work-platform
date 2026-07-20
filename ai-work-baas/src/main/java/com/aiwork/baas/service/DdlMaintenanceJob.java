@@ -94,6 +94,10 @@ public class DdlMaintenanceJob {
 
     private final ObjectMapper objectMapper;
 
+    private final BoundedScanCursor<BaasDdlLog> cleanupScanCursor = new BoundedScanCursor<>();
+
+    private final BoundedScanCursor<BaasDdlLog> staleScanCursor = new BoundedScanCursor<>();
+
     @Value("${baas.ddl.stale-running-minutes:10}")
     private int staleRunningMinutes;
 
@@ -123,10 +127,8 @@ public class DdlMaintenanceJob {
     }
 
     private void processCleanupRecords() {
-        List<BaasDdlLog> candidates = ddlLogMapper.selectList(Wrappers.<BaasDdlLog>lambdaQuery()
-            .eq(BaasDdlLog::getOperationType, DdlOperationType.CLEANUP_DROP.code())
-            .in(BaasDdlLog::getStatus, DdlLogStatus.PENDING.name(), DdlLogStatus.FAILED.name(),
-                    DdlLogStatus.RUNNING.name()).orderByAsc(BaasDdlLog::getId).last("LIMIT 100"));
+        List<BaasDdlLog> candidates = cleanupScanCursor.nextBatch(this::loadLatestCleanupRecords,
+                this::loadCursorCleanupRecords, BaasDdlLog::getId);
         for (BaasDdlLog record : candidates) {
             try {
                 if (shouldSkipCleanup(record)) {
@@ -149,6 +151,24 @@ public class DdlMaintenanceJob {
         }
     }
 
+    private List<BaasDdlLog> loadLatestCleanupRecords(int limit) {
+        return loadCleanupRecords(0, limit);
+    }
+
+    private List<BaasDdlLog> loadCursorCleanupRecords(long beforeId, int limit) {
+        return loadCleanupRecords(beforeId, limit);
+    }
+
+    private List<BaasDdlLog> loadCleanupRecords(long beforeId, int limit) {
+        return ddlLogMapper.selectList(Wrappers.<BaasDdlLog>lambdaQuery()
+            .eq(BaasDdlLog::getOperationType, DdlOperationType.CLEANUP_DROP.code())
+            .in(BaasDdlLog::getStatus, DdlLogStatus.PENDING.name(), DdlLogStatus.FAILED.name(),
+                    DdlLogStatus.RUNNING.name())
+            .lt(beforeId > 0, BaasDdlLog::getId, beforeId)
+            .orderByDesc(BaasDdlLog::getId)
+            .last("LIMIT " + limit));
+    }
+
     private boolean shouldSkipCleanup(BaasDdlLog record) {
         if (DdlLogStatus.RUNNING.name().equals(record.getStatus())) {
             return lockManager.isHeldBy(record.getProjectId(), record.getOwnerToken());
@@ -169,10 +189,9 @@ public class DdlMaintenanceJob {
 
     private void processStaleHttpRunning() {
         LocalDateTime threshold = staleThreshold();
-        List<BaasDdlLog> candidates = ddlLogMapper.selectList(Wrappers.<BaasDdlLog>lambdaQuery()
-            .eq(BaasDdlLog::getStatus, DdlLogStatus.RUNNING.name())
-            .in(BaasDdlLog::getOperationType, HTTP_OPERATION_TYPES.stream().map(DdlOperationType::code).toList())
-            .lt(BaasDdlLog::getUpdateTime, threshold).orderByAsc(BaasDdlLog::getId).last("LIMIT 100"));
+        List<BaasDdlLog> candidates = staleScanCursor.nextBatch(
+                limit -> loadStaleHttpRunning(0, threshold, limit),
+                (beforeId, limit) -> loadStaleHttpRunning(beforeId, threshold, limit), BaasDdlLog::getId);
         for (BaasDdlLog record : candidates) {
             try {
                 if (lockManager.isHeldBy(record.getProjectId(), record.getOwnerToken())) {
@@ -193,6 +212,16 @@ public class DdlMaintenanceJob {
                         exception.getClass().getSimpleName());
             }
         }
+    }
+
+    private List<BaasDdlLog> loadStaleHttpRunning(long beforeId, LocalDateTime threshold, int limit) {
+        return ddlLogMapper.selectList(Wrappers.<BaasDdlLog>lambdaQuery()
+            .eq(BaasDdlLog::getStatus, DdlLogStatus.RUNNING.name())
+            .in(BaasDdlLog::getOperationType, HTTP_OPERATION_TYPES.stream().map(DdlOperationType::code).toList())
+            .lt(BaasDdlLog::getUpdateTime, threshold)
+            .lt(beforeId > 0, BaasDdlLog::getId, beforeId)
+            .orderByDesc(BaasDdlLog::getId)
+            .last("LIMIT " + limit));
     }
 
     private void forceFailInLock(Long logId, LockHandle handle) {

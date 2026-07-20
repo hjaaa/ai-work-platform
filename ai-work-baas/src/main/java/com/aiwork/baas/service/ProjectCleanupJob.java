@@ -46,12 +46,14 @@ public class ProjectCleanupJob {
 
     private final ProjectLifecycleService lifecycleService;
 
+    private final BoundedScanCursor<BaasProject> scanCursor = new BoundedScanCursor<>();
+
     @Scheduled(fixedDelay = 3600000)
     public void cleanup() {
-        List<BaasProject> expiredProjects = projectMapper.selectList(Wrappers.<BaasProject>lambdaQuery()
-            .eq(BaasProject::getStatus, ProjectStatus.DELETING)
-            .lt(BaasProject::getDeleteAfter, LocalDateTime.now())
-            .orderByAsc(BaasProject::getId).last("LIMIT 100"));
+        LocalDateTime threshold = LocalDateTime.now();
+        List<BaasProject> expiredProjects = scanCursor.nextBatch(
+                limit -> loadExpiredProjects(0, threshold, limit),
+                (beforeId, limit) -> loadExpiredProjects(beforeId, threshold, limit), BaasProject::getId);
         for (BaasProject project : expiredProjects) {
             try {
                 ProjectCleanupResult result = lifecycleService.physicallyCleanup(project);
@@ -64,6 +66,15 @@ public class ProjectCleanupJob {
                         exception.getClass().getSimpleName());
             }
         }
+    }
+
+    private List<BaasProject> loadExpiredProjects(long beforeId, LocalDateTime threshold, int limit) {
+        return projectMapper.selectList(Wrappers.<BaasProject>lambdaQuery()
+            .eq(BaasProject::getStatus, ProjectStatus.DELETING)
+            .lt(BaasProject::getDeleteAfter, threshold)
+            .lt(beforeId > 0, BaasProject::getId, beforeId)
+            .orderByDesc(BaasProject::getId)
+            .last("LIMIT " + limit));
     }
 
 }

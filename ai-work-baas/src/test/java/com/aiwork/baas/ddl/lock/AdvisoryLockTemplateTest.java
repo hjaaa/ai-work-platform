@@ -29,6 +29,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -120,18 +121,27 @@ class AdvisoryLockTemplateTest extends PlanBContainerSupport {
 	}
 
 	@Test
-	void callbackAndConnectionCloseFailuresDoNotExposeCauseOrSuppressedExceptions() throws Exception {
+	void fencingFailureRemainsVisibleWhenReleaseSucceedsDespiteCloseFailure() throws Exception {
 		AdvisoryLockTemplate closeFailingTemplate = new AdvisoryLockTemplate(closeFailingDataSource());
 
 		assertThatThrownBy(() -> closeFailingTemplate.executeWithLock(205L, connection -> {
-			throw new Exception("secret callback metadata");
-		})).isInstanceOf(DdlLockInfrastructureException.class)
+			throw new DdlLockBusyException("fencing token lost");
+		})).isInstanceOf(DdlLockBusyException.class)
+			.hasMessage("fencing token lost")
+			.hasNoCause()
+			.satisfies(exception -> assertThat(exception.getSuppressed()).isEmpty());
+	}
+
+	@Test
+	void getLockFailureAndConnectionCloseFailureMarksAdvisoryStateUncertain() {
+		AdvisoryLockTemplate failingTemplate = new AdvisoryLockTemplate(getLockAndCloseFailingDataSource());
+
+		assertThatThrownBy(() -> failingTemplate.executeWithLock(2051L, connection -> null))
+			.isInstanceOf(DdlLockInfrastructureException.class)
 			.hasMessage("DDL_LOCK_INFRASTRUCTURE_FAILED")
 			.hasNoCause()
-			.satisfies(exception -> {
-				assertThat(exception.getSuppressed()).isEmpty();
-				assertThat(((DdlLockInfrastructureException) exception).advisoryStateUncertain()).isFalse();
-			});
+			.satisfies(exception -> assertThat(
+					((DdlLockInfrastructureException) exception).advisoryStateUncertain()).isTrue());
 	}
 
 	@Test
@@ -162,6 +172,13 @@ class AdvisoryLockTemplateTest extends PlanBContainerSupport {
 		ResultSet resultSet = proxy(ResultSet.class, (proxy, method, args) -> switch (method.getName()) {
 			case "next" -> true;
 			case "getInt" -> 1;
+			case "getString" -> "STRICT_TRANS_TABLES";
+			case "wasNull" -> false;
+			case "close" -> null;
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		Statement queryStatement = proxy(Statement.class, (proxy, method, args) -> switch (method.getName()) {
+			case "executeQuery" -> resultSet;
 			case "close" -> null;
 			default -> throw new UnsupportedOperationException(method.getName());
 		});
@@ -169,11 +186,33 @@ class AdvisoryLockTemplateTest extends PlanBContainerSupport {
 				(proxy, method, args) -> switch (method.getName()) {
 					case "setString", "close" -> null;
 					case "executeQuery" -> resultSet;
+					case "executeUpdate" -> 1;
+					default -> throw new UnsupportedOperationException(method.getName());
+				});
+		Connection connection = proxy(Connection.class, (proxy, method, args) -> switch (method.getName()) {
+			case "createStatement" -> queryStatement;
+			case "prepareStatement" -> statement;
+			case "close" -> throw new SQLException("secret close jdbc metadata");
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		return proxy(DataSource.class, (proxy, method, args) -> {
+			if ("getConnection".equals(method.getName())) {
+				return connection;
+			}
+			throw new UnsupportedOperationException(method.getName());
+		});
+	}
+
+	private static DataSource getLockAndCloseFailingDataSource() {
+		PreparedStatement statement = proxy(PreparedStatement.class,
+				(proxy, method, args) -> switch (method.getName()) {
+					case "setString", "close" -> null;
+					case "executeQuery" -> throw new SQLException("secret get-lock failure");
 					default -> throw new UnsupportedOperationException(method.getName());
 				});
 		Connection connection = proxy(Connection.class, (proxy, method, args) -> switch (method.getName()) {
 			case "prepareStatement" -> statement;
-			case "close" -> throw new SQLException("secret close jdbc metadata");
+			case "close" -> throw new SQLException("secret close failure");
 			default -> throw new UnsupportedOperationException(method.getName());
 		});
 		return proxy(DataSource.class, (proxy, method, args) -> {

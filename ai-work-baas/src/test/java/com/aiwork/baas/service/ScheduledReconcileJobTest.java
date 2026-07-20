@@ -36,6 +36,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -81,7 +82,7 @@ class ScheduledReconcileJobTest {
 
         InOrder order = inOrder(physicalPreconditions, projectMapper, reconcileService);
         order.verify(physicalPreconditions).assertSatisfied();
-        order.verify(projectMapper).selectList(any());
+        order.verify(projectMapper, times(2)).selectList(any());
         order.verify(reconcileService).scheduledReconcile(project);
     }
 

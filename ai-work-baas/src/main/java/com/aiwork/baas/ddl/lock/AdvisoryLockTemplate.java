@@ -64,8 +64,8 @@ public class AdvisoryLockTemplate {
             throw exception;
         }
         catch (Exception exception) {
-            close(connection, name);
-            throw new DdlLockInfrastructureException(false);
+            boolean closed = close(connection, name);
+            throw new DdlLockInfrastructureException(!closed);
         }
 
         String originalSqlMode;
@@ -73,9 +73,9 @@ public class AdvisoryLockTemplate {
             originalSqlMode = configureDeterministicSqlMode(connection);
         }
         catch (Exception exception) {
-            release(connection, name);
-            close(connection, name);
-            throw new DdlLockInfrastructureException(false);
+            boolean released = release(connection, name);
+            boolean closed = close(connection, name);
+            throw new DdlLockInfrastructureException(!released && !closed);
         }
 
         T result = null;
@@ -98,10 +98,10 @@ public class AdvisoryLockTemplate {
             callbackError = error;
         }
 
-        boolean modeRestored = restoreSqlMode(connection, originalSqlMode, name);
+        restoreSqlMode(connection, originalSqlMode, name);
         boolean released = release(connection, name);
         boolean closed = close(connection, name);
-        if ((!released || !modeRestored) && !closed) {
+        if (!released && !closed) {
             throw new DdlLockInfrastructureException(true);
         }
         if (callbackError != null) {
@@ -109,6 +109,9 @@ public class AdvisoryLockTemplate {
         }
         if (callbackFailure != null) {
             throw callbackFailure;
+        }
+        if (!closed) {
+            throw new DdlLockInfrastructureException(false);
         }
         return result;
     }

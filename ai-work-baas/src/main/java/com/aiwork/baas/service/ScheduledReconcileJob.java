@@ -49,6 +49,8 @@ public class ScheduledReconcileJob {
 
     private final BaasProjectMapper projectMapper;
 
+    private final BoundedScanCursor<BaasProject> scanCursor = new BoundedScanCursor<>();
+
     @Value("${baas.reconcile.scheduled-enabled:false}")
     private boolean enabled;
 
@@ -63,9 +65,8 @@ public class ScheduledReconcileJob {
     /** 执行一轮定时对账扫描;物理前置条件是任何扫描、锁或副作用前的第一动作。 */
     public void scanOnce() {
         physicalPreconditions.assertSatisfied();
-        List<BaasProject> projects = projectMapper.selectList(Wrappers.<BaasProject>lambdaQuery()
-            .eq(BaasProject::getStatus, ProjectStatus.ACTIVE)
-            .orderByAsc(BaasProject::getId).last("LIMIT 100"));
+        List<BaasProject> projects = scanCursor.nextBatch(this::loadLatestProjects, this::loadCursorProjects,
+                BaasProject::getId);
         for (BaasProject project : projects) {
             try {
                 reconcileService.scheduledReconcile(project);
@@ -75,6 +76,22 @@ public class ScheduledReconcileJob {
                         exception.getClass().getSimpleName());
             }
         }
+    }
+
+    private List<BaasProject> loadLatestProjects(int limit) {
+        return loadProjects(0, limit);
+    }
+
+    private List<BaasProject> loadCursorProjects(long beforeId, int limit) {
+        return loadProjects(beforeId, limit);
+    }
+
+    private List<BaasProject> loadProjects(long beforeId, int limit) {
+        return projectMapper.selectList(Wrappers.<BaasProject>lambdaQuery()
+            .eq(BaasProject::getStatus, ProjectStatus.ACTIVE)
+            .lt(beforeId > 0, BaasProject::getId, beforeId)
+            .orderByDesc(BaasProject::getId)
+            .last("LIMIT " + limit));
     }
 
 }

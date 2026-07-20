@@ -27,7 +27,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
+import java.lang.reflect.Proxy;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -225,10 +229,64 @@ class ProjectDdlLockExecutorTest extends PlanBContainerSupport {
 		assertThat(oldFailure.get()).isInstanceOf(DdlLockBusyException.class);
 	}
 
+	@Test
+	void sqlModeAndCleanupFailureRetainsRedisTokenUntilTtl() {
+		DdlLockManager manager = manager();
+		ProjectDdlLockExecutor executor = new ProjectDdlLockExecutor(manager,
+				new AdvisoryLockTemplate(sqlModeReleaseAndCloseFailingDataSource()), LockAcquisitionObserver.NOOP);
+
+		assertThatThrownBy(() -> executor.execute(307L, (handle, connection) -> null))
+			.isInstanceOf(DdlLockInfrastructureException.class)
+			.satisfies(exception -> assertThat(
+					((DdlLockInfrastructureException) exception).advisoryStateUncertain()).isTrue());
+		assertThat(redisTemplate.opsForValue().get(DdlLockManager.lockKey(307L))).isNotNull();
+		redisTemplate.delete(DdlLockManager.lockKey(307L));
+	}
+
 	private DdlLockManager manager() {
 		DdlLockManager manager = new DdlLockManager(redisTemplate, 60000, 20000);
 		managers.add(manager);
 		return manager;
+	}
+
+	private static javax.sql.DataSource sqlModeReleaseAndCloseFailingDataSource() {
+		ResultSet acquired = proxy(ResultSet.class, (proxy, method, args) -> switch (method.getName()) {
+			case "next" -> true;
+			case "getInt" -> 1;
+			case "wasNull" -> false;
+			case "close" -> null;
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		Connection connection = proxy(Connection.class, (proxy, method, args) -> switch (method.getName()) {
+			case "prepareStatement" -> {
+				String sql = (String) args[0];
+				PreparedStatement statement = proxy(PreparedStatement.class,
+						(statementProxy, statementMethod, statementArgs) -> switch (statementMethod.getName()) {
+							case "setString", "close" -> null;
+							case "executeQuery" -> {
+								if (sql.contains("GET_LOCK")) {
+									yield acquired;
+								}
+								throw new SQLException("secret release failure");
+							}
+							default -> throw new UnsupportedOperationException(statementMethod.getName());
+						});
+				yield statement;
+			}
+			case "createStatement" -> throw new SQLException("secret sql-mode failure");
+			case "close" -> throw new SQLException("secret close failure");
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		return proxy(javax.sql.DataSource.class, (proxy, method, args) -> {
+			if ("getConnection".equals(method.getName())) {
+				return connection;
+			}
+			throw new UnsupportedOperationException(method.getName());
+		});
+	}
+
+	private static <T> T proxy(Class<T> type, java.lang.reflect.InvocationHandler handler) {
+		return type.cast(Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] { type }, handler));
 	}
 
 	private static long queryLockState(String sql, String lockName) {
