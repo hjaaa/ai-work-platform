@@ -70,19 +70,24 @@ public class BaasStudioExceptionHandler {
 
     @ExceptionHandler(DdlExecutionException.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
-    public R<Void> handleDdlExecutionFailure() {
+    public R<Void> handleDdlExecutionFailure(DdlExecutionException exception) {
+        // 异常自身已按 spec §11 脱敏(固定 message + 结构化诊断码,无 cause),可整体落日志
+        log.error("DDL execution failed errorCode={} sqlState={} vendorCode={}", exception.errorCode(),
+                exception.sqlState(), exception.vendorCode(), exception);
         return R.failed("DDL 执行失败");
     }
 
     @ExceptionHandler(OwnerAclClosedException.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
-    public R<Void> handleOwnerAclClosedFailure() {
+    public R<Void> handleOwnerAclClosedFailure(OwnerAclClosedException exception) {
+        log.error("owner column drop failed, ACL closed", exception);
         return R.failed("DDL 执行失败，owner ACL 已安全关闭");
     }
 
     @ExceptionHandler(DdlLockInfrastructureException.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
-    public R<Void> handleDdlLockInfrastructureFailure() {
+    public R<Void> handleDdlLockInfrastructureFailure(DdlLockInfrastructureException exception) {
+        log.error("DDL lock infrastructure unavailable", exception);
         return R.failed("DDL 锁服务暂时不可用");
     }
 

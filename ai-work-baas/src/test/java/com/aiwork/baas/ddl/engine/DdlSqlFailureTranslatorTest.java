@@ -57,7 +57,7 @@ class DdlSqlFailureTranslatorTest {
     void studioHandlerReturnsFixedMessageWithoutUsingExceptionDetails() {
         DdlExecutionException failure = new DdlExecutionException("SECRET_CODE", "HY000", 9999);
 
-        assertThat(new BaasStudioExceptionHandler().handleDdlExecutionFailure().getMsg()).isEqualTo("DDL 执行失败");
+        assertThat(new BaasStudioExceptionHandler().handleDdlExecutionFailure(failure).getMsg()).isEqualTo("DDL 执行失败");
     }
 
 }
