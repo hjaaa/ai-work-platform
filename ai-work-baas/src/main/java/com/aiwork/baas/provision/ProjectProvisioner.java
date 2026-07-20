@@ -141,7 +141,8 @@ public class ProjectProvisioner {
         jdbc.execute(CREATE_SESSIONS_TABLE_SQL.formatted(databaseName));
         jdbc.execute(CREATE_REFRESH_TOKENS_TABLE_SQL.formatted(databaseName));
         SystemTableManifest.MatchResult result = SystemTableManifest.compare(readSystemTables(jdbc, databaseName));
-        if (result == SystemTableManifest.MatchResult.MATCH_LEGACY_PLAN_A) {
+        if (result == SystemTableManifest.MatchResult.MATCH_LEGACY_PLAN_A
+                || result == SystemTableManifest.MatchResult.MATCH_MIXED) {
             upgradeLegacySystemTables(jdbc, databaseName);
             result = SystemTableManifest.compare(readSystemTables(jdbc, databaseName));
         }
@@ -164,16 +165,26 @@ public class ProjectProvisioner {
     }
 
     private void upgradeLegacySystemTables(JdbcOperations jdbc, String databaseName) {
+        Map<String, PhysicalTable> tables = readSystemTables(jdbc, databaseName);
         for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
-            PhysicalTable table = SchemaInspector.readTable(jdbc, databaseName, tableName);
+            PhysicalTable table = tables.get(tableName);
             if (SystemTableManifest.tableMatches(tableName, table, false)) {
                 continue;
+            }
+            if (!SystemTableManifest.tableMatches(tableName, table, true)) {
+                throw new IllegalStateException("system table manifest mismatch: " + tableName);
             }
             Long overflow = jdbc.queryForObject(
                     SystemTableManifest.unsignedBoundsCheckSql(databaseName, tableName), Long.class);
             if (overflow != null && overflow > 0) {
                 throw new IllegalStateException(
                         "unsigned value exceeds signed bigint range, cannot migrate: " + tableName);
+            }
+        }
+        for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
+            PhysicalTable table = tables.get(tableName);
+            if (SystemTableManifest.tableMatches(tableName, table, false)) {
+                continue;
             }
             jdbc.execute(SystemTableManifest.legacyMigrationSql(databaseName, tableName));
         }

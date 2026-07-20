@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -45,6 +45,7 @@ import com.aiwork.baas.entity.enums.TableStatus;
 import com.aiwork.baas.exception.BaasBadRequestException;
 import com.aiwork.baas.exception.DdlConflictException;
 import com.aiwork.baas.exception.TableNotFoundException;
+import com.aiwork.baas.exception.OwnerAclClosedException;
 import com.aiwork.baas.mapper.BaasColumnMapper;
 import com.aiwork.baas.mapper.BaasTableAclMapper;
 import com.aiwork.baas.mapper.BaasTableMapper;
@@ -193,7 +194,17 @@ class AlterTableWork implements DdlWork {
     @Override
     public void validateInLock(DdlWorkContext context) {
         service.requireProjectActiveInLock(project.getId());
-        tableRow = service.findTableRow(project.getId(), tableName);
+        if (context.branch() == OwnershipBranch.NEW_OPERATION) {
+            tableRow = service.findTableRow(project.getId(), tableName);
+        }
+        else {
+            Long immutableTableId = context.existingLog() == null ? null : context.existingLog().getTableId();
+            tableRow = immutableTableId == null ? null : tableMapper.selectById(immutableTableId);
+            if (tableRow != null && (!project.getId().equals(tableRow.getProjectId())
+                    || !tableName.equals(tableRow.getTableName()))) {
+                throw new DdlConflictException("改表重试目标已被替换，拒绝作用于同名新表");
+            }
+        }
         if (tableRow == null) {
             throw new TableNotFoundException();
         }
@@ -378,6 +389,12 @@ class AlterTableWork implements DdlWork {
         if (!ownerColumn.unique() && !ownerColumn.indexed()) {
             throw new BaasBadRequestException("owner 列必须保留单列索引");
         }
+        BaasTableAcl anon = aclMapper.selectOne(Wrappers.<BaasTableAcl>lambdaQuery()
+            .eq(BaasTableAcl::getTableId, tableRow.getId())
+            .eq(BaasTableAcl::getRole, "anon"));
+        if (anon != null && Boolean.TRUE.equals(anon.getCanInsert()) && !ownerColumn.nullable()) {
+            throw new BaasBadRequestException("匿名插入开启时 owner 列必须允许 NULL");
+        }
     }
 
     private String finalOwnerColumn() {
@@ -535,7 +552,9 @@ class AlterTableWork implements DdlWork {
         if (dropsOwnerColumn && sanitizedSql != null) {
             sanitizedSql = OWNER_DROP_INTENT_MARKER + " " + sanitizedSql;
         }
-        service.patchDdlLog(context.logId(), tableRow.getId(), sanitizedSql);
+        if (context.branch() == OwnershipBranch.NEW_OPERATION) {
+            service.patchDdlLog(context.logId(), tableRow.getId(), sanitizedSql);
+        }
     }
 
     private void closeAclForOwnerDrop() {
@@ -549,23 +568,31 @@ class AlterTableWork implements DdlWork {
 
     @Override
     public ObjectNode perform(DdlWorkContext context) {
-        if (!context.stepReached(DdlStep.DDL_APPLIED)) {
-            if (!ddlAlreadyApplied) {
-                ensureStrictMode(context);
-                DdlRenderer.RenderedDdl rendered = DdlRenderer.renderAlterTable(project.getDbName(), tableName,
-                        clauses);
-                context.projectJdbc().execute(rendered.sql());
+        try {
+            if (!context.stepReached(DdlStep.DDL_APPLIED)) {
+                if (!ddlAlreadyApplied) {
+                    ensureStrictMode(context);
+                    DdlRenderer.RenderedDdl rendered = DdlRenderer.renderAlterTable(project.getDbName(), tableName,
+                            clauses);
+                    context.projectJdbc().execute(rendered.sql());
+                    verifyPhysicalTarget(context);
+                }
+                context.advanceToDdlApplied();
+            }
+            else {
                 verifyPhysicalTarget(context);
             }
-            context.advanceToDdlApplied();
+            return context.completeSuccess(() -> {
+                applyMetadata();
+                return buildSnapshot();
+            });
         }
-        else {
-            verifyPhysicalTarget(context);
+        catch (RuntimeException exception) {
+            if (dropsOwnerColumn) {
+                throw new OwnerAclClosedException();
+            }
+            throw exception;
         }
-        return context.completeSuccess(() -> {
-            applyMetadata();
-            return buildSnapshot();
-        });
     }
 
     private void ensureStrictMode(DdlWorkContext context) {

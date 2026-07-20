@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -38,7 +38,8 @@ class DdlLockConfigurationTest {
 	@ParameterizedTest
 	@CsvSource({ "0, 1", "1000, 0", "1000, 1000", "1000, 2000" })
 	void rejectsInvalidTtlAndRenewPeriod(long ttlMillis, long renewPeriodMillis) {
-		assertThatThrownBy(() -> configuration.ddlLockManager(new StringRedisTemplate(), ttlMillis, renewPeriodMillis))
+		assertThatThrownBy(() -> configuration.ddlLockManager(new StringRedisTemplate(), ttlMillis,
+				renewPeriodMillis, 4))
 			.isInstanceOf(IllegalArgumentException.class)
 			.hasMessage("DDL_LOCK_CONFIGURATION_INVALID");
 	}

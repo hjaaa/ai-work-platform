@@ -23,6 +23,8 @@ import com.aiwork.baas.entity.BaasProject;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
@@ -40,7 +42,24 @@ public interface BaasProjectMapper extends BaseMapper<BaasProject> {
      * @param projectId 项目 ID
      * @return 项目行,不存在返回 null
      */
-    @Select("SELECT * FROM baas_project WHERE id = #{projectId} FOR UPDATE")
+    @Select("SELECT id, project_ref, name, db_name, status, provision_step, owner_user_id, allowed_origins, "
+            + "runtime_db_user, runtime_db_password_cipher, ddl_fence_epoch, delete_after, create_time, update_time "
+            + "FROM baas_project WHERE id = #{projectId} FOR UPDATE")
+    @Results(id = "baasProjectResult", value = {
+            @Result(column = "id", property = "id", id = true),
+            @Result(column = "project_ref", property = "projectRef"),
+            @Result(column = "name", property = "name"),
+            @Result(column = "db_name", property = "dbName"),
+            @Result(column = "status", property = "status"),
+            @Result(column = "provision_step", property = "provisionStep"),
+            @Result(column = "owner_user_id", property = "ownerUserId"),
+            @Result(column = "allowed_origins", property = "allowedOrigins"),
+            @Result(column = "runtime_db_user", property = "runtimeDbUser"),
+            @Result(column = "runtime_db_password_cipher", property = "runtimeDbPasswordCipher"),
+            @Result(column = "ddl_fence_epoch", property = "ddlFenceEpoch"),
+            @Result(column = "delete_after", property = "deleteAfter"),
+            @Result(column = "create_time", property = "createTime"),
+            @Result(column = "update_time", property = "updateTime") })
     BaasProject selectByIdForUpdate(@Param("projectId") Long projectId);
 
     /**

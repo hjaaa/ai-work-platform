@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -37,11 +37,12 @@ public class DdlLockConfiguration {
 	@Bean
 	public DdlLockManager ddlLockManager(StringRedisTemplate stringRedisTemplate,
 			@Value("${baas.ddl.lock-ttl-millis:60000}") long ttlMillis,
-			@Value("${baas.ddl.lock-renew-millis:20000}") long renewPeriodMillis) {
+			@Value("${baas.ddl.lock-renew-millis:20000}") long renewPeriodMillis,
+			@Value("${baas.ddl.lock-watchdog-threads:4}") int watchdogThreads) {
 		if (ttlMillis <= 0 || renewPeriodMillis <= 0 || renewPeriodMillis >= ttlMillis) {
 			throw new IllegalArgumentException("DDL_LOCK_CONFIGURATION_INVALID");
 		}
-		return new DdlLockManager(stringRedisTemplate, ttlMillis, renewPeriodMillis);
+		return new DdlLockManager(stringRedisTemplate, ttlMillis, renewPeriodMillis, watchdogThreads);
 	}
 
 	@Bean

@@ -1,3 +1,22 @@
+/*
+ *
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
+ *
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions are met:
+ *
+ * Redistributions of source code must retain the above copyright notice,
+ *  this list of conditions and the following disclaimer.
+ *  Redistributions in binary form must reproduce the above copyright
+ *  notice, this list of conditions and the following disclaimer in the
+ *  documentation and/or other materials provided with the distribution.
+ *  Neither the name of the pig4cloud.com developer nor the names of its
+ *  contributors may be used to endorse or promote products derived from
+ *  this software without specific prior written permission.
+ *  Author: lengleng (wangiegie@gmail.com)
+ *
+ */
+
 package com.aiwork.baas.service;
 
 import com.aiwork.baas.controller.dto.ReconcileTriggerDTO;
@@ -57,6 +76,14 @@ class ReconcileAdmissionMatrixTest extends PlanBProjectIntegrationTestSupport {
                 + "v varchar(200), PRIMARY KEY (id), KEY idx_f ((lower(v))))" + baseline);
         rootJdbc.execute("CREATE TABLE `" + db + "`.`RA_UPPER` (id bigint NOT NULL AUTO_INCREMENT, "
                 + "PRIMARY KEY (id))" + baseline);
+        rootJdbc.execute("CREATE TABLE `" + db + "`.ra_trigger (id bigint NOT NULL AUTO_INCREMENT, "
+                + "v int, PRIMARY KEY (id))" + baseline);
+        rootJdbc.execute("CREATE TRIGGER `" + db + "`.tr_ra_trigger BEFORE INSERT ON `" + db
+                + "`.ra_trigger FOR EACH ROW SET NEW.v = COALESCE(NEW.v, 0)");
+        rootJdbc.execute("CREATE TABLE `" + db + "`.ra_check (id bigint NOT NULL AUTO_INCREMENT, "
+                + "v int, PRIMARY KEY (id), CONSTRAINT ck_ra CHECK (v >= 0))" + baseline);
+        rootJdbc.execute("CREATE TABLE `" + db + "`.ra_bad_col (id bigint NOT NULL AUTO_INCREMENT, "
+                + "`BadColumn` int, PRIMARY KEY (id))" + baseline);
 
         ObjectNode report = reconcileService.manualReconcile(project,
                 new ReconcileTriggerDTO(UUID.randomUUID().toString()));
@@ -75,6 +102,9 @@ class ReconcileAdmissionMatrixTest extends PlanBProjectIntegrationTestSupport {
                 Map.entry("ra_desc", "索引不可映射为单列布尔模型: idx_n"),
                 Map.entry("ra_ft", "索引不可映射为单列布尔模型: ft_v"),
                 Map.entry("ra_func", "索引不可映射为单列布尔模型: idx_f"),
+                Map.entry("ra_trigger", "存在表级触发器"),
+                Map.entry("ra_check", "存在 CHECK 约束(含 NOT ENFORCED)"),
+                Map.entry("ra_bad_col", "列标识符非法: BadColumn"),
                 Map.entry("RA_UPPER", "表标识符非法: RA_UPPER"));
         assertThat(rejected).isEqualTo(expected);
         for (String name : expected.keySet()) {

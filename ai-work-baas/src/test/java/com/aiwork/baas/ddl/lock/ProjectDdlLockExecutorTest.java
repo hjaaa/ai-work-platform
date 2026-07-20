@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -182,6 +182,47 @@ class ProjectDdlLockExecutorTest extends PlanBContainerSupport {
 			.hasMessage("observer failed");
 		assertThat(redisTemplate.opsForValue().get(DdlLockManager.lockKey(305L))).isNull();
 		assertThat(queryLockState("SELECT IS_FREE_LOCK(?)", AdvisoryLockTemplate.lockName(305L))).isEqualTo(1L);
+	}
+
+	@Test
+	void expiredRedisLeaseCannotBypassOldExecutorsAdvisoryLock() throws Exception {
+		CountDownLatch oldInside = new CountDownLatch(1);
+		CountDownLatch releaseOld = new CountDownLatch(1);
+		AtomicReference<Throwable> oldFailure = new AtomicReference<>();
+		DdlLockManager oldManager = new DdlLockManager(redisTemplate, 300, 100);
+		DdlLockManager successorManager = manager();
+		managers.add(oldManager);
+		ProjectDdlLockExecutor oldExecutor = new ProjectDdlLockExecutor(oldManager, advisoryLockTemplate,
+				LockAcquisitionObserver.NOOP);
+		ProjectDdlLockExecutor successor = new ProjectDdlLockExecutor(successorManager, advisoryLockTemplate,
+				LockAcquisitionObserver.NOOP);
+		Thread oldThread = new Thread(() -> {
+			try {
+				oldExecutor.execute(306L, (handle, connection) -> {
+					handle.renewTask.cancel(false);
+					oldInside.countDown();
+					releaseOld.await(10, TimeUnit.SECONDS);
+					return null;
+				});
+			}
+			catch (Throwable throwable) {
+				oldFailure.set(throwable);
+			}
+		});
+		try {
+			oldThread.start();
+			assertThat(oldInside.await(10, TimeUnit.SECONDS)).isTrue();
+			Thread.sleep(600);
+
+			assertThatThrownBy(() -> successor.execute(306L, (handle, connection) -> "must-not-run"))
+				.isInstanceOf(DdlLockBusyException.class);
+			assertThat(redisTemplate.opsForValue().get(DdlLockManager.lockKey(306L))).isNull();
+		}
+		finally {
+			releaseOld.countDown();
+			oldThread.join(10000);
+		}
+		assertThat(oldFailure.get()).isInstanceOf(DdlLockBusyException.class);
 	}
 
 	private DdlLockManager manager() {

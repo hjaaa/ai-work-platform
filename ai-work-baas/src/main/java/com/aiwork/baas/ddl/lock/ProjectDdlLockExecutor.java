@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -46,6 +46,7 @@ public class ProjectDdlLockExecutor {
 		if (handle == null) {
 			throw new DdlLockBusyException("该项目有 DDL 操作进行中(Redis lock busy)");
 		}
+		boolean releaseRedis = true;
 		try {
 			observer.afterRedisBeforeAdvisory(handle);
 			return advisoryLockTemplate.executeWithLock(projectId, connection -> {
@@ -55,8 +56,14 @@ public class ProjectDdlLockExecutor {
 				return result;
 			});
 		}
+		catch (DdlLockInfrastructureException exception) {
+			releaseRedis = !exception.advisoryStateUncertain();
+			throw exception;
+		}
 		finally {
-			lockManager.release(handle);
+			if (releaseRedis) {
+				lockManager.release(handle);
+			}
 		}
 	}
 

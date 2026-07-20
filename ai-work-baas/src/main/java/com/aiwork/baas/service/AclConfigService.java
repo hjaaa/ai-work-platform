@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -59,6 +59,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -93,6 +94,7 @@ public class AclConfigService {
 
     private final ObjectMapper objectMapper;
 
+    @Transactional(readOnly = true)
     public ObjectNode getAcl(BaasProject project, String tableName) {
         requireIdentifier(tableName, "表名不合法");
         BaasTable table = tableService.findTableRow(project.getId(), tableName);
@@ -170,6 +172,8 @@ public class AclConfigService {
 
         private boolean cancelOwner;
 
+        private boolean conflictCancel;
+
         private boolean ownerUnique;
 
         private boolean ownerIndexed;
@@ -200,15 +204,16 @@ public class AclConfigService {
             persistedDdlIntent = context.branch() != OwnershipBranch.NEW_OPERATION
                     && context.existingLog() != null && context.existingLog().getDdlText() != null
                     && !context.existingLog().getDdlText().isBlank();
+            cancelOwner = dto.ownerColumn() == null && tableRow.getOwnerColumn() != null;
             String status = tableRow.getStatus();
             boolean active = TableStatus.ACTIVE.name().equals(status);
             boolean retryableDdlState = persistedDdlIntent
                     && (TableStatus.ALTERING.name().equals(status) || TableStatus.CONFLICT.name().equals(status));
-            if (!active && !retryableDdlState) {
+            conflictCancel = TableStatus.CONFLICT.name().equals(status) && cancelOwner;
+            if (!active && !retryableDdlState && !conflictCancel) {
                 throw new DdlConflictException("表当前状态不允许 ACL 配置: " + status);
             }
 
-            cancelOwner = dto.ownerColumn() == null && tableRow.getOwnerColumn() != null;
             if (dto.ownerColumn() == null) {
                 return;
             }
@@ -419,6 +424,9 @@ public class AclConfigService {
             if (index == null || flagsMatch) {
                 return;
             }
+            if (!Boolean.TRUE.equals(metadata.getUnique()) && !Boolean.TRUE.equals(metadata.getIndexed())) {
+                return;
+            }
             if (allowPendingOwnerIndex && !index.unique()) {
                 return;
             }
@@ -444,12 +452,13 @@ public class AclConfigService {
             writeAcl("anon", closeAll ? ALL_OFF : dto.acl().anon());
             writeAcl("authenticated", closeAll ? ALL_OFF : dto.acl().authenticated());
             updateOwnerColumnMetadata();
+            String expectedStatus = conflictCancel ? TableStatus.CONFLICT.name()
+                    : restoreActive ? TableStatus.ALTERING.name() : TableStatus.ACTIVE.name();
             var update = Wrappers.<BaasTable>lambdaUpdate()
                 .eq(BaasTable::getId, tableRow.getId())
-                .eq(BaasTable::getStatus,
-                        restoreActive ? TableStatus.ALTERING.name() : TableStatus.ACTIVE.name())
+                .eq(BaasTable::getStatus, expectedStatus)
                 .set(BaasTable::getOwnerColumn, dto.ownerColumn());
-            if (restoreActive) {
+            if (restoreActive && !conflictCancel) {
                 update.set(BaasTable::getStatus, TableStatus.ACTIVE.name());
             }
             if (tableMapper.update(null, update) != 1) {

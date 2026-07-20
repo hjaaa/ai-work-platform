@@ -1,3 +1,22 @@
+/*
+ *
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
+ *
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions are met:
+ *
+ * Redistributions of source code must retain the above copyright notice,
+ *  this list of conditions and the following disclaimer.
+ *  Redistributions in binary form must reproduce the above copyright
+ *  notice, this list of conditions and the following disclaimer in the
+ *  documentation and/or other materials provided with the distribution.
+ *  Neither the name of the pig4cloud.com developer nor the names of its
+ *  contributors may be used to endorse or promote products derived from
+ *  this software without specific prior written permission.
+ *  Author: lengleng (wangiegie@gmail.com)
+ *
+ */
+
 package com.aiwork.baas.ddl.inspect;
 
 import com.aiwork.baas.ddl.type.ColumnType;
@@ -64,6 +83,19 @@ class DdlTargetMatcherTest {
                         new PhysicalIndex("foreign_name", true,
                                 List.of(new PhysicalIndex.Part("email", null, null, "BTREE", "YES", "A")))));
         assertThat(DdlTargetMatcher.matches(actual, "demo", "", List.of(ID, normalized))).isTrue();
+    }
+
+    @Test
+    void descendingPrimaryKeyDoesNotMatchManagedTarget() {
+        PhysicalTable actual = table("demo", "表注释", true, true);
+        PhysicalIndex descending = new PhysicalIndex("PRIMARY", true,
+                List.of(new PhysicalIndex.Part("id", null, null, "BTREE", "YES", "D")));
+        PhysicalTable drifted = new PhysicalTable(actual.tableName(), actual.tableType(), actual.engine(),
+                actual.rowFormat(), actual.collation(), actual.tableComment(), actual.hasTriggers(),
+                actual.hasForeignKeys(), actual.hasCheckConstraints(), actual.columns(),
+                List.of(descending, actual.secondaryIndexes().get(0)));
+
+        assertThat(DdlTargetMatcher.matches(drifted, "demo", "表注释", List.of(ID, EMAIL))).isFalse();
     }
 
     private PhysicalTable table(String name, String comment, boolean nullable, boolean canonicalIndexName) {

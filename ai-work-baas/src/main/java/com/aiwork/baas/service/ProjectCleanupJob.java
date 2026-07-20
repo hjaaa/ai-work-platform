@@ -50,7 +50,8 @@ public class ProjectCleanupJob {
     public void cleanup() {
         List<BaasProject> expiredProjects = projectMapper.selectList(Wrappers.<BaasProject>lambdaQuery()
             .eq(BaasProject::getStatus, ProjectStatus.DELETING)
-            .lt(BaasProject::getDeleteAfter, LocalDateTime.now()));
+            .lt(BaasProject::getDeleteAfter, LocalDateTime.now())
+            .orderByAsc(BaasProject::getId).last("LIMIT 100"));
         for (BaasProject project : expiredProjects) {
             try {
                 ProjectCleanupResult result = lifecycleService.physicallyCleanup(project);

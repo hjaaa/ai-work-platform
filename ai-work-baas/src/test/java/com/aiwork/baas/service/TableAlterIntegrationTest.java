@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -33,6 +33,7 @@ import com.aiwork.baas.entity.enums.DdlStep;
 import com.aiwork.baas.entity.enums.TableStatus;
 import com.aiwork.baas.exception.BaasBadRequestException;
 import com.aiwork.baas.exception.DdlConflictException;
+import com.aiwork.baas.exception.OwnerAclClosedException;
 import com.aiwork.baas.mapper.BaasDdlLogMapper;
 import com.aiwork.baas.mapper.BaasTableAclMapper;
 import com.aiwork.baas.mapper.BaasTableMapper;
@@ -381,7 +382,8 @@ class TableAlterIntegrationTest extends PlanBProjectIntegrationTestSupport {
                 List.of(new ColumnDefinitionDTO("name", "varchar", 8, null, true, null, false, false, null)), null);
 
         assertThatThrownBy(() -> tableService.alterTable(project, table, dto))
-            .isInstanceOf(DdlConflictException.class);
+            .isInstanceOf(OwnerAclClosedException.class)
+            .hasMessage("OWNER_DROP_FAILED_ACL_CLOSED");
 
         BaasTable row = tableRow(table);
         assertThat(row.getOwnerColumn()).isNull();

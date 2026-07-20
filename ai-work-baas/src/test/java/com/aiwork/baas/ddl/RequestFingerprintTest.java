@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * 操作指纹测试。
@@ -68,6 +69,17 @@ class RequestFingerprintTest {
         second.put("c", null);
         assertThat(RequestFingerprint.canonicalBody(first)).isEqualTo(RequestFingerprint.canonicalBody(second));
         assertThat(RequestFingerprint.canonicalBody(null)).isEmpty();
+    }
+
+    @Test
+    void canonicalBodyDropsExplicitJsonNullRecursivelyButPreservesFalsyValues() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        var explicit = mapper.readTree("{\"nested\":{\"ignored\":null,\"zero\":0},\"flag\":false,\"text\":\"\"}");
+        var omitted = mapper.readTree("{\"nested\":{\"zero\":0},\"flag\":false,\"text\":\"\"}");
+
+        assertThat(RequestFingerprint.canonicalBody(explicit))
+            .isEqualTo(RequestFingerprint.canonicalBody(omitted))
+            .contains("\"flag\":false", "\"zero\":0", "\"text\":\"\"");
     }
 
     @Test

@@ -20,6 +20,7 @@
 package com.aiwork.baas.exception;
 
 import com.aiwork.common.core.util.R;
+import com.aiwork.baas.ddl.lock.DdlLockInfrastructureException;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -73,6 +74,18 @@ public class BaasStudioExceptionHandler {
         return R.failed("DDL 执行失败");
     }
 
+    @ExceptionHandler(OwnerAclClosedException.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public R<Void> handleOwnerAclClosedFailure() {
+        return R.failed("DDL 执行失败，owner ACL 已安全关闭");
+    }
+
+    @ExceptionHandler(DdlLockInfrastructureException.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public R<Void> handleDdlLockInfrastructureFailure() {
+        return R.failed("DDL 锁服务暂时不可用");
+    }
+
     @ExceptionHandler({ BindException.class, MethodArgumentNotValidException.class,
             HandlerMethodValidationException.class, ConstraintViolationException.class,
             MissingServletRequestParameterException.class })
@@ -110,14 +123,14 @@ public class BaasStudioExceptionHandler {
     @ExceptionHandler(ProjectProvisionException.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public R<Void> handleProvisionFailure(ProjectProvisionException exception) {
-        log.error("project provisioning failed", exception);
+        log.error("project provisioning failed errorType={}", exception.getClass().getSimpleName());
         return R.failed("项目开通失败，请稍后重试");
     }
 
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public R<Void> handleUnexpected(Exception exception) {
-        log.error("unexpected Studio exception", exception);
+        log.error("unexpected Studio exception errorType={}", exception.getClass().getSimpleName());
         return R.failed("服务暂时不可用，请稍后重试");
     }
 

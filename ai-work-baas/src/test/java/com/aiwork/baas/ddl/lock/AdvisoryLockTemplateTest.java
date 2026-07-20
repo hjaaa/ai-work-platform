@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -111,15 +111,27 @@ class AdvisoryLockTemplateTest extends PlanBContainerSupport {
 	}
 
 	@Test
+	void callbackErrorStillRestoresSessionAndReleasesLock() {
+		assertThatThrownBy(() -> template.executeWithLock(2041L, connection -> {
+			throw new AssertionError("simulated process failure");
+		})).isInstanceOf(AssertionError.class).hasMessage("simulated process failure");
+
+		assertThat(template.<String>executeWithLock(2041L, connection -> "ok")).isEqualTo("ok");
+	}
+
+	@Test
 	void callbackAndConnectionCloseFailuresDoNotExposeCauseOrSuppressedExceptions() throws Exception {
 		AdvisoryLockTemplate closeFailingTemplate = new AdvisoryLockTemplate(closeFailingDataSource());
 
 		assertThatThrownBy(() -> closeFailingTemplate.executeWithLock(205L, connection -> {
 			throw new Exception("secret callback metadata");
-		})).isInstanceOf(IllegalStateException.class)
-			.hasMessage("DDL_LOCK_CALLBACK_FAILED")
+		})).isInstanceOf(DdlLockInfrastructureException.class)
+			.hasMessage("DDL_LOCK_INFRASTRUCTURE_FAILED")
 			.hasNoCause()
-			.satisfies(exception -> assertThat(exception.getSuppressed()).isEmpty());
+			.satisfies(exception -> {
+				assertThat(exception.getSuppressed()).isEmpty();
+				assertThat(((DdlLockInfrastructureException) exception).advisoryStateUncertain()).isFalse();
+			});
 	}
 
 	@Test

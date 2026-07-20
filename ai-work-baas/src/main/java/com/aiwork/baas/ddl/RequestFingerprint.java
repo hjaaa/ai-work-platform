@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -24,6 +24,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 
 import java.nio.charset.StandardCharsets;
@@ -57,10 +60,32 @@ public final class RequestFingerprint {
             return "";
         }
         try {
-            return CANONICAL_MAPPER.writeValueAsString(body);
+            JsonNode tree = CANONICAL_MAPPER.valueToTree(body);
+            pruneNullObjectFields(tree);
+            return CANONICAL_MAPPER.writeValueAsString(tree);
         }
         catch (JsonProcessingException exception) {
             throw new IllegalStateException("canonical body serialization failed", exception);
+        }
+    }
+
+    private static void pruneNullObjectFields(JsonNode node) {
+        if (node instanceof ObjectNode object) {
+            object.properties().forEach(entry -> {
+                JsonNode child = entry.getValue();
+                if (!child.isNull()) {
+                    pruneNullObjectFields(child);
+                }
+            });
+            var fields = object.properties().iterator();
+            while (fields.hasNext()) {
+                if (fields.next().getValue().isNull()) {
+                    fields.remove();
+                }
+            }
+        }
+        else if (node instanceof ArrayNode array) {
+            array.forEach(RequestFingerprint::pruneNullObjectFields);
         }
     }
 

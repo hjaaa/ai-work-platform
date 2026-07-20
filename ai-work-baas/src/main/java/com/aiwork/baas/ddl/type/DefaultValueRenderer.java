@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -191,7 +191,7 @@ public final class DefaultValueRenderer {
         if ("CURRENT_TIMESTAMP()".equalsIgnoreCase(text)) {
             throw new BaasBadRequestException("varchar 列默认值不支持函数表达式");
         }
-        if (length != null && text.length() > length) {
+        if (length != null && text.codePointCount(0, text.length()) > length) {
             throw new BaasBadRequestException("varchar 默认值长度超出列定义");
         }
         return new Rendered("'" + escapeStringLiteral(text) + "'", text);

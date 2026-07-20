@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -276,7 +276,9 @@ public class TableManagementService {
         @Override
         public void validateInLock(DdlWorkContext context) {
             requireProjectActiveInLock(project.getId());
-            BaasTable existing = findTableRow(project.getId(), dto.tableName());
+            BaasTable existing = context.branch() == OwnershipBranch.NEW_OPERATION
+                    ? findTableRow(project.getId(), dto.tableName())
+                    : tableByImmutableLogTarget(context, dto.tableName());
             PhysicalTable physical = SchemaInspector.readTable(context.projectJdbc(), project.getDbName(),
                     dto.tableName());
             if (context.branch() == OwnershipBranch.NEW_OPERATION) {
@@ -302,6 +304,16 @@ public class TableManagementService {
                 }
                 ddlAlreadyApplied = true;
             }
+        }
+
+        private BaasTable tableByImmutableLogTarget(DdlWorkContext context, String expectedName) {
+            Long immutableTableId = context.existingLog() == null ? null : context.existingLog().getTableId();
+            BaasTable existing = immutableTableId == null ? null : tableMapper.selectById(immutableTableId);
+            if (existing == null || !project.getId().equals(existing.getProjectId())
+                    || !expectedName.equals(existing.getTableName())) {
+                throw new DdlConflictException("建表重试目标已被替换，拒绝作用于同名新表");
+            }
+            return existing;
         }
 
         @Override
@@ -440,7 +452,7 @@ public class TableManagementService {
                 if (TableStatus.DELETED.name().equals(current.getStatus())) {
                     deleteAfter = current.getDeleteAfter();
                 } else {
-                    deleteAfter = LocalDateTime.now().plusDays(tombstoneDays);
+                    deleteAfter = LocalDateTime.now().plusDays(tombstoneDays).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
                     int updated = tableMapper.update(null, Wrappers.<BaasTable>lambdaUpdate()
                         .eq(BaasTable::getId, tableRow.getId())
                         .in(BaasTable::getStatus, TableStatus.ACTIVE.name(), TableStatus.FAILED.name(),

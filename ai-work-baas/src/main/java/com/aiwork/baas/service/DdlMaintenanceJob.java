@@ -1,6 +1,19 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
+ *
+ *  Redistribution and use in source and binary forms, with or without
+ *  modification, are permitted provided that the following conditions are met:
+ *
+ * Redistributions of source code must retain the above copyright notice,
+ *  this list of conditions and the following disclaimer.
+ *  Redistributions in binary form must reproduce the above copyright
+ *  notice, this list of conditions and the following disclaimer in the
+ *  documentation and/or other materials provided with the distribution.
+ *  Neither the name of the pig4cloud.com developer nor the names of its
+ *  contributors may be used to endorse or promote products derived from
+ *  this software without specific prior written permission.
+ *  Author: lengleng (wangiegie@gmail.com)
  *
  */
 
@@ -84,10 +97,22 @@ public class DdlMaintenanceJob {
     @Value("${baas.ddl.stale-running-minutes:10}")
     private int staleRunningMinutes;
 
-    @Scheduled(initialDelayString = "${baas.ddl.maintenance-interval-millis:300000}",
-            fixedDelayString = "${baas.ddl.maintenance-interval-millis:300000}")
     public void scheduledScan() {
         scanOnce();
+    }
+
+    @Scheduled(initialDelayString = "${baas.ddl.maintenance-interval-millis:300000}",
+            fixedDelayString = "${baas.ddl.maintenance-interval-millis:300000}")
+    public void scheduledCleanupScan() {
+        physicalPreconditions.assertSatisfied();
+        processCleanupRecords();
+    }
+
+    @Scheduled(initialDelayString = "${baas.ddl.maintenance-interval-millis:300000}",
+            fixedDelayString = "${baas.ddl.maintenance-interval-millis:300000}")
+    public void scheduledStaleScan() {
+        physicalPreconditions.assertSatisfied();
+        processStaleHttpRunning();
     }
 
     /** 执行一轮维护；物理前置条件是任何扫描、锁或元数据副作用前的第一动作。 */
@@ -101,7 +126,7 @@ public class DdlMaintenanceJob {
         List<BaasDdlLog> candidates = ddlLogMapper.selectList(Wrappers.<BaasDdlLog>lambdaQuery()
             .eq(BaasDdlLog::getOperationType, DdlOperationType.CLEANUP_DROP.code())
             .in(BaasDdlLog::getStatus, DdlLogStatus.PENDING.name(), DdlLogStatus.FAILED.name(),
-                    DdlLogStatus.RUNNING.name()));
+                    DdlLogStatus.RUNNING.name()).orderByAsc(BaasDdlLog::getId).last("LIMIT 100"));
         for (BaasDdlLog record : candidates) {
             try {
                 if (shouldSkipCleanup(record)) {
@@ -147,7 +172,7 @@ public class DdlMaintenanceJob {
         List<BaasDdlLog> candidates = ddlLogMapper.selectList(Wrappers.<BaasDdlLog>lambdaQuery()
             .eq(BaasDdlLog::getStatus, DdlLogStatus.RUNNING.name())
             .in(BaasDdlLog::getOperationType, HTTP_OPERATION_TYPES.stream().map(DdlOperationType::code).toList())
-            .lt(BaasDdlLog::getUpdateTime, threshold));
+            .lt(BaasDdlLog::getUpdateTime, threshold).orderByAsc(BaasDdlLog::getId).last("LIMIT 100"));
         for (BaasDdlLog record : candidates) {
             try {
                 if (lockManager.isHeldBy(record.getProjectId(), record.getOwnerToken())) {

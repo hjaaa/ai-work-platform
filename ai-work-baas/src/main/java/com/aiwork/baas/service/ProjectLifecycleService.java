@@ -38,6 +38,7 @@ import com.aiwork.baas.mapper.BaasApiKeyMapper;
 import com.aiwork.baas.mapper.BaasAuditLogMapper;
 import com.aiwork.baas.mapper.BaasJwtKeyMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
+import com.aiwork.baas.mapper.BaasDdlLogMapper;
 import com.aiwork.baas.provision.PhysicalPreconditions;
 import com.aiwork.baas.provision.ProjectProvisioner;
 import com.aiwork.baas.security.crypto.BaasCryptoService;
@@ -48,6 +49,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.security.SecureRandom;
@@ -69,6 +71,9 @@ import java.util.concurrent.atomic.AtomicReference;
 @RequiredArgsConstructor
 public class ProjectLifecycleService {
 
+    @Value("${baas.ddl.execute-timeout-seconds:300}")
+    private int ddlTimeoutSeconds;
+
     private final BaasProjectMapper projectMapper;
 
     private final BaasJwtKeyMapper jwtKeyMapper;
@@ -76,6 +81,8 @@ public class ProjectLifecycleService {
     private final BaasApiKeyMapper apiKeyMapper;
 
     private final BaasAuditLogMapper auditLogMapper;
+
+    private final BaasDdlLogMapper ddlLogMapper;
 
     private final ProjectProvisioner provisioner;
 
@@ -206,6 +213,7 @@ public class ProjectLifecycleService {
                 long epoch = transactionTemplate.execute(
                         status -> fencingGuard.incrementEpochInTx(current.getId()));
                 try (var statement = connection.createStatement()) {
+                    statement.setQueryTimeout(ddlTimeoutSeconds);
                     statement.execute(DdlRenderer.renderDropDatabase(current.getDbName()).sql());
                     statement.execute(DdlRenderer.renderDropUser(current.getRuntimeDbUser()).sql());
                 }
@@ -216,6 +224,8 @@ public class ProjectLifecycleService {
                     if (!casStatus(current.getId(), ProjectStatus.DELETING, ProjectStatus.DELETED)) {
                         throw new IllegalStateException("project physical cleanup status race");
                     }
+                    ddlLogMapper.finishCleanupForDeletedProject(current.getId(),
+                            "{\"noop\":true,\"reason\":\"PROJECT_DELETED\"}");
                 });
                 completedCleanup.set(ProjectCleanupResult.CLEANED);
                 return ProjectCleanupResult.CLEANED;
@@ -280,8 +290,9 @@ public class ProjectLifecycleService {
             String passwordAad = aad(project.getId(), "db_password", String.valueOf(project.getId()));
             String runtimePassword = cryptoService.decrypt(project.getRuntimeDbPasswordCipher(), passwordAad);
 
+            // 历史 provision_step 不是当前物理准入证明；每次 ACTIVE 前都重验库基线与 manifest。
+            provisioner.createDatabase(connection, project.getDbName());
             if (completedStep.ordinal() < ProvisionStep.DB_CREATED.ordinal()) {
-                provisioner.createDatabase(connection, project.getDbName());
                 advance(project, ProvisionStep.DB_CREATED);
             }
             if (completedStep.ordinal() < ProvisionStep.USER_CREATED.ordinal()) {
@@ -289,8 +300,8 @@ public class ProjectLifecycleService {
                         project.getDbName());
                 advance(project, ProvisionStep.USER_CREATED);
             }
+            provisioner.initSystemTables(connection, project.getDbName());
             if (completedStep.ordinal() < ProvisionStep.SYSTEM_TABLES.ordinal()) {
-                provisioner.initSystemTables(connection, project.getDbName());
                 advance(project, ProvisionStep.SYSTEM_TABLES);
             }
 

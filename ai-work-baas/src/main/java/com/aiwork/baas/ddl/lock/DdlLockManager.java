@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -59,12 +59,18 @@ public class DdlLockManager {
 
 	private final DefaultRedisScript<Long> releaseScript = new DefaultRedisScript<>(RELEASE_LUA, Long.class);
 
-	private final ScheduledThreadPoolExecutor watchdog = createWatchdog();
+	private final ScheduledThreadPoolExecutor watchdog;
 
 	public DdlLockManager(StringRedisTemplate redisTemplate, long ttlMillis, long renewPeriodMillis) {
+		this(redisTemplate, ttlMillis, renewPeriodMillis, 4);
+	}
+
+	public DdlLockManager(StringRedisTemplate redisTemplate, long ttlMillis, long renewPeriodMillis,
+			int watchdogThreads) {
 		this.redisTemplate = redisTemplate;
 		this.ttlMillis = ttlMillis;
 		this.renewPeriodMillis = renewPeriodMillis;
+		this.watchdog = createWatchdog(watchdogThreads);
 	}
 
 	public static String lockKey(Long projectId) {
@@ -156,8 +162,8 @@ public class DdlLockManager {
 		}
 	}
 
-	private static ScheduledThreadPoolExecutor createWatchdog() {
-		ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1, runnable -> {
+	private static ScheduledThreadPoolExecutor createWatchdog(int threads) {
+		ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(Math.max(2, threads), runnable -> {
 			Thread thread = new Thread(runnable, "baas-ddl-lock-watchdog");
 			thread.setDaemon(true);
 			return thread;

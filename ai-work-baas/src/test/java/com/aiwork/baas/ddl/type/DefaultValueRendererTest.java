@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -159,6 +159,15 @@ class DefaultValueRendererTest {
     void varcharDefaultLongerThanColumnRejected() {
         assertThatThrownBy(() -> DefaultValueRenderer.render(ColumnType.VARCHAR, 3, null,
                 MAPPER.getNodeFactory().textNode("abcd")))
+            .isInstanceOf(BaasBadRequestException.class);
+    }
+
+    @Test
+    void varcharLengthUsesUnicodeCodePoints() {
+        assertThat(DefaultValueRenderer.render(ColumnType.VARCHAR, 1, null,
+                MAPPER.getNodeFactory().textNode("😀")).canonical()).isEqualTo("😀");
+        assertThatThrownBy(() -> DefaultValueRenderer.render(ColumnType.VARCHAR, 1, null,
+                MAPPER.getNodeFactory().textNode("😀😀")))
             .isInstanceOf(BaasBadRequestException.class);
     }
 

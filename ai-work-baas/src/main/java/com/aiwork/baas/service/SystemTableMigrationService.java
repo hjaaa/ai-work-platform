@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -42,10 +42,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.sql.Connection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -64,6 +68,10 @@ public class SystemTableMigrationService {
     private static final String AUDIT_SUCCESS = "SYSTEM_TABLE_MIGRATION_SUCCESS";
 
     private static final String AUDIT_FAILED = "SYSTEM_TABLE_MIGRATION_FAILED";
+
+    private static final int SCAN_LATEST_LIMIT = 50;
+
+    private static final int SCAN_CURSOR_LIMIT = 50;
 
     private enum MigrationSource {
 
@@ -92,6 +100,8 @@ public class SystemTableMigrationService {
     private final JdbcTemplate provisionerJdbc;
 
     private final boolean startupScanEnabled;
+
+    private final AtomicLong scanCursor = new AtomicLong();
 
     public SystemTableMigrationService(BaasProjectMapper projectMapper, BaasApiKeyMapper apiKeyMapper,
             BaasJwtKeyMapper jwtKeyMapper, BaasAuditLogMapper auditLogMapper,
@@ -131,8 +141,22 @@ public class SystemTableMigrationService {
      */
     public void scanOnce() {
         physicalPreconditions.assertSatisfied();
-        for (BaasProject project : projectMapper.selectList(Wrappers.<BaasProject>lambdaQuery()
-            .in(BaasProject::getStatus, ProjectStatus.ACTIVE, ProjectStatus.MIGRATING))) {
+        List<BaasProject> cursorBatch = loadCursorBatch(scanCursor.get());
+        if (cursorBatch.isEmpty() && scanCursor.get() > 0) {
+            scanCursor.set(0);
+            cursorBatch = loadCursorBatch(0);
+        }
+        if (!cursorBatch.isEmpty()) {
+            scanCursor.set(cursorBatch.get(cursorBatch.size() - 1).getId());
+        }
+        Map<Long, BaasProject> batchById = new LinkedHashMap<>();
+        for (BaasProject project : loadLatestBatch()) {
+            batchById.put(project.getId(), project);
+        }
+        for (BaasProject project : cursorBatch) {
+            batchById.putIfAbsent(project.getId(), project);
+        }
+        for (BaasProject project : batchById.values()) {
             try {
                 if (project.getStatus() == ProjectStatus.MIGRATING) {
                     executeMigration(project, MigrationSource.BACKGROUND_RESUME, SYSTEM_OPERATOR_USER_ID);
@@ -149,6 +173,21 @@ public class SystemTableMigrationService {
         }
     }
 
+    private List<BaasProject> loadLatestBatch() {
+        return projectMapper.selectList(Wrappers.<BaasProject>lambdaQuery()
+            .in(BaasProject::getStatus, ProjectStatus.ACTIVE, ProjectStatus.MIGRATING)
+            .orderByDesc(BaasProject::getId)
+            .last("LIMIT " + SCAN_LATEST_LIMIT));
+    }
+
+    private List<BaasProject> loadCursorBatch(long beforeId) {
+        return projectMapper.selectList(Wrappers.<BaasProject>lambdaQuery()
+            .in(BaasProject::getStatus, ProjectStatus.ACTIVE, ProjectStatus.MIGRATING)
+            .lt(beforeId > 0, BaasProject::getId, beforeId)
+            .orderByDesc(BaasProject::getId)
+            .last("LIMIT " + SCAN_CURSOR_LIMIT));
+    }
+
     /**
      * 管理员手动迁移入口，仅接受 ACTIVE/FAILED；状态在双层锁内重新确认。
      * @param project 目标项目
@@ -163,6 +202,9 @@ public class SystemTableMigrationService {
 
     private SystemTableMigrationResult executeMigration(BaasProject project, MigrationSource source,
             Long operatorUserId) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("system table migration cannot run within an active transaction");
+        }
         AtomicReference<SystemTableMigrationResult> committedResult = new AtomicReference<>();
         try {
             physicalPreconditions.assertSatisfied();

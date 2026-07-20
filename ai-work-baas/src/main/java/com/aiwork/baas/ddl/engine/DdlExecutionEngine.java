@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -39,6 +39,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.sql.Connection;
 import java.util.Objects;
@@ -82,6 +83,7 @@ public class DdlExecutionEngine {
     }
 
     public ObjectNode execute(DdlOperationSpec spec, DdlWork work) {
+        rejectAmbientTransaction();
         // Task 4 cross-check / spec §9.1:任何日志、锁、元数据或项目库副作用前先 fail-closed。
         physicalPreconditions.assertSatisfied();
 
@@ -103,6 +105,11 @@ public class DdlExecutionEngine {
                     (handle, connection) -> runInLock(spec, work, handle, connection));
         }
         catch (DdlLockBusyException busy) {
+            BaasDdlLog completed = ddlLogMapper.selectByProjectAndOperation(spec.projectId(), spec.operationId());
+            if (completed != null && isStatus(completed, DdlLogStatus.SUCCESS)
+                    && Objects.equals(completed.getRequestHash(), spec.requestHash())) {
+                return readSnapshot(completed);
+            }
             throw new DdlConflictException("该项目有 DDL 操作进行中");
         }
     }
@@ -116,10 +123,13 @@ public class DdlExecutionEngine {
      */
     public ObjectNode executeResolved(Long projectId, Supplier<DdlOperationSpec> specResolver,
             Function<DdlOperationSpec, DdlWork> workFactory) {
+        rejectAmbientTransaction();
         physicalPreconditions.assertSatisfied();
+        DdlOperationSpec[] resolved = new DdlOperationSpec[1];
         try {
             return lockExecutor.execute(projectId, (handle, connection) -> {
                 DdlOperationSpec spec = Objects.requireNonNull(specResolver.get(), "resolved ddl spec");
+                resolved[0] = spec;
                 if (!Objects.equals(projectId, spec.projectId())) {
                     throw new IllegalArgumentException("resolved ddl spec project mismatch");
                 }
@@ -128,12 +138,25 @@ public class DdlExecutionEngine {
             });
         }
         catch (DdlLockBusyException busy) {
+            DdlOperationSpec spec = resolved[0];
+            BaasDdlLog completed = spec == null ? null
+                    : ddlLogMapper.selectByProjectAndOperation(projectId, spec.operationId());
+            if (completed != null && isStatus(completed, DdlLogStatus.SUCCESS)
+                    && Objects.equals(completed.getRequestHash(), spec.requestHash())) {
+                return readSnapshot(completed);
+            }
             throw new DdlConflictException("该项目有 DDL 操作进行中");
         }
     }
 
     boolean lockStillHeld(LockHandle handle) {
         return lockManager.stillHeld(handle);
+    }
+
+    private void rejectAmbientTransaction() {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("ddl operation cannot run within an active transaction");
+        }
     }
 
     private ObjectNode runInLock(DdlOperationSpec spec, DdlWork work, LockHandle handle, Connection connection)
@@ -170,21 +193,24 @@ public class DdlExecutionEngine {
 
         DdlWorkContext context = new DdlWorkContext(this, spec, connection, branch, inLock, handle);
         // 按分支重读现状并校验(spec §9.2:依赖现状的校验不得沿用锁外快照)。
-        work.validateInLock(context);
-
-        acquireOwnership(context, work, inLock);
+        try {
+            work.validateInLock(context);
+            acquireOwnership(context, work, inLock);
+        }
+        catch (Exception exception) {
+            throw translateFailure(exception);
+        }
 
         // 提交成功后锁内重读确认(spec §9.2:确认前不得产生任何项目库副作用)。
-        BaasDdlLog confirmed = ddlLogMapper.selectByProjectAndOperation(spec.projectId(), spec.operationId());
-        if (confirmed == null || !Objects.equals(confirmed.getOwnerToken(), context.ownerToken())
-                || !isStatus(confirmed, DdlLogStatus.RUNNING)
-                || !Objects.equals(confirmed.getFenceEpoch(), context.fenceEpoch())) {
-            throw new DdlConflictException("所有权确认失败,放弃执行");
-        }
-        context.setCurrentStep(DdlStep.valueOf(confirmed.getStep()));
-        context.assertLockStillHeld();
-
         try {
+            BaasDdlLog confirmed = ddlLogMapper.selectByProjectAndOperation(spec.projectId(), spec.operationId());
+            if (confirmed == null || !Objects.equals(confirmed.getOwnerToken(), context.ownerToken())
+                    || !isStatus(confirmed, DdlLogStatus.RUNNING)
+                    || !Objects.equals(confirmed.getFenceEpoch(), context.fenceEpoch())) {
+                throw new DdlConflictException("所有权确认失败,放弃执行");
+            }
+            context.setCurrentStep(DdlStep.valueOf(confirmed.getStep()));
+            context.assertLockStillHeld();
             return work.perform(context);
         }
         catch (StaleExecutorException stale) {
@@ -266,30 +292,72 @@ public class DdlExecutionEngine {
 
     void advanceToDdlApplied(DdlWorkContext context) {
         context.assertLockStillHeld();
-        transactionTemplate.executeWithoutResult(txStatus -> {
-            fencingGuard.verifyEpochInTx(context.spec().projectId(), context.fenceEpoch());
-            if (ddlLogMapper.advanceStepGuarded(context.logId(), context.ownerToken(),
-                    DdlStep.DDL_APPLIED.name()) != 1) {
-                throw new StaleExecutorException("检查点推进被拒,本执行者已陈旧");
+        try {
+            transactionTemplate.executeWithoutResult(txStatus -> {
+                fencingGuard.verifyEpochInTx(context.spec().projectId(), context.fenceEpoch());
+                if (ddlLogMapper.advanceStepGuarded(context.logId(), context.ownerToken(),
+                        DdlStep.DDL_APPLIED.name()) != 1) {
+                    throw new StaleExecutorException("检查点推进被拒,本执行者已陈旧");
+                }
+            });
+        }
+        catch (RuntimeException commitUncertain) {
+            if (!checkpointCommitConfirmed(context, DdlStep.DDL_APPLIED)) {
+                throw commitUncertain;
             }
-        });
+        }
         context.setCurrentStep(DdlStep.DDL_APPLIED);
     }
 
     ObjectNode completeSuccess(DdlWorkContext context, Supplier<ObjectNode> metadataWrites) {
         context.assertLockStillHeld();
         ObjectNode[] snapshotHolder = new ObjectNode[1];
-        transactionTemplate.executeWithoutResult(txStatus -> {
-            fencingGuard.verifyEpochInTx(context.spec().projectId(), context.fenceEpoch());
-            snapshotHolder[0] = metadataWrites.get();
-            if (ddlLogMapper.finishGuarded(context.logId(), context.ownerToken(), context.fenceEpoch(),
-                    DdlLogStatus.SUCCESS.name(), DdlStep.METADATA_APPLIED.name(), snapshotHolder[0].toString(),
-                    null) != 1) {
-                throw new StaleExecutorException("终态写入被拒,整笔回滚");
+        try {
+            transactionTemplate.executeWithoutResult(txStatus -> {
+                fencingGuard.verifyEpochInTx(context.spec().projectId(), context.fenceEpoch());
+                snapshotHolder[0] = metadataWrites.get();
+                if (ddlLogMapper.finishGuarded(context.logId(), context.ownerToken(), context.fenceEpoch(),
+                        DdlLogStatus.SUCCESS.name(), DdlStep.METADATA_APPLIED.name(), snapshotHolder[0].toString(),
+                        null) != 1) {
+                    throw new StaleExecutorException("终态写入被拒,整笔回滚");
+                }
+            });
+        }
+        catch (RuntimeException commitUncertain) {
+            BaasDdlLog committed = ownedLog(context);
+            if (committed == null || !isStatus(committed, DdlLogStatus.SUCCESS)
+                    || !DdlStep.METADATA_APPLIED.name().equals(committed.getStep())) {
+                throw commitUncertain;
             }
-        });
+            snapshotHolder[0] = readSnapshot(committed);
+        }
         context.setCurrentStep(DdlStep.METADATA_APPLIED);
         return snapshotHolder[0];
+    }
+
+    private boolean checkpointCommitConfirmed(DdlWorkContext context, DdlStep expectedStep) {
+        BaasDdlLog committed = ownedLog(context);
+        if (committed == null || !isStatus(committed, DdlLogStatus.RUNNING)) {
+            return false;
+        }
+        try {
+            return DdlStep.valueOf(committed.getStep()).reached(expectedStep);
+        }
+        catch (IllegalArgumentException | NullPointerException ignored) {
+            return false;
+        }
+    }
+
+    private BaasDdlLog ownedLog(DdlWorkContext context) {
+        BaasDdlLog committed = ddlLogMapper.selectByProjectAndOperation(context.spec().projectId(),
+                context.spec().operationId());
+        if (committed == null || !Objects.equals(committed.getId(), context.logId())
+                || !Objects.equals(committed.getOwnerToken(), context.ownerToken())
+                || !Objects.equals(committed.getFenceEpoch(), context.fenceEpoch())
+                || !Objects.equals(committed.getRequestHash(), context.spec().requestHash())) {
+            return null;
+        }
+        return committed;
     }
 
     private RuntimeException translateFailure(Exception exception) {
@@ -307,8 +375,7 @@ public class DdlExecutionEngine {
         try {
             transactionTemplate.executeWithoutResult(txStatus -> {
                 fencingGuard.verifyEpochInTx(context.spec().projectId(), context.fenceEpoch());
-                if (ddlLogMapper.finishGuarded(context.logId(), context.ownerToken(), context.fenceEpoch(),
-                        DdlLogStatus.FAILED.name(), context.currentStep().name(), null,
+                if (ddlLogMapper.failGuarded(context.logId(), context.ownerToken(), context.fenceEpoch(),
                         sanitizeError(cause)) != 1) {
                     throw new StaleExecutorException("FAILED 终态写入被拒");
                 }

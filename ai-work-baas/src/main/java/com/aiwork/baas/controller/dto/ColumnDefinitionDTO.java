@@ -1,6 +1,6 @@
 /*
  *
- *      Copyright (c) 2018-2025, lengleng All rights reserved.
+ *      Copyright (c) 2018-2026, lengleng All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
  *  modification, are permitted provided that the following conditions are met:
@@ -20,6 +20,7 @@
 package com.aiwork.baas.controller.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import jakarta.validation.constraints.NotBlank;
 
 /**
@@ -29,7 +30,8 @@ import jakarta.validation.constraints.NotBlank;
  * @date 2026/07/18
  */
 public record ColumnDefinitionDTO(@NotBlank String columnName, @NotBlank String dataType, Integer length,
-        Integer scale, Boolean nullable, JsonNode defaultValue, Boolean unique, Boolean indexed, String comment) {
+        Integer scale, Boolean nullable, @JsonDeserialize(using = PreciseJsonNodeDeserializer.class) JsonNode defaultValue,
+        Boolean unique, Boolean indexed, String comment) {
 
     public boolean nullableOrDefault() {
         return nullable == null || nullable;
