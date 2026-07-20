@@ -54,6 +54,12 @@
             <artifactId>ai-work-quartz</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!--BaaS 表管理与恢复任务（单体部署必须与 cloud 形态能力一致）-->
+        <dependency>
+            <groupId>com.aiwork</groupId>
+            <artifactId>ai-work-baas</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!--安全模块-->
         <dependency>
             <groupId>com.aiwork</groupId>

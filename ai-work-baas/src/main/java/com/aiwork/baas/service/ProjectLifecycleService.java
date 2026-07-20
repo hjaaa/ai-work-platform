@@ -20,6 +20,10 @@
 package com.aiwork.baas.service;
 
 import com.aiwork.baas.datasource.ProjectDataSourceRegistry;
+import com.aiwork.baas.ddl.engine.DdlFencingGuard;
+import com.aiwork.baas.ddl.lock.DdlLockBusyException;
+import com.aiwork.baas.ddl.lock.ProjectDdlLockExecutor;
+import com.aiwork.baas.ddl.render.DdlRenderer;
 import com.aiwork.baas.entity.BaasApiKey;
 import com.aiwork.baas.entity.BaasAuditLog;
 import com.aiwork.baas.entity.BaasJwtKey;
@@ -28,11 +32,14 @@ import com.aiwork.baas.entity.enums.JwtKeyStatus;
 import com.aiwork.baas.entity.enums.KeyType;
 import com.aiwork.baas.entity.enums.ProjectStatus;
 import com.aiwork.baas.entity.enums.ProvisionStep;
+import com.aiwork.baas.exception.DdlConflictException;
 import com.aiwork.baas.exception.ProjectProvisionException;
 import com.aiwork.baas.mapper.BaasApiKeyMapper;
 import com.aiwork.baas.mapper.BaasAuditLogMapper;
 import com.aiwork.baas.mapper.BaasJwtKeyMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
+import com.aiwork.baas.mapper.BaasDdlLogMapper;
+import com.aiwork.baas.provision.PhysicalPreconditions;
 import com.aiwork.baas.provision.ProjectProvisioner;
 import com.aiwork.baas.security.crypto.BaasCryptoService;
 import com.aiwork.baas.security.key.ApiKeyGenerator;
@@ -42,12 +49,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.security.SecureRandom;
+import java.sql.Connection;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 项目生命周期状态机(spec §9.1、§9.3)。平台库操作按三段短事务组织：元数据创建、开通完成、删除意图；
@@ -61,6 +71,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ProjectLifecycleService {
 
+    @Value("${baas.ddl.execute-timeout-seconds:300}")
+    private int ddlTimeoutSeconds;
+
     private final BaasProjectMapper projectMapper;
 
     private final BaasJwtKeyMapper jwtKeyMapper;
@@ -69,7 +82,11 @@ public class ProjectLifecycleService {
 
     private final BaasAuditLogMapper auditLogMapper;
 
+    private final BaasDdlLogMapper ddlLogMapper;
+
     private final ProjectProvisioner provisioner;
+
+    private final PhysicalPreconditions physicalPreconditions;
 
     private final ApiKeyGenerator keyGenerator;
 
@@ -79,10 +96,15 @@ public class ProjectLifecycleService {
 
     private final TransactionTemplate transactionTemplate;
 
+    private final ProjectDdlLockExecutor lockExecutor;
+
+    private final DdlFencingGuard fencingGuard;
+
     public record CreatedProject(BaasProject project, String publishableKey, String secretKey) {
     }
 
     public CreatedProject createProject(String name, Long ownerUserId) {
+        physicalPreconditions.assertSatisfied();
         rejectAmbientTransaction();
         BaasProject project = transactionTemplate.execute(status -> {
             String projectRef = keyGenerator.generateProjectRef();
@@ -102,12 +124,126 @@ public class ProjectLifecycleService {
             projectMapper.updateById(createdProject);
             return createdProject;
         });
-        return continueProvision(project, ownerUserId);
+        AtomicReference<CreatedProject> completedProvision = new AtomicReference<>();
+        try {
+            return lockExecutor.execute(project.getId(), (handle, connection) -> {
+                lockExecutor.assertStillHeld(handle);
+                CreatedProject result = continueProvision(project, ownerUserId, connection);
+                completedProvision.set(result);
+                return result;
+            });
+        }
+        catch (ProjectProvisionException provisionException) {
+            throw provisionException;
+        }
+        catch (DdlLockBusyException busy) {
+            if (completedProvision.get() != null) {
+                return completedProvision.get();
+            }
+            markProvisionFailed(project, ownerUserId, busy);
+            throw new ProjectProvisionException("provision lock unavailable", busy);
+        }
+        catch (RuntimeException infrastructureException) {
+            markProvisionFailed(project, ownerUserId, infrastructureException);
+            throw new ProjectProvisionException("provision lock infrastructure failed", infrastructureException);
+        }
     }
 
     public CreatedProject retryProvision(Long projectId) {
+        physicalPreconditions.assertSatisfied();
         rejectAmbientTransaction();
-        BaasProject project = projectMapper.selectById(projectId);
+        AtomicReference<CreatedProject> completedProvision = new AtomicReference<>();
+        try {
+            return lockExecutor.execute(projectId, (handle, connection) -> {
+                lockExecutor.assertStillHeld(handle);
+                BaasProject project = transactionTemplate.execute(status -> prepareProvisionRetry(projectId));
+                CreatedProject result = continueProvision(project, project.getOwnerUserId(), connection);
+                completedProvision.set(result);
+                return result;
+            });
+        }
+        catch (DdlLockBusyException busy) {
+            if (completedProvision.get() != null) {
+                return completedProvision.get();
+            }
+            throw new DdlConflictException("该项目有 DDL 操作进行中，无法重试开通");
+        }
+    }
+
+    public void deleteProject(Long projectId, Long operatorUserId) {
+        rejectAmbientTransaction();
+        BaasProject project;
+        AtomicReference<BaasProject> committedDelete = new AtomicReference<>();
+        try {
+            project = lockExecutor.execute(projectId, (handle, connection) -> {
+                lockExecutor.assertStillHeld(handle);
+                BaasProject result = transactionTemplate.execute(status -> markDeleting(projectId, operatorUserId));
+                committedDelete.set(result);
+                return result;
+            });
+        }
+        catch (DdlLockBusyException busy) {
+            project = committedDelete.get();
+            if (project == null) {
+                throw new DdlConflictException("该项目有 DDL 操作进行中，无法删除");
+            }
+        }
+
+        registry.blockAndDrain(project.getProjectRef());
+    }
+
+    /**
+     * 对已进入 DELETING 状态的项目执行物理清理，由 {@link ProjectCleanupJob} 在延迟期到达后调用。
+     * @param project 待清理项目
+     * @return 本轮已完成清理或已跳过
+     */
+    public ProjectCleanupResult physicallyCleanup(BaasProject project) {
+        physicalPreconditions.assertSatisfied();
+        rejectAmbientTransaction();
+        AtomicReference<ProjectCleanupResult> completedCleanup = new AtomicReference<>();
+        try {
+            return lockExecutor.execute(project.getId(), (handle, connection) -> {
+                BaasProject current = projectMapper.selectById(project.getId());
+                if (!cleanupDue(current)) {
+                    completedCleanup.set(ProjectCleanupResult.SKIPPED);
+                    return ProjectCleanupResult.SKIPPED;
+                }
+
+                lockExecutor.assertStillHeld(handle);
+                long epoch = transactionTemplate.execute(
+                        status -> fencingGuard.incrementEpochInTx(current.getId()));
+                try (var statement = connection.createStatement()) {
+                    statement.setQueryTimeout(ddlTimeoutSeconds);
+                    statement.execute(DdlRenderer.renderDropDatabase(current.getDbName()).sql());
+                    statement.execute(DdlRenderer.renderDropUser(current.getRuntimeDbUser()).sql());
+                }
+
+                lockExecutor.assertStillHeld(handle);
+                transactionTemplate.executeWithoutResult(status -> {
+                    fencingGuard.verifyEpochInTx(current.getId(), epoch);
+                    if (!casStatus(current.getId(), ProjectStatus.DELETING, ProjectStatus.DELETED)) {
+                        throw new IllegalStateException("project physical cleanup status race");
+                    }
+                    ddlLogMapper.finishCleanupForDeletedProject(current.getId(),
+                            "{\"noop\":true,\"reason\":\"PROJECT_DELETED\"}");
+                });
+                completedCleanup.set(ProjectCleanupResult.CLEANED);
+                return ProjectCleanupResult.CLEANED;
+            });
+        }
+        catch (DdlLockBusyException busy) {
+            if (completedCleanup.get() != null) {
+                return completedCleanup.get();
+            }
+            if (log.isInfoEnabled()) {
+                log.info("project {} cleanup skipped: ddl lock busy", project.getProjectRef());
+            }
+            return ProjectCleanupResult.SKIPPED;
+        }
+    }
+
+    private BaasProject prepareProvisionRetry(Long projectId) {
+        BaasProject project = projectMapper.selectByIdForUpdate(projectId);
         if (project == null) {
             throw new IllegalStateException("project not found");
         }
@@ -116,60 +252,56 @@ public class ProjectLifecycleService {
         }
 
         project.setStatus(ProjectStatus.PROVISIONING);
-        return continueProvision(project, project.getOwnerUserId());
+        return project;
     }
 
-    public void deleteProject(Long projectId, Long operatorUserId) {
-        rejectAmbientTransaction();
-        BaasProject project = transactionTemplate.execute(status -> {
-            boolean transitioned = casStatus(projectId, ProjectStatus.ACTIVE, ProjectStatus.DELETING)
-                    || casStatus(projectId, ProjectStatus.FAILED, ProjectStatus.DELETING);
-            BaasProject deletingProject = projectMapper.selectById(projectId);
-            if (deletingProject == null
-                    || (!transitioned && deletingProject.getStatus() != ProjectStatus.DELETING)) {
-                throw new IllegalStateException("project not deletable or concurrent state change");
-            }
+    private BaasProject markDeleting(Long projectId, Long operatorUserId) {
+        fencingGuard.incrementEpochInTx(projectId);
+        boolean transitioned = casStatus(projectId, ProjectStatus.ACTIVE, ProjectStatus.DELETING)
+                || casStatus(projectId, ProjectStatus.FAILED, ProjectStatus.DELETING);
+        BaasProject deletingProject = projectMapper.selectById(projectId);
+        if (deletingProject == null
+                || (!transitioned && deletingProject.getStatus() != ProjectStatus.DELETING)) {
+            throw new IllegalStateException("project not deletable or concurrent state change");
+        }
 
-            revokeActiveKeys(projectId);
-            projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
-                .eq(BaasProject::getId, projectId)
-                .isNull(BaasProject::getDeleteAfter)
-                .set(BaasProject::getDeleteAfter, LocalDateTime.now().plusDays(7)));
-            if (transitioned) {
-                audit(projectId, operatorUserId, "PROJECT_DELETE", "ref=" + deletingProject.getProjectRef(), "HIGH");
-            }
-            return deletingProject;
-        });
-
-        registry.blockAndDrain(project.getProjectRef());
+        revokeActiveKeys(projectId);
+        int scheduled = projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
+            .eq(BaasProject::getId, projectId)
+            .isNull(BaasProject::getDeleteAfter)
+            .set(BaasProject::getDeleteAfter, LocalDateTime.now().plusDays(7)));
+        if (transitioned && scheduled != 1) {
+            throw new IllegalStateException("project delete_after update race");
+        }
+        if (transitioned) {
+            audit(projectId, operatorUserId, "PROJECT_DELETE", "ref=" + deletingProject.getProjectRef(), "HIGH");
+        }
+        return deletingProject;
     }
 
-    /**
-     * 对已进入 DELETING 状态的项目执行物理清理，由 {@link ProjectCleanupJob} 在延迟期到达后调用。
-     * @param project 待清理项目
-     */
-    public void physicallyCleanup(BaasProject project) {
-        rejectAmbientTransaction();
-        provisioner.dropDatabaseAndUser(project.getDbName(), project.getRuntimeDbUser());
-        casStatus(project.getId(), ProjectStatus.DELETING, ProjectStatus.DELETED);
+    private boolean cleanupDue(BaasProject project) {
+        return project != null && project.getStatus() == ProjectStatus.DELETING && project.getDeleteAfter() != null
+                && !project.getDeleteAfter().isAfter(LocalDateTime.now());
     }
 
-    private CreatedProject continueProvision(BaasProject project, Long operatorUserId) {
+    private CreatedProject continueProvision(BaasProject project, Long operatorUserId, Connection connection) {
         try {
             ProvisionStep completedStep = ProvisionStep.valueOf(project.getProvisionStep());
             String passwordAad = aad(project.getId(), "db_password", String.valueOf(project.getId()));
             String runtimePassword = cryptoService.decrypt(project.getRuntimeDbPasswordCipher(), passwordAad);
 
+            // 历史 provision_step 不是当前物理准入证明；每次 ACTIVE 前都重验库基线与 manifest。
+            provisioner.createDatabase(connection, project.getDbName());
             if (completedStep.ordinal() < ProvisionStep.DB_CREATED.ordinal()) {
-                provisioner.createDatabase(project.getDbName());
                 advance(project, ProvisionStep.DB_CREATED);
             }
             if (completedStep.ordinal() < ProvisionStep.USER_CREATED.ordinal()) {
-                provisioner.createRuntimeUser(project.getRuntimeDbUser(), runtimePassword, project.getDbName());
+                provisioner.createRuntimeUser(connection, project.getRuntimeDbUser(), runtimePassword,
+                        project.getDbName());
                 advance(project, ProvisionStep.USER_CREATED);
             }
+            provisioner.initSystemTables(connection, project.getDbName());
             if (completedStep.ordinal() < ProvisionStep.SYSTEM_TABLES.ordinal()) {
-                provisioner.initSystemTables(project.getDbName());
                 advance(project, ProvisionStep.SYSTEM_TABLES);
             }
 

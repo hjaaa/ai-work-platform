@@ -43,6 +43,22 @@ public class BaasDdlLog {
 
     private Long projectId;
 
+    private String operationType;
+
+    private String tableName;
+
+    private Long tableId;
+
+    private String requestHash;
+
+    private String resultSnapshot;
+
+    private String ownerToken;
+
+    private Long fenceEpoch;
+
+    private String triggerSource;
+
     private String ddlText;
 
     private String step;

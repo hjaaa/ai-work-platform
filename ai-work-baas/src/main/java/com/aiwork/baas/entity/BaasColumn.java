@@ -34,7 +34,7 @@ import java.time.LocalDateTime;
  * @date 2026/07/17
  */
 @Data
-@TableName("baas_column")
+@TableName(value = "baas_column", autoResultMap = true)
 public class BaasColumn {
 
     @TableId(type = IdType.AUTO)

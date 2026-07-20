@@ -46,22 +46,35 @@ public class ProjectCleanupJob {
 
     private final ProjectLifecycleService lifecycleService;
 
+    private final BoundedScanCursor<BaasProject> scanCursor = new BoundedScanCursor<>();
+
     @Scheduled(fixedDelay = 3600000)
     public void cleanup() {
-        List<BaasProject> expiredProjects = projectMapper.selectList(Wrappers.<BaasProject>lambdaQuery()
-            .eq(BaasProject::getStatus, ProjectStatus.DELETING)
-            .lt(BaasProject::getDeleteAfter, LocalDateTime.now()));
+        LocalDateTime threshold = LocalDateTime.now();
+        List<BaasProject> expiredProjects = scanCursor.nextBatch(
+                limit -> loadExpiredProjects(0, threshold, limit),
+                (beforeId, limit) -> loadExpiredProjects(beforeId, threshold, limit), BaasProject::getId);
         for (BaasProject project : expiredProjects) {
             try {
-                lifecycleService.physicallyCleanup(project);
-                if (log.isInfoEnabled()) {
+                ProjectCleanupResult result = lifecycleService.physicallyCleanup(project);
+                if (result == ProjectCleanupResult.CLEANED && log.isInfoEnabled()) {
                     log.info("baas project {} physically cleaned", project.getProjectRef());
                 }
             }
             catch (Exception exception) {
-                log.error("cleanup project {} failed", project.getProjectRef(), exception);
+                log.error("cleanup project {} failed errorType={}", project.getProjectRef(),
+                        exception.getClass().getSimpleName());
             }
         }
+    }
+
+    private List<BaasProject> loadExpiredProjects(long beforeId, LocalDateTime threshold, int limit) {
+        return projectMapper.selectList(Wrappers.<BaasProject>lambdaQuery()
+            .eq(BaasProject::getStatus, ProjectStatus.DELETING)
+            .lt(BaasProject::getDeleteAfter, threshold)
+            .lt(beforeId > 0, BaasProject::getId, beforeId)
+            .orderByDesc(BaasProject::getId)
+            .last("LIMIT " + limit));
     }
 
 }

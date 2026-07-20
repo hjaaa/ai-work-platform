@@ -20,12 +20,14 @@
 package com.aiwork.baas.exception;
 
 import com.aiwork.common.core.util.R;
+import com.aiwork.baas.ddl.lock.DdlLockInfrastructureException;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -48,8 +50,50 @@ public class BaasStudioExceptionHandler {
         return R.failed("项目不存在或无权访问");
     }
 
+    @ExceptionHandler(TableNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public R<Void> handleTableNotFound() {
+        return R.failed("表不存在");
+    }
+
+    @ExceptionHandler(BaasBadRequestException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public R<Void> handleBaasBadRequest(BaasBadRequestException exception) {
+        return R.failed(exception.getMessage());
+    }
+
+    @ExceptionHandler(DdlConflictException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public R<Void> handleDdlConflict(DdlConflictException exception) {
+        return R.failed(exception.getMessage());
+    }
+
+    @ExceptionHandler(DdlExecutionException.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public R<Void> handleDdlExecutionFailure(DdlExecutionException exception) {
+        // 异常自身已按 spec §11 脱敏(固定 message + 结构化诊断码,无 cause),可整体落日志
+        log.error("DDL execution failed errorCode={} sqlState={} vendorCode={}", exception.errorCode(),
+                exception.sqlState(), exception.vendorCode(), exception);
+        return R.failed("DDL 执行失败");
+    }
+
+    @ExceptionHandler(OwnerAclClosedException.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public R<Void> handleOwnerAclClosedFailure(OwnerAclClosedException exception) {
+        log.error("owner column drop failed, ACL closed", exception);
+        return R.failed("DDL 执行失败，owner ACL 已安全关闭");
+    }
+
+    @ExceptionHandler(DdlLockInfrastructureException.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public R<Void> handleDdlLockInfrastructureFailure(DdlLockInfrastructureException exception) {
+        log.error("DDL lock infrastructure unavailable", exception);
+        return R.failed("DDL 锁服务暂时不可用");
+    }
+
     @ExceptionHandler({ BindException.class, MethodArgumentNotValidException.class,
-            HandlerMethodValidationException.class, ConstraintViolationException.class })
+            HandlerMethodValidationException.class, ConstraintViolationException.class,
+            MissingServletRequestParameterException.class })
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public R<Void> handleValidation(Exception exception) {
         log.warn("Studio request validation failed, type={}", exception.getClass().getSimpleName());

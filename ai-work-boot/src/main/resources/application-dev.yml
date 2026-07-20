@@ -3,6 +3,7 @@ spring:
     redis:
       host: ai-work-redis
       database: 5
+      timeout: ${BAAS_REDIS_COMMAND_TIMEOUT:2s}
   # 数据库相关配置
   datasource:
     type: com.alibaba.druid.pool.DruidDataSource

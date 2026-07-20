@@ -36,7 +36,7 @@ import java.util.Map;
  * @date 2026/07/17
  */
 @SpringBootApplication(scanBasePackages = { "com.aiwork.baas.service", "com.aiwork.baas.provision",
-        "com.aiwork.baas.datasource", "com.aiwork.baas.security.key" })
+        "com.aiwork.baas.datasource", "com.aiwork.baas.security.key", "com.aiwork.baas.ddl" })
 @MapperScan("com.aiwork.baas.mapper")
 public class LifecycleTestApplication {
 
