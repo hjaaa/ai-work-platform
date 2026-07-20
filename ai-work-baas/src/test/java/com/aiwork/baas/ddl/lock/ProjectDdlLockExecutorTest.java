@@ -243,6 +243,25 @@ class ProjectDdlLockExecutorTest extends PlanBContainerSupport {
 		redisTemplate.delete(DdlLockManager.lockKey(307L));
 	}
 
+	@Test
+	void fencingFailureAndUncertainAdvisoryCleanupRetainsRedisToken() {
+		DdlLockManager manager = manager();
+		ProjectDdlLockExecutor executor = new ProjectDdlLockExecutor(manager,
+				new AdvisoryLockTemplate(callbackReleaseAndCloseFailingDataSource()), LockAcquisitionObserver.NOOP);
+
+		assertThatThrownBy(() -> executor.execute(308L, (handle, connection) -> {
+			throw new DdlLockBusyException("Redis owner_token 已失效");
+		})).isInstanceOf(DdlLockBusyException.class)
+			.hasMessage("Redis owner_token 已失效")
+			.satisfies(exception -> {
+				assertThat(exception.getSuppressed()).hasSize(1);
+				assertThat(((DdlLockInfrastructureException) exception.getSuppressed()[0])
+					.advisoryStateUncertain()).isTrue();
+			});
+		assertThat(redisTemplate.opsForValue().get(DdlLockManager.lockKey(308L))).isNotNull();
+		redisTemplate.delete(DdlLockManager.lockKey(308L));
+	}
+
 	private DdlLockManager manager() {
 		DdlLockManager manager = new DdlLockManager(redisTemplate, 60000, 20000);
 		managers.add(manager);
@@ -274,6 +293,48 @@ class ProjectDdlLockExecutorTest extends PlanBContainerSupport {
 				yield statement;
 			}
 			case "createStatement" -> throw new SQLException("secret sql-mode failure");
+			case "close" -> throw new SQLException("secret close failure");
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		return proxy(javax.sql.DataSource.class, (proxy, method, args) -> {
+			if ("getConnection".equals(method.getName())) {
+				return connection;
+			}
+			throw new UnsupportedOperationException(method.getName());
+		});
+	}
+
+	private static javax.sql.DataSource callbackReleaseAndCloseFailingDataSource() {
+		ResultSet resultSet = proxy(ResultSet.class, (proxy, method, args) -> switch (method.getName()) {
+			case "next" -> true;
+			case "getInt" -> 1;
+			case "getString" -> "STRICT_TRANS_TABLES";
+			case "wasNull" -> false;
+			case "close" -> null;
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		Connection connection = proxy(Connection.class, (proxy, method, args) -> switch (method.getName()) {
+			case "createStatement" -> proxy(java.sql.Statement.class,
+					(statementProxy, statementMethod, statementArgs) -> switch (statementMethod.getName()) {
+						case "executeQuery" -> resultSet;
+						case "close" -> null;
+						default -> throw new UnsupportedOperationException(statementMethod.getName());
+					});
+			case "prepareStatement" -> {
+				String sql = (String) args[0];
+				yield proxy(PreparedStatement.class, (statementProxy, statementMethod,
+						statementArgs) -> switch (statementMethod.getName()) {
+							case "setString", "close" -> null;
+							case "executeUpdate" -> 1;
+							case "executeQuery" -> {
+								if (sql.contains("GET_LOCK")) {
+									yield resultSet;
+								}
+								throw new SQLException("secret release failure");
+							}
+							default -> throw new UnsupportedOperationException(statementMethod.getName());
+						});
+			}
 			case "close" -> throw new SQLException("secret close failure");
 			default -> throw new UnsupportedOperationException(method.getName());
 		});

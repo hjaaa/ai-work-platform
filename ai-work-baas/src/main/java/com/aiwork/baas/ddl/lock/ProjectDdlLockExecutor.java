@@ -56,8 +56,8 @@ public class ProjectDdlLockExecutor {
 				return result;
 			});
 		}
-		catch (DdlLockInfrastructureException exception) {
-			releaseRedis = !exception.advisoryStateUncertain();
+		catch (RuntimeException | Error exception) {
+			releaseRedis = !hasUncertainAdvisoryState(exception);
 			throw exception;
 		}
 		finally {
@@ -65,6 +65,19 @@ public class ProjectDdlLockExecutor {
 				lockManager.release(handle);
 			}
 		}
+	}
+
+	private boolean hasUncertainAdvisoryState(Throwable failure) {
+		if (failure instanceof DdlLockInfrastructureException infrastructureFailure
+				&& infrastructureFailure.advisoryStateUncertain()) {
+			return true;
+		}
+		for (Throwable suppressed : failure.getSuppressed()) {
+			if (hasUncertainAdvisoryState(suppressed)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public void assertStillHeld(LockHandle handle) {

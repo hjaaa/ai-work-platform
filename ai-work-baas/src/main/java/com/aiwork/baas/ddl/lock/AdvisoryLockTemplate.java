@@ -50,20 +50,19 @@ public class AdvisoryLockTemplate {
         catch (Exception exception) {
             throw new DdlLockInfrastructureException(false);
         }
+        int acquired;
         try {
-            int acquired = lockResult(connection, "SELECT GET_LOCK(?, 0)", name);
-            if (acquired == 0) {
-                throw new DdlLockBusyException("该项目有 DDL 操作进行中(advisory lock busy)");
-            }
-            if (acquired != 1) {
-                throw new DdlLockInfrastructureException(false);
-            }
-        }
-        catch (DdlLockBusyException | DdlLockInfrastructureException exception) {
-            close(connection, name);
-            throw exception;
+            acquired = lockResult(connection, "SELECT GET_LOCK(?, 0)", name);
         }
         catch (Exception exception) {
+            boolean closed = close(connection, name);
+            throw new DdlLockInfrastructureException(!closed);
+        }
+        if (acquired == 0) {
+            close(connection, name);
+            throw new DdlLockBusyException("该项目有 DDL 操作进行中(advisory lock busy)");
+        }
+        if (acquired != 1) {
             boolean closed = close(connection, name);
             throw new DdlLockInfrastructureException(!closed);
         }
@@ -102,7 +101,16 @@ public class AdvisoryLockTemplate {
         boolean released = release(connection, name);
         boolean closed = close(connection, name);
         if (!released && !closed) {
-            throw new DdlLockInfrastructureException(true);
+            DdlLockInfrastructureException infrastructureFailure = new DdlLockInfrastructureException(true);
+            if (callbackError != null) {
+                callbackError.addSuppressed(infrastructureFailure);
+                throw callbackError;
+            }
+            if (callbackFailure != null) {
+                callbackFailure.addSuppressed(infrastructureFailure);
+                throw callbackFailure;
+            }
+            throw infrastructureFailure;
         }
         if (callbackError != null) {
             throw callbackError;

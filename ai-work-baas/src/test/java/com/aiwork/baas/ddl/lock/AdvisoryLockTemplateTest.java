@@ -22,6 +22,8 @@ package com.aiwork.baas.ddl.lock;
 import com.aiwork.baas.support.PlanBContainerSupport;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import javax.sql.DataSource;
 import java.lang.reflect.Proxy;
@@ -144,6 +146,44 @@ class AdvisoryLockTemplateTest extends PlanBContainerSupport {
 					((DdlLockInfrastructureException) exception).advisoryStateUncertain()).isTrue());
 	}
 
+	@ParameterizedTest
+	@EnumSource(InvalidAcquireResult.class)
+	void indeterminateGetLockResultAndCloseFailureMarksAdvisoryStateUncertain(InvalidAcquireResult result) {
+		AdvisoryLockTemplate failingTemplate = new AdvisoryLockTemplate(invalidGetLockResultDataSource(result, true));
+
+		assertThatThrownBy(() -> failingTemplate.executeWithLock(2052L, connection -> null))
+			.isInstanceOf(DdlLockInfrastructureException.class)
+			.satisfies(exception -> assertThat(
+					((DdlLockInfrastructureException) exception).advisoryStateUncertain()).isTrue());
+	}
+
+	@Test
+	void indeterminateGetLockResultAndSuccessfulCloseHasKnownAdvisoryState() {
+		AdvisoryLockTemplate failingTemplate = new AdvisoryLockTemplate(
+				invalidGetLockResultDataSource(InvalidAcquireResult.NULL, false));
+
+		assertThatThrownBy(() -> failingTemplate.executeWithLock(2053L, connection -> null))
+			.isInstanceOf(DdlLockInfrastructureException.class)
+			.satisfies(exception -> assertThat(
+					((DdlLockInfrastructureException) exception).advisoryStateUncertain()).isFalse());
+	}
+
+	@Test
+	void fencingFailureRemainsPrimaryWhenReleaseAndCloseBothFail() {
+		AdvisoryLockTemplate failingTemplate = new AdvisoryLockTemplate(releaseAndCloseFailingDataSource());
+
+		assertThatThrownBy(() -> failingTemplate.executeWithLock(2054L, connection -> {
+			throw new DdlLockBusyException("Redis owner_token 已失效");
+		})).isInstanceOf(DdlLockBusyException.class)
+			.hasMessage("Redis owner_token 已失效")
+			.satisfies(exception -> {
+				assertThat(exception.getSuppressed()).hasSize(1);
+				assertThat(exception.getSuppressed()[0]).isInstanceOf(DdlLockInfrastructureException.class);
+				assertThat(((DdlLockInfrastructureException) exception.getSuppressed()[0])
+					.advisoryStateUncertain()).isTrue();
+			});
+	}
+
 	@Test
 	void interruptedCallbackRestoresInterruptFlagAndUsesStableError() {
 		try {
@@ -221,6 +261,87 @@ class AdvisoryLockTemplateTest extends PlanBContainerSupport {
 			}
 			throw new UnsupportedOperationException(method.getName());
 		});
+	}
+
+	private static DataSource invalidGetLockResultDataSource(InvalidAcquireResult acquireResult,
+			boolean closeFails) {
+		ResultSet resultSet = proxy(ResultSet.class, (proxy, method, args) -> switch (method.getName()) {
+			case "next" -> acquireResult != InvalidAcquireResult.EMPTY;
+			case "getInt" -> acquireResult == InvalidAcquireResult.ILLEGAL ? 2 : 0;
+			case "wasNull" -> acquireResult == InvalidAcquireResult.NULL;
+			case "close" -> null;
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		PreparedStatement statement = proxy(PreparedStatement.class,
+				(proxy, method, args) -> switch (method.getName()) {
+					case "setString", "close" -> null;
+					case "executeQuery" -> resultSet;
+					default -> throw new UnsupportedOperationException(method.getName());
+				});
+		Connection connection = proxy(Connection.class, (proxy, method, args) -> switch (method.getName()) {
+			case "prepareStatement" -> statement;
+			case "close" -> {
+				if (closeFails) {
+					throw new SQLException("secret close failure");
+				}
+				yield null;
+			}
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		return proxy(DataSource.class, (proxy, method, args) -> {
+			if ("getConnection".equals(method.getName())) {
+				return connection;
+			}
+			throw new UnsupportedOperationException(method.getName());
+		});
+	}
+
+	private static DataSource releaseAndCloseFailingDataSource() {
+		ResultSet resultSet = proxy(ResultSet.class, (proxy, method, args) -> switch (method.getName()) {
+			case "next" -> true;
+			case "getInt" -> 1;
+			case "getString" -> "STRICT_TRANS_TABLES";
+			case "wasNull" -> false;
+			case "close" -> null;
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		Statement queryStatement = proxy(Statement.class, (proxy, method, args) -> switch (method.getName()) {
+			case "executeQuery" -> resultSet;
+			case "close" -> null;
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		Connection connection = proxy(Connection.class, (proxy, method, args) -> switch (method.getName()) {
+			case "createStatement" -> queryStatement;
+			case "prepareStatement" -> {
+				String sql = (String) args[0];
+				yield proxy(PreparedStatement.class, (statementProxy, statementMethod,
+						statementArgs) -> switch (statementMethod.getName()) {
+							case "setString", "close" -> null;
+							case "executeUpdate" -> 1;
+							case "executeQuery" -> {
+								if (sql.contains("GET_LOCK")) {
+									yield resultSet;
+								}
+								throw new SQLException("secret release failure");
+							}
+							default -> throw new UnsupportedOperationException(statementMethod.getName());
+						});
+			}
+			case "close" -> throw new SQLException("secret close failure");
+			default -> throw new UnsupportedOperationException(method.getName());
+		});
+		return proxy(DataSource.class, (proxy, method, args) -> {
+			if ("getConnection".equals(method.getName())) {
+				return connection;
+			}
+			throw new UnsupportedOperationException(method.getName());
+		});
+	}
+
+	private enum InvalidAcquireResult {
+
+		NULL, EMPTY, ILLEGAL
+
 	}
 
 	private static <T> T proxy(Class<T> type, java.lang.reflect.InvocationHandler handler) {
