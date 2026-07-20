@@ -103,6 +103,20 @@ class TableCreateIntegrationTest extends PlanBProjectIntegrationTestSupport {
     }
 
     @Test
+    void createTableWithEmptyCommentNormalizesAndEndsActive() {
+        TableCreateDTO dto = createDto("notes", List.of(
+                new ColumnDefinitionDTO("title", "varchar", 64, null, true, null, false, false, "")));
+
+        ObjectNode snapshot = tableService.createTable(project, dto);
+
+        assertThat(snapshot.get("status").asText()).isEqualTo("ACTIVE");
+        BaasTable meta = tableMapper.selectOne(Wrappers.<BaasTable>lambdaQuery()
+            .eq(BaasTable::getProjectId, project.getId())
+            .eq(BaasTable::getTableName, "notes"));
+        assertThat(meta.getStatus()).isEqualTo(TableStatus.ACTIVE.name());
+    }
+
+    @Test
     void idempotentReplayReturnsSameSnapshotWithoutSecondExecution() {
         TableCreateDTO dto = createDto("replay_t", List.of(column("name", "varchar", 64, false, false)));
         ObjectNode first = tableService.createTable(project, dto);
