@@ -59,6 +59,16 @@ public class PermitAllUrlProperties implements InitializingBean {
 	@Setter
 	private boolean skipPublicUrl = false;
 
+	/**
+	 * 完全跳过 Bearer token 解析的路径
+	 * <p>
+	 * 匹配路径的请求即使携带 Authorization 头也不进入平台 token 内省,供自带鉴权体系的路径使用(如 BaaS 数据面 /data/**)。
+	 * 默认空列表,存量服务行为不变。
+	 */
+	@Getter
+	@Setter
+	private List<String> skipResolveUrls = new ArrayList<>();
+
 	@Override
 	public void afterPropertiesSet() {
 		ignoreUrls.addAll(Arrays.asList(DEFAULT_IGNORE_URLS));
