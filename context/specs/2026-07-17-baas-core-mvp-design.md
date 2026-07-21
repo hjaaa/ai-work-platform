@@ -1,7 +1,7 @@
 # BaaS 核心 MVP 设计(ai-work-baas)
 
 - 日期:2026-07-17
-- 状态:v27;v1~v5 经四轮整体评审定稿,v6 附实施规划与会话交接(§16),v8 补齐 Plan B(表管理与 DDL)设计细化,v9~v25 按 Plan B 十七轮设计评审修订,v26 为四维系统性自查修订,v27 为 Plan B 实施计划复审闭环修订
+- 状态:v28;v1~v5 经四轮整体评审定稿,v6 附实施规划与会话交接(§16),v8 补齐 Plan B(表管理与 DDL)设计细化,v9~v25 按 Plan B 十七轮设计评审修订,v26 为四维系统性自查修订,v27 为 Plan B 实施计划复审闭环修订,v28 补齐 Plan C(数据面 REST)设计细化
 - 范围:「MySQL 版 BaaS 平台」首个子项目(核心 MVP,定位内部 Alpha)的设计文档,同时记录三个子项目的总体开发顺序决策
 
 ## 1. 背景与目标
@@ -82,6 +82,14 @@ Cloud 网关会剥掉外部路径第一段(AiWorkRequestGlobalFilter 重写 Stri
 
 鉴权边界:`/data/**` 加入资源服务器 ignore-urls(平台 OAuth 放行),由 ApiKeyAuthFilter 强制校验;`/studio/**` 走平台登录态 + upms 权限,与现有服务一致。
 
+**入口落地清单(Plan C 细化,收口 Plan A/B 遗留 Follow-up)**:
+
+- **网关路由**:`db/ai_work_config.sql` 的 `ai-work-gateway-dev.yml` 种子新增 `id: ai-work-baas / uri: lb://ai-work-baas / predicates: Path=/baas/**`(仿 upms 条目;AiWorkRequestGlobalFilter 全局剥外部路径第一段,已与本节路径表吻合,无需额外配置)
+- **Nacos 配置种子**:新增 `ai-work-baas-dev.yml`(当前完全缺失,cloud 形态元数据源无配置、服务无法启动):元数据源(druid → `ai_work_baas`)、redis、`security.oauth2.client.ignore-urls: [/data/**]`、`baas.provisioner.*`、`baas.project-db.*`
+- **boot 形态元数据表并库(已确认决策)**:baas 平台元数据表在 boot 单体落 `ai_work` 单库(与 quartz/upms 同库惯例一致;baas 的 mapper 与 TransactionTemplate 全部绑定默认数据源,零代码改动)。脚本组织:`db/ai_work_baas.sql` 保持 cloud 形态单一事实源,`db/ai_work.sql` 增补相同的 baas 表 DDL(两种 compose 共用同一 mysql 镜像,`ai_work` 中多这组表对 cloud 形态无害),并以单测断言两个文件中 baas 表 DDL 逐语句一致防漂移
+- **boot 配置**:`ai-work-boot/application.yml` 的 `security.oauth2.client.ignore-urls` 同步加 `/data/**`;`application-dev.yml` 补 `baas.provisioner.*` 与 `baas.project-db.*`;boot 冒烟测试补数据面路由断言
+- **compose**:`docker-compose.yml` 新增 `ai-work-baas` 服务(仿 upms 范式:build context + networks);`docker-compose-boot.yml` 的 boot 服务同步注入 `BAAS_MASTER_KEYS`/`BAAS_ACTIVE_KEY_ID` 等环境变量(缺失时加密器 fail-fast 属预期行为)
+
 ## 6. 数据模型
 
 ### 6.1 平台元数据库(新建 `ai_work_baas` 库,独立 SQL 脚本)
@@ -126,6 +134,15 @@ DELETE /rest/v1/{table}?id=eq.1  按条件删除(无过滤条件则 400 拒绝)
 - POST 数组批量插入为**单事务原子**:任一行失败整体回滚
 - `Prefer: return=representation` 时 POST/PATCH 返回行数据,默认仅返回主键/行数
 - 分页:默认 `limit=100`,最大 `1000`;`Prefer: count=exact` 时响应头返回 `Content-Range: 0-19/87` 总数
+- **值类型感知绑定(Plan C 细化)**:过滤值与 body 值按目标列逻辑类型严格解析后绑定——bigint/int → Long、decimal → BigDecimal、boolean 仅 `true/false`、`date` 须 `yyyy-MM-dd`、`datetime` 须 `yyyy-MM-dd HH:mm:ss`(与 §7.3 默认值规范格式一致),解析失败 400;datetime 值在响应中同样以 `yyyy-MM-dd HH:mm:ss` 输出(输入输出对称)
+- `like` 通配符:值中的 `%`/`_` 原样传递给 MySQL,**不做 PostgREST 的 `*`→`%` 转换**(差异在数据面静态 OpenAPI 中注明)
+- `in` 值按逗号切分,不支持值内嵌逗号或引号转义(无法唯一切分即 400);空列表 `in.()` → 400
+- `json` 列仅允许 `is.null / is.not_null` 过滤,其余操作符 400;`text` 列支持全部操作符
+- `order` 支持逗号分隔多列,每列可选 `.asc` / `.desc`,缺省 asc;列名同样过元数据白名单
+- **POST/PATCH body 含 `id` 列一律 400**(所有角色,含 service_role):主键统一服务端自增生成、禁止显式指定与更新
+- 默认响应体:POST 201 + 插入行主键数组 `[{"id": 1}, …]`(JDBC generated keys);PATCH/DELETE 200 + `{"count": n}`;`Prefer: return=representation` 时 POST/PATCH 返回完整行数据(DELETE 不支持 representation)
+- `Prefer: count=exact` 以同过滤条件执行第二条 `COUNT(*)` 后拼 `Content-Range`;未携带该头不执行 count
+- bigint 列(含 `id` 与 owner 列)在响应 JSON 中以**原样 number** 输出(与 PostgREST 行为对齐;JS 2^53 精度风险在静态 OpenAPI 注明),不沿用平台 Long→String 全局定制(见 §7.5)
 - 关联/嵌套查询、OR、聚合不进 MVP
 
 ### 7.2 Auth API(终端用户,完整会话模型)
@@ -217,6 +234,18 @@ PUT  /auth/v1/user/password                   修改密码:成功后撤销该用
 **三方项目一致性(强制)**:URL 中的 `{projectRef}`、API Key 所属项目、JWT 的 `iss/aud` 三者必须指向同一项目,**任一不一致一律 401**;一致性校验完成之前不选择数据源、不建立任何项目库连接。校验顺序:apikey 解析项目 → 与 URL projectRef 比对 → 若带 JWT 再校验 iss/aud 与 kid。
 
 **secret key 与 JWT 互斥**:secret key 恒定解析为 `service_role`;secret key 请求**同时携带终端用户 JWT 直接 401 拒绝**,不做身份混合。
+
+### 7.5 数据面执行架构(Plan C)
+
+- **包与序列化隔离**:数据面代码位于独立包 `com.aiwork.baas.data`,配独立 `@RestControllerAdvice` 输出 §11 错误体(既有 `BaasStudioExceptionHandler` 限定 `com.aiwork.baas.controller` 包,不覆盖数据面);请求与响应使用数据面**独立 ObjectMapper**(专用 HttpMessageConverter 仅挂数据面控制器),绕开平台全局 Long→String、时间格式定制与 **XSS 反序列化清洗**(后者会静默改写用户写入的数据,数据面必须绕开)
+- **请求管道**(servlet filter,仅匹配 `/data/**`):`CorsFilter`(§12.2)→ `ApiKeyAuthFilter` → controller。鉴权结果(项目实体、角色、终端用户 ID)放入 request attribute 承载的 DataRequestContext,**不进 Spring SecurityContext**(数据面与平台安全体系零耦合)
+- **ApiKeyAuthFilter** 按 §7.4 顺序执行:`apikey` 头 SHA-256 后查 `baas_api_key`(常量时间比较)→ 与 URL projectRef 比对 → 项目状态非 ACTIVE 一律 403 → 若带 JWT 再验;一致性校验完成前不触碰 ProjectDataSourceRegistry。`last_used_time` 更新为**节流 best-effort**(每 key 每分钟至多写一次,失败不影响请求)
+- **JWT 验签完整实现属 Plan C**(Plan D 仅签发、会话模型与轮换端点):按 kid 查 `baas_jwt_key`(CURRENT,或 PREVIOUS 且未过 `valid_until`;REVOKED 拒绝),`BaasCryptoService` 解密 HS256 secret 验签,严格校验 `iss/aud/role`,`sub` 严格解析为 Long(§7.2);**签名密钥不做任何缓存、每请求直查**——§6.1 紧急轮换「旧 access JWT 立即失效」与 §14 对应必测项依赖此
+- **元数据每请求直查、MVP 不做缓存**:每请求约 5-6 次平台库点查(key/project/jwt key/table/columns/acl,均走主键或唯一索引)。ALTERING/CONFLICT 阻断(§9.5)要求强一致,而 DDL 可能发生在其他实例,进程内缓存必须解决跨实例失效,内部 Alpha 不值得;缓存留二期,届时仅替换此层实现
+- **SQL 构建两级**:QueryParser(查询串 → 过滤 AST + select/order/分页)与 SqlBuilder(AST + 元数据 + 角色上下文 → 参数化 SQL);拼入 SQL 原文的只有白名单校验后反引号包裹的列名,值全部占位符绑定;owner 策略(§8.3)在 SqlBuilder 内注入(SELECT/UPDATE/DELETE 追加过滤、INSERT 强制覆写)
+- **执行层**:`ProjectDataSourceRegistry.execute(project, ds → …)` 借用连接池,JdbcTemplate 设置 `queryTimeout = 5s`(§13;注册表本身未设,须在此层补);批量插入在单个 Connection 上手动事务(`setAutoCommit(false)`,全部成功 commit、任一失败 rollback)兑现 §7.1 单事务原子
+- **表状态阻断响应码**(§9.5 执行面):元数据无此表或 DELETED(tombstone)→ 404(对外等同不存在,不泄露);CREATING/ALTERING/FAILED/CONFLICT → 403 + hint 说明表暂不可用
+- **静态 OpenAPI**:手写 `baas-data-api.yaml` 入库(`ai-work-baas` 资源目录),以 base_url 相对路径描述(§5),覆盖查询语法、鉴权头、Prefer 语义、错误体与全部状态码;MVP 仅作为仓库交付物,不新增运行时端点(数据面路径全部在 apikey 之后,不为文档开匿名面)
 
 ## 8. 权限模型
 
@@ -369,7 +398,7 @@ ACTIVE / FAILED / CONFLICT → DELETED(tombstone,+N 天,默认 7) → 到期物�
 ## 11. 错误处理
 
 - 数据面用 HTTP 语义 + PostgREST 风格错误体 `{code, message, details, hint}`,不复用平台 `R<T>`
-- 映射:唯一键冲突→409,表不存在→404,列名/语法非法→400,ACL 或 owner 策略拒绝→403,apikey 无效/JWT 无效→401,项目非 ACTIVE→403,超资源限制→413/429
+- 映射:唯一键冲突→409,表不存在→404,列名/语法非法→400,ACL 或 owner 策略拒绝→403,apikey 无效/JWT 无效→401,项目非 ACTIVE→403,超资源限制→413/429,SQL 执行超时→500(脱敏 message;资源保护动作,非客户端可修复错误)
 - 原始 SQL 错误不透传(防泄露表结构),服务端做**结构化脱敏记录**(SQL 参数值、邮箱等业务字段值同样属于敏感信息,不得原样落日志)
 
 ## 12. 安全
@@ -387,16 +416,16 @@ ACTIVE / FAILED / CONFLICT → DELETED(tombstone,+N 天,默认 7) → 到期物�
 
 - 注入防线:表名/列名对照元数据白名单 + 值全部 PreparedStatement 参数绑定;DDL 层标识符限定 `^[a-z][a-z0-9_]{0,63}$` 并过滤 MySQL 保留字
 - `_` 前缀系统表对数据 API 完全不可见
-- CORS:数据面支持 per-project 允许来源配置(`baas_project.allowed_origins`),MVP 默认 `*` 可收紧,**默认 `*` 时固定 `allowCredentials=false`**。OPTIONS 预检不携带 apikey,由 CORS Filter 在 ApiKeyAuthFilter **之前**处理:仅按 URL projectRef 查平台元数据,不创建任何项目库连接
+- CORS:数据面支持 per-project 允许来源配置(`baas_project.allowed_origins`),MVP 默认 `*` 可收紧,**默认 `*` 时固定 `allowCredentials=false`**。OPTIONS 预检不携带 apikey,由 CORS Filter 在 ApiKeyAuthFilter **之前**处理:仅按 URL projectRef 查平台元数据,不创建任何项目库连接;projectRef 不存在时预检直接放行且不返回任何 CORS 头(不泄露项目存在性)
 - Auth 防暴力:基于 Redis 的登录/注册失败计数限速(每邮箱 + 每 IP)
 - 日志脱敏:password、key、JWT 不落日志;DDL 与密钥操作入 `baas_audit_log`
-- 限流:gateway/sentinel 基础 QPS 阈值 + 服务内资源限制(第 13 节)兜底慢查询
+- 限流:MVP(内部 Alpha)不新增网关限流配置,以服务内资源限制(第 13 节)兜底慢查询;gateway/sentinel QPS 阈值留对外形态时配置
 
 ## 13. 资源限制(MVP 默认值,可配)
 
 | 项 | 限制 |
 |---|---|
-| 请求体大小 | 1 MB |
+| 请求体大小 | 1 MB(数据面在鉴权前按 Content-Length 预检,超限 413;body 读取时流式兜底) |
 | 批量插入行数 | 1000 行 |
 | 过滤条件数量 | 每请求 20 个 |
 | SQL 执行超时 | 5 秒(JDBC queryTimeout,仅数据面) |
@@ -435,6 +464,7 @@ ACTIVE / FAILED / CONFLICT → DELETED(tombstone,+N 天,默认 7) → 到期物�
 - **集成测试**:Testcontainers 真 MySQL,覆盖「建项目状态机 → 建表 → CRUD 各操作符与语义细则 → signup/login/refresh/logout → ACL 与 owner 策略拦截 → key 吊销生效」全链路
 - **安全场景必测**:owner 伪造/转移(各角色 × INSERT/PATCH 携带 owner 列)、URL/apikey/JWT 三项目标识不一致、secret key 携带 JWT、Studio 跨项目越权(IDOR,替换 `{ref}`)、并发 refresh(grace 窗口内/外)、连续 JWT 轮换、**紧急轮换后原 current 与 previous 签发的 JWT 均立即 401 且 refresh token 仍可换新**、软删除后对账不复活、Cloud 与 Boot 两种形态的鉴权链各自生效
 - **Plan B(表管理与 DDL)必测**:类型兼容矩阵判定单测(无损/有损分类全覆盖);有损转换不带 `allowLossy` → 400、带且数据不兼容 → 409 不截断、可空→非空含 NULL 行 → 409;rename owner 列联动更新 `owner_column`、`id` 列保护;**drop owner 列 fail-closed**(ACL 同步全关、无越权窗口)与**取消 owner 配置强制关 ACL**;tombstone 同名禁重建(建表与表重命名两条路径)、物理清理后名称可复用;对账各情形(§9.4)各一例,**含 owner 约束破坏(列缺失/非 bigint/索引丢失)置 CONFLICT 不修正**;DDL 锁互斥、锁续租(原子 CAS)与锁丢失中止、**watchdog 停顿超过 TTL 时 DB advisory lock 兜底**(第二操作拿到 Redis 锁但在 GET_LOCK 处被拒,不与旧 DDL 并发);幂等重放(指纹一致返回快照、**指纹不一致 409**,含 DELETE 同 ID 删不同表被指纹区分)、`DDL_APPLIED` 断点探测式续跑、**陈旧 RUNNING 接管**(模拟进程崩溃后 CAS 接管续跑)、**接管后旧执行者隔离**(A 超时、B 接管后:A 续租失败、无法释放 B 的锁、日志条件更新 0 行,不覆盖 B 的检查点;**含 A 在取 GET_LOCK 前停顿、A 在写平台元数据前停顿两个窗口**——恢复后均不产生陈旧 DDL 或元数据覆盖,元数据事务因守卫 0 行整笔回滚);**并发 FAILED 重试仅一个执行者 CAS 成功**、连续多次失败 retry_count 递增;**陈旧 cleanup 不误删同名新表**(旧表清理完成、同名重建后,预建 cleanup 记录按表 ID 校验不通过、不执行 DROP)、**未到期 PENDING 不被认领**(保持 PENDING、不置 SUCCESS)、**多实例并发认领同一 PENDING 仅一个 CAS 成功**、**PENDING→RUNNING 后立即崩溃可被调度器自动接管**、**DROP 已执行而终态提交前崩溃时探测式续跑**、**FAILED cleanup 由调度器自动重试**;**所有权事务提交失败不产生任何项目库副作用**、**所有权事务提交成功后崩溃可被接管续跑**、**DDL_APPLIED 状态下重试/接管不重置检查点**;**陈旧对账不覆盖新元数据**(对账读完结构后丢锁、并发 ALTER 完成,旧对账整笔回滚);**跨 operationId 的项目级 epoch fencing**(A 在最后一次锁校验后停顿并丢失双锁,B 以不同 operationId 完成操作,A 恢复后整笔事务因项目 epoch 不匹配回滚;至少覆盖 reconcile-vs-ALTER 与 ACL 关闭-vs-开启两组);**SCHEDULED reconcile 的 RUNNING 崩溃由下一调度周期接管**、**FAILED 自动重试**、**多实例调度不产生重复任务**(两个调度器锁外同时读空,第一个写入 RUNNING 后崩溃,第二个锁内重查后接管原记录、不创建新记录);**迁移后 Plan A 建项目路径不改造仍成功且 `ddl_fence_epoch` 初始为 0**;**四分支所有权取得后日志 fence_epoch 与项目 epoch 相等**(参数化覆盖新操作/FAILED 重试/RUNNING 接管/PENDING 认领);**管理 API 不得删除 owner 列最后一个索引**(modifyColumns unique=false,indexed=false → 400;unique→普通索引同一 ALTER 替换);**非规范索引名可被正确定位**(外部建 `foo_email` 索引 → reconcile 导入 → PATCH 关闭索引/重命名列,DDL 按 information_schema 实际名生成且执行成功);**ACL PUT ownerColumn=id → 400 且不改 ACL/索引**;**对账准入拦截**——已有元数据的表违反约束置 CONFLICT、无元数据的外部表拒绝导入且报告留痕 REJECTED_IMPORT(两类断言分开,不得同时断言「不导入」与 `status=CONFLICT`),用例覆盖:无 `id`、`id` 类型/自增/主键性质错误、复合主键、生成列、外键、**列级与表级 CHECK 约束(含 NOT ENFORCED)**、**VIEW、MyISAM、表级触发器、非法表名/列名**、**不满足单列索引谓词的索引(前缀唯一、不可见、FULLTEXT、DESC、函数索引各一例)**;**建表语句显式 ENGINE=InnoDB**;**boolean 规范化闭环**(创建含 true/false 默认值的 boolean 列 → 查询 information_schema 回读 tinyint(1) 与 0/1 → 对账无差异不产生漂移;tinyint(4)/unsigned 变体拒绝映射);**物理基线三例**(平台建表回读 charset/collation/row_format 符合基线;外部表表级排序规则不同 → 拦截;外部表单列覆盖排序规则 → 拦截);**索引准入矩阵四例**(text/json 索引请求 400、varchar 键长边界 length=768 通过且 769 拒绝、已带索引的 varchar 扩长越界 400、第 65 个二级索引 400,均断言不执行 DDL);**依赖现状校验锁内重做**(两个并发请求均按"当前 63 个索引"锁外预检通过,后取锁者锁内重查后 400,且不记日志、不执行 DDL);**物理前置 fail-closed 三例**(page size 非 16384 → readiness 失败禁止建项目、预存错误字符集 database → 建库回读置 FAILED、预存错误基线系统表 → 回读不过不得 ACTIVE);**类型参数矩阵**(decimal(66,31)/varchar(0)/date 带 length → 400,数值默认值越界 400,外部 unsigned/zerofill → CONFLICT/REJECTED_IMPORT,**owner 列与 `_users.id` 精确类型一致——含 signedness**);**四类恢复路径不被前置状态校验误杀**(建表重试于 CREATING/FAILED、改表重试于 ALTERING/CONFLICT、cleanup 于 DELETED 到期、新操作仅 ACTIVE——按分支分类后各自放行/拦截);**系统表 manifest 与迁移闭环**(预存表错列/错索引 → FAILED 不得 ACTIVE、匹配 Plan A unsigned 版自动走 MIGRATING 迁移、迁移中数据面被阻断、迁移中崩溃按 information_schema 续跑、unsigned 越界值不产生部分迁移);**EXTRA 允许集合**(外部表 on update CURRENT_TIMESTAMP → CONFLICT/REJECTED_IMPORT;平台 datetime CURRENT_TIMESTAMP 默认值的 DEFAULT_GENERATED 对账无漂移);**索引名占用探测**(其他列的外部索引占用 `idx_email`/`uk_email` 后,email 列新增索引、唯一/普通替换及列重命名仍成功,分配器落到备用名);**长 ALTER 与项目删除互斥**、**表级 cleanup 与项目 DROP DATABASE 不并发**(同一项目锁);**SUCCESS 重放不取锁**(他人长时间持有 DDL 锁时,已成功操作的同 ID 重放仍立即返回原快照而非 409);**ACL PUT 与改表串行化**(并发 ALTER 删/改 owner 列时 ACL 配置不产出损坏的 owner 约束)、**ACL 幂等重放不覆盖新配置**(请求成功 → 另一请求修改 → 原 operationId 重放仅返回旧快照);**删表 tombstone 快照重放**与 cleanup-drop 独立取锁重试;**超过 255 字符的注释/默认值元数据双写成功**(验证迁移扩容);**ACL 索引被外部删除后再次设置 owner 可重建**;**64 字符列名生成合法索引名**(截断 + 哈希后缀 ≤ 64);**DDL 注入尝试**(默认值/注释携带引号、注释符、子查询等恶意载荷,断言渲染后 DDL 无原样拼接);**FAILED/CONFLICT 表可删除并释放表名**(软删 → cleanup no-op(物理表不存在)→ 元数据行物理删除后同名可重建);**HTTP 陈旧 RUNNING 兜底**(客户端消失、锁失效超阈值后调度器置 FAILED 且表状态按类型落位(create→FAILED、alter→CONFLICT),同 ID 重试仍从检查点续跑);**锁内分类发现 SUCCESS 返回快照**(两个同 ID 请求竞速,后进锁者锁内发现已 SUCCESS,返回原快照不重复执行);**acl-config 补索引期间表置 ALTERING 阻断数据面、纯开关分支不改表状态**;**对账只处理 ACTIVE/CONFLICT 表**(FAILED/CREATING 表不被「库无表」规则误判为 CONFLICT);**datetime(6) 外部列拒绝映射、int(11) 显示宽度等价映射不误拒**;**项目池 drain 期间 DDL 锁连接不受影响**(GET_LOCK 走 Provisioner 连接);**MIGRATING 由启动扫描触发且参与 epoch**(Testcontainers 真 MySQL)
+- **Plan C(数据面 REST)必测**:解析器与 SqlBuilder 单测覆盖操作符全矩阵(eq/neq/gt/gte/lt/lte/like/in/is × 各逻辑类型)、非法列/非法操作符/类型解析失败 400、`in.()` 与值内嵌逗号 400、json 列非 is 操作符 400、order 多列与非法列、limit/offset 边界与 20 条过滤上限;**SQL 注入载荷**(列名/值/order 携带引号、注释符、子查询)断言全部参数化绑定或 400、DDL 原文无拼接;URL/apikey/JWT 三方一致性矩阵、secret key 携带 JWT 401、kid 三态(CURRENT/PREVIOUS 未过 `valid_until`/REVOKED)与过期边界、**紧急轮换后立即 401(密钥无缓存直查)**;ACL × 角色 × 四操作全矩阵;owner 策略按 §8.3 表逐格覆盖(含 body 携带 owner 列 400、anon `owner IS NULL` 读写、service_role 绕过);表状态阻断矩阵(ACTIVE 放行、DELETED/无表 404、CREATING/ALTERING/FAILED/CONFLICT 403)与项目非 ACTIVE 403;POST/PATCH body 含 `id` 400;批量插入部分失败整体回滚、1000 行/1MB/limit 1000 边界(413/400);`return=representation` 与 `count=exact` 的 Content-Range 语义;CORS 预检不触碰项目库连接(断言 ProjectDataSourceRegistry 零调用)、默认 `*` 时 allowCredentials=false、projectRef 不存在无 CORS 头;**bigint 输出 JSON number、datetime 输出 `yyyy-MM-dd HH:mm:ss`、XSS 清洗不改写数据面 body**(写入含 HTML 的字符串读回原样);queryTimeout 5 秒生效且超时 500 脱敏;`last_used_time` 节流更新;boot 冒烟测试补 `/data/{ref}/rest/v1/{table}` 路由断言;Testcontainers 全链路(建项目 → 建表 → 开 ACL → anon/authenticated/service_role 三态 CRUD);`db/ai_work.sql` 与 `db/ai_work_baas.sql` 的 baas 表 DDL 逐语句一致性断言
 - **交付物**:数据面静态 OpenAPI + 管理面 springdoc 文档,后续 MCP 插件以 7.3 为契约
 
 ## 15. 明确不进 MVP 的范围
@@ -459,9 +489,9 @@ BaaS 核心 MVP 拆为 5 份实施计划,每份独立产出可运行、可测试
 | 计划 | 范围 | 对应 spec 章节 | 依赖 | 状态(2026-07-18) |
 |---|---|---|---|---|
 | **A 项目底座与生命周期** | 模块骨架(`ai-work-baas`,端口 4010)、元数据库、AES-GCM 加密器、API Key 体系、项目状态机与延迟清理、项目连接池注册表、Studio 项目管理 API(含 IDOR 防护) | §4、§6、§8.1、§9.1/9.3、§10、§12.1 | — | **已实现**(PR #13 已合入 develop) |
-| **B 表管理与 DDL** | 建/改/删表(元数据 + 真实 DDL,改表为全能档:加/删列、改类型/长度、重命名列/表,含 `allowLossy` 确认与类型兼容矩阵)、Redis 串行锁 + 操作 ID 幂等(`baas_ddl_log`)、表状态机(§9.5)、表级 ACL 与 owner 列配置(bigint 校验/自动建索引/anon.insert 要求可空)、软删 tombstone 与同名禁重建、`information_schema` 对账 | §7.3(表管理契约)、§8.2/8.3(配置面)、§9.2/9.4/9.5、§13(表编辑器边界与兼容矩阵) | A | 设计细化至 v27,实施计划 `docs/superpowers/plans/2026-07-18-baas-plan-b-table-ddl.md` 已生成并按首轮复审修订,待实施 |
-| **C 数据面 REST** | PostgREST 风格解析器与 SQL 构建器、`/rest/v1/{table}` 动态 CRUD 语义细则、ApiKeyAuthFilter + URL/apikey/JWT 三方一致性、owner 行策略注入、CORS Filter(先于鉴权、仅查元数据)、错误体映射、资源限制、Cloud/Boot 双形态入口落地、数据面静态 OpenAPI | §5、§7.1/7.4、§8.2/8.3(执行面)、§11、§12.2、§13 | A、B | 未写 |
-| **D 终端用户 Auth** | `/auth/v1/*`:signup/login、`_sessions`/`_refresh_tokens`、refresh 行锁事务 + 10 秒 grace 加密重放、logout/改密撤销会话、JWT 签发验签(kid 双版本)、常规/紧急轮换端点、防暴力限速 | §7.2、§6.1/6.2、§12.2 | A、C | 未写 |
+| **B 表管理与 DDL** | 建/改/删表(元数据 + 真实 DDL,改表为全能档:加/删列、改类型/长度、重命名列/表,含 `allowLossy` 确认与类型兼容矩阵)、Redis 串行锁 + 操作 ID 幂等(`baas_ddl_log`)、表状态机(§9.5)、表级 ACL 与 owner 列配置(bigint 校验/自动建索引/anon.insert 要求可空)、软删 tombstone 与同名禁重建、`information_schema` 对账 | §7.3(表管理契约)、§8.2/8.3(配置面)、§9.2/9.4/9.5、§13(表编辑器边界与兼容矩阵) | A | **已实现**(PR #14 已合入 develop,2026-07-20;Codex review 循环收敛) |
+| **C 数据面 REST** | PostgREST 风格解析器与 SQL 构建器、`/rest/v1/{table}` 动态 CRUD 语义细则、ApiKeyAuthFilter + URL/apikey/JWT 三方一致性、**终端用户 JWT 完整验签(kid 双版本;签发属 D)**、owner 行策略注入、CORS Filter(先于鉴权、仅查元数据)、错误体映射、资源限制、Cloud/Boot 双形态入口落地、数据面静态 OpenAPI | §5、§7.1/7.4/7.5、§8.2/8.3(执行面)、§11、§12.2、§13 | A、B | 设计细化至 v28(2026-07-21),计划未写 |
+| **D 终端用户 Auth** | `/auth/v1/*`:signup/login、`_sessions`/`_refresh_tokens`、refresh 行锁事务 + 10 秒 grace 加密重放、logout/改密撤销会话、JWT 签发(kid 双版本;**验签已在 C 实现**)、常规/紧急轮换端点、防暴力限速 | §7.2、§6.1/6.2、§12.2 | A、C | 未写 |
 | **E Studio 前端** | ai-work-ui 的 BaaS 控制台:项目列表/详情、可视化表编辑器、ACL 与 owner 配置、API Key 管理(明文仅显示一次),遵循 ai-work-ui/DESIGN.md | §7.3 的界面化 | A、B(可与 C/D 并行) | 未写 |
 
 MVP 之后(各自另行「设计 → 计划」,不属于上述 5 份):插件市场 MVP → MCP 插件(以 §7.3 管理面 API 为契约,作为市场首个插件)→ Storage → Realtime → Functions(见 §2)。
@@ -483,9 +513,17 @@ MVP 之后(各自另行「设计 → 计划」,不属于上述 5 份):插件市�
    - Plan A 的项目删除(`ProjectLifecycleService` 直接 CAS DELETING、关连接池)与项目物理清理(`ProjectCleanupJob` 到期直接 DROP DATABASE)**均未取任何 DDL 锁**;Plan B 须按 §9.3 改造为先取项目双层锁再转移状态/执行清理
    - Plan A 的 `ProjectProvisioner.CREATE_DATABASE_SQL` 已显式 `DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci`,与 §13 物理基线一致;部署前置条件 `innodb_page_size=16KiB`(§13 varchar 键长校验按此计算,§9.1 要求启动/初始化时查 `@@innodb_page_size` fail-closed)
    - Plan A 系统表建表语句(`CREATE_USERS/SESSIONS/REFRESH_TOKENS_TABLE_SQL`)仅显式 ENGINE、未带 charset/collation/ROW_FORMAT,且 **id/user_id/session_id/replacement_token_id 均为 `bigint unsigned`**,与 §6.2「signed bigint + Java Long」矛盾;Plan B 须改建表模板并迁移存量项目库统一为 signed,同时补系统表物理基线回读(§9.1)
+   - 平台全局 `JacksonConfiguration`(ai-work-common-core)把所有 Long 序列化为 String,`ai-work-common-xss` 对所有 String 反序列化做清洗;数据面必须用独立 ObjectMapper 绕开(§7.5),否则 bigint 变字符串、用户写入的数据被静默改写
+   - `BaasStudioExceptionHandler` 的 `@RestControllerAdvice` 限定 `basePackages="com.aiwork.baas.controller"`;数据面 controller 必须放独立包(`com.aiwork.baas.data`)并配独立 advice,否则错误体被接管成 `R` 格式
+   - `ProjectDataSourceRegistry` 为回调式借用 API(`execute(BaasProject, Function<DataSource, T>)`,无按 ref 直接取 DataSource 的方法),且**未设置 JDBC queryTimeout**,数据面执行层须自设 5 秒;runtime 密码解密 AAD 为 `{projectId}:db_password:{projectId}`
+   - `ProjectKeyService` 没有按 keyHash 查询的方法(Plan C 新增);`ApiKeyGenerator.sha256Hex/matches`(常量时间比较)可直接复用
+   - Nacos 种子(`db/ai_work_config.sql`)当前没有任何 `ai-work-baas-*.yml` 条目,cloud 形态元数据源无配置——Plan C 须新增种子;网关路由种子在同文件的 `ai-work-gateway-dev.yml`
+   - boot 形态 baas 元数据表并入 `ai_work` 单库(§5 已确认决策):baas 的 mapper 与 Plan A/B 各处注入的 `TransactionTemplate` 全部绑定默认数据源;dynamic-datasource 的 `@DS` 在已开启事务内不切换连接,会使 Plan B fencing 事务写错库,不可用;独立 SqlSessionFactory 方案需改造已合入代码的注入点,均已排除
+   - Plan B `DefaultValueRenderer` 的规范时间格式为 `yyyy-MM-dd`(date)与 `yyyy-MM-dd HH:mm:ss`(datetime,严格解析);数据面值解析与输出沿用同一格式(§7.1),不引入 ISO-8601 `T` 分隔变体
 
 ## 17. 修订记录
 
+- **v28(2026-07-21)**:补齐 Plan C(数据面 REST)设计细化,三项范围决策经需求方确认:① JWT 验签完整实现归 Plan C(Plan D 仅签发/会话/轮换端点),消除 §16.1 C/D 行歧义;② boot 单体形态 baas 元数据表并入 `ai_work` 单库(`@DS` 在已开启事务内不切换连接会破坏 Plan B fencing 事务、独立 SqlSessionFactory 需改造已合入代码,均排除);③ 数据面 bigint 以 JSON number 原样输出(独立 ObjectMapper 绕开平台 Long→String 与 XSS 清洗)。新增 §7.5 数据面执行架构:包与序列化隔离、CorsFilter→ApiKeyAuthFilter 管道与 request attribute 上下文、JWT 密钥无缓存直查(支撑紧急轮换立即失效)、元数据每请求直查不缓存(ALTERING 阻断强一致,缓存留二期)、QueryParser/SqlBuilder 两级构建、执行层借用连接池 + 5 秒 queryTimeout + 批量插入单连接手动事务、表状态阻断响应码(DELETED/无表 404,CREATING/ALTERING/FAILED/CONFLICT 403)、静态 OpenAPI 仅仓库交付物。§7.1 补语义细则:值类型感知严格解析绑定(时间格式与 §7.3 默认值一致)、like 不做 `*` 转换、in 切分规则与 `in.()` 400、json 列仅 is 过滤、order 多列、POST/PATCH 禁 `id` 列、默认响应体形态(POST 主键数组/PATCH/DELETE count)、count=exact 二次 COUNT、bigint number 输出。§5 补入口落地清单(网关路由种子、Nacos `ai-work-baas-dev.yml` 种子——当前缺失致 cloud 形态亦无法启动、boot 并库脚本组织与一致性单测、boot ignore-urls、双 compose 环境变量)。§11 补 SQL 超时 500;§12.2 CORS 补 projectRef 不存在无 CORS 头、限流定为 MVP 不新增网关配置;§14 增补 Plan C 必测项;§16.2 增补七条工程事实(全局 Jackson/XSS、异常处理器分包、注册表 API 与 queryTimeout 缺口、key 哈希查询缺口、Nacos 种子缺失、boot 并库依据、时间规范格式);§16.1 同步 Plan B 已实现(PR #14 已合入 develop)、Plan C 设计细化完成。
 - **v27(2026-07-18)**:闭环 Plan B 实施计划首轮复审中的管理 API 契约缺口。§7.3 正式加入 `POST /studio/projects/{ref}/system-tables/migrate`:仅 `baas_admin`,非管理员 404,锁忙/非法 manifest/迁移失败 409,同步返回 `status/migrated`,不使用 operationId(依赖项目状态、manifest 与 epoch 检查点幂等);§16.1 同步 Plan B 计划已生成并进入实施前修订状态。
 - **v26(2026-07-18)**:四维系统性自查修订(状态机完备性/锁与事务顺序/information_schema 映射完整性/测试覆盖对齐),11 处发现一次性修复。状态机——① FAILED→ACTIVE(重试成功)与 FAILED/CONFLICT→DELETED 出边补全,FAILED/CONFLICT 表允许删除以释放表名,cleanup 改用 DROP TABLE IF EXISTS(§9.5/§9.2);② HTTP 操作陈旧 RUNNING 兜底:请求体不持久化、调度器无法代跑,锁失效超阈值(默认 10 分钟)后 CAS 置 FAILED 并按类型落表状态,同 ID 重试仍可续跑(§9.2);③ MIGRATING 触发入口定为启动后台扫描 + 手动,并参与项目级 epoch(§9.1/§9.2);④ §9.2 锁内分类补 SUCCESS(返回快照)与活跃 RUNNING(409)两类,删表状态集定为 ACTIVE/FAILED/CONFLICT。锁与事务——⑤ 消除 §9.2「GET_LOCK 与 DDL 同连接」与 §9.3「专用管理连接」的矛盾:统一为同一条 Provisioner 数据源物理连接(DDL 本就由 Provisioner 执行,天然不受项目池 drain 波及);⑥ acl-config 补索引分支明确置 ALTERING、纯开关不改表状态(§8.3)。映射——⑦ date/datetime 仅 DATETIME_PRECISION=0 可映射;⑧ int/bigint 显示宽度忽略(int(11) 等价 int,不按字面误拒)(§13);⑨ 对账范围限定 ACTIVE/CONFLICT 表,防「库无表」规则误伤 FAILED/CREATING(§9.4)。§14 增补上述全部测试项。
 - **v25(2026-07-18)**:按 Plan B 十七轮复审(3 P1)修订。① 锁内校验先按日志分支分类(§9.2):固定顺序改为「双层锁 → 锁内重读日志分类(无记录/FAILED/陈旧 RUNNING/PENDING)→ 按分支重读结构并校验该分支允许的状态集(新操作仅 ACTIVE、建表重试 CREATING/FAILED、改表重试 ALTERING/CONFLICT、cleanup DELETED 且到期)→ 所有权事务」——统一前置 ACTIVE 会误杀恢复路径,笼统放行又会命中损坏表/tombstone;PENDING 认领改为先锁内复核再 CAS,消除与总顺序的矛盾;② 系统表校验与 signed 迁移闭环(§9.1/§6.2):版本化系统表 manifest(列/类型含 signedness/NULL/默认值/EXTRA/主键自增/索引形状/物理基线)全量比对,精确匹配当前版通过、精确匹配已知历史版(Plan A unsigned 版)自动迁移、其他偏差置 FAILED;项目状态机增 **MIGRATING**(阻断数据面),迁移在项目双层锁下逐表检查点执行,ALTER 前校验 unsigned 数据未超 signed 上限,崩溃按 information_schema 续跑;③ 列 EXTRA 允许集合(§9.4):id 仅 auto_increment、datetime CURRENT_TIMESTAMP 默认值的 DEFAULT_GENERATED 规范化不产生漂移、普通列仅空 EXTRA、on update CURRENT_TIMESTAMP 及其他未建模属性 CONFLICT/REJECTED_IMPORT,对账/导入/续跑共用。§14 增补:四类恢复路径不被误杀、系统表 manifest 与迁移闭环五例、EXTRA 拦截与无漂移。
