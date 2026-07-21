@@ -154,7 +154,7 @@ public class DataPlaneExecutor {
                             representation);
                     return representation;
                 }
-                return idArrayBuffer(ids);
+                return finishAndCheck(idArrayBuffer(ids));
             });
             writeBuffer(buffer, response, 201);
         };
@@ -185,7 +185,7 @@ public class DataPlaneExecutor {
                 aclChecker.check(meta, ctx.role(), DataOperation.UPDATE, false);
                 WriteBodyParser.ParsedWrite write = bodyParser.parsePatch(meta, body, ctx);
                 int count = executeUpdate(connection, sqlBuilder.buildUpdate(meta, query, write, ctx));
-                return countBuffer(count);
+                return finishAndCheck(countBuffer(count));
             });
             writeBuffer(buffer, response, 200);
             return;
@@ -207,7 +207,7 @@ public class DataPlaneExecutor {
                     JsonGenerator generator = representation.generator();
                     generator.writeStartArray();
                     generator.writeEndArray();
-                    return representation;
+                    return finishAndCheck(representation);
                 }
                 executeUpdate(connection, sqlBuilder.buildUpdateByIds(meta, write, ids));
                 streamRows(connection,
@@ -234,7 +234,7 @@ public class DataPlaneExecutor {
         BoundedJsonBuffer buffer = inTransaction(ctx, fastMeta, (connection, meta) -> {
             aclChecker.check(meta, ctx.role(), DataOperation.DELETE, false);
             int count = executeUpdate(connection, sqlBuilder.buildDelete(meta, query, ctx));
-            return countBuffer(count);
+            return finishAndCheck(countBuffer(count));
         });
         writeBuffer(buffer, response, 200);
     }
@@ -440,6 +440,11 @@ public class DataPlaneExecutor {
         generator.writeStartObject();
         generator.writeNumberField("count", count);
         generator.writeEndObject();
+        return buffer;
+    }
+
+    private static BoundedJsonBuffer finishAndCheck(BoundedJsonBuffer buffer) throws IOException {
+        buffer.checkLimit();
         return buffer;
     }
 

@@ -4,6 +4,7 @@ import com.aiwork.baas.data.auth.ApiKeyAuthFilter;
 import com.aiwork.baas.data.auth.BaasJwtVerifier;
 import com.aiwork.baas.data.cors.DataPlaneCorsFilter;
 import com.aiwork.baas.data.error.DataErrorWriter;
+import com.aiwork.baas.data.error.DataPlaneErrorBoundaryFilter;
 import com.aiwork.baas.mapper.BaasApiKeyMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
 import com.aiwork.baas.security.key.ApiKeyGenerator;
@@ -63,6 +64,16 @@ public class DataPlaneConfiguration {
     @Bean("dataResponsePermits")
     public Semaphore dataResponsePermits(DataPlaneProperties properties) {
         return new Semaphore(properties.getResponsePermits());
+    }
+
+    @Bean
+    public FilterRegistrationBean<DataPlaneErrorBoundaryFilter> dataPlaneErrorBoundaryFilterRegistration(
+            DataErrorWriter errorWriter) {
+        FilterRegistrationBean<DataPlaneErrorBoundaryFilter> registration = new FilterRegistrationBean<>(
+                new DataPlaneErrorBoundaryFilter(errorWriter));
+        registration.addUrlPatterns("/data/*");
+        registration.setOrder(0);
+        return registration;
     }
 
     @Bean

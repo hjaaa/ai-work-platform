@@ -24,8 +24,14 @@ import com.baomidou.dynamic.datasource.creator.druid.DruidDataSourceCreator;
 import com.aiwork.baas.config.BaasSchedulingConfiguration;
 import com.aiwork.baas.controller.StudioTableController;
 import com.aiwork.baas.data.rest.DataRestController;
+import com.aiwork.baas.entity.BaasApiKey;
+import com.aiwork.baas.entity.BaasProject;
+import com.aiwork.baas.entity.enums.KeyType;
+import com.aiwork.baas.entity.enums.ProjectStatus;
+import com.aiwork.baas.mapper.BaasApiKeyMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
 import com.aiwork.baas.security.crypto.MasterKeySource;
+import com.aiwork.baas.security.key.ApiKeyGenerator;
 import com.aiwork.baas.service.SystemTableMigrationService;
 import com.aiwork.common.security.component.PermitAllUrlProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -53,6 +59,8 @@ import java.sql.DatabaseMetaData;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 /**
  * boot profile 对 BaaS 关键 Bean 与 Studio 路由的真实应用上下文冒烟测试。
@@ -98,6 +106,12 @@ class BaasBootRouteSmokeTest {
     @MockitoBean
     private BaasProjectMapper baasProjectMapper;
 
+    @MockitoBean
+    private BaasApiKeyMapper baasApiKeyMapper;
+
+    @Autowired
+    private ApiKeyGenerator apiKeyGenerator;
+
     @Test
     void realBootContextMountsBaasBeansSchedulerAndRoutes() {
         assertThat(applicationContext.getBean(StudioTableController.class)).isNotNull();
@@ -141,6 +155,32 @@ class BaasBootRouteSmokeTest {
         // 平台 String 反序列化器含 trim/XSS 定制;数据面 mapper 必须保留线协议原值。
         assertThat(platformObjectMapper.readValue("\"  raw  \"", String.class)).isEqualTo("raw");
         assertThat(dataPlaneObjectMapper.readValue("\"  raw  \"", String.class)).isEqualTo("  raw  ");
+    }
+
+    @Test
+    void validDataPlaneAuthenticationUsesDataPlaneBadRequestBodyInBootContext() throws Exception {
+        String plaintext = "sec_boot_test";
+        BaasApiKey apiKey = new BaasApiKey();
+        apiKey.setId(11L);
+        apiKey.setProjectId(21L);
+        apiKey.setKeyType(KeyType.SECRET);
+        apiKey.setKeyHash(apiKeyGenerator.sha256Hex(plaintext));
+        apiKey.setStatus("ACTIVE");
+        BaasProject project = new BaasProject();
+        project.setId(21L);
+        project.setProjectRef("valid");
+        project.setStatus(ProjectStatus.ACTIVE);
+        when(baasApiKeyMapper.selectOne(any())).thenReturn(apiKey);
+        when(baasProjectMapper.selectById(21L)).thenReturn(project);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+            .get("/data/valid/rest/v1/t?limit=0")
+            .header("apikey", plaintext))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code")
+                .value("BAD_REQUEST"))
+            .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code")
+                .isString());
     }
 
     @TestConfiguration(proxyBeanMethods = false)

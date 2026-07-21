@@ -175,6 +175,73 @@ class DataPlaneExecutorIntegrationTest extends DataPlaneIntegrationTestSupport {
     }
 
     @Test
+    void oversizedDefaultPostIdResponseRollsBackBeforeCommit() throws Exception {
+        createOrdersTable();
+        long previousMaxBytes = properties.getResponseMaxBytes();
+        properties.setResponseMaxBytes(1L);
+        try {
+            assertThatThrownBy(() -> executor.executePost(serviceCtx(), "orders",
+                    dataPlaneObjectMapper.readTree("{\"title\":\"x\",\"qty\":1}"), PreferHeader.parse(null),
+                    new MockHttpServletResponse()))
+                .isInstanceOf(DataApiException.class)
+                .satisfies(error -> assertThat(((DataApiException)error).status()).isEqualTo(413));
+        }
+        finally {
+            properties.setResponseMaxBytes(previousMaxBytes);
+        }
+
+        MockHttpServletResponse get = new MockHttpServletResponse();
+        executor.executeGet(serviceCtx(), "orders", query(Map.of()), PreferHeader.parse(null), get);
+        assertThat(dataPlaneObjectMapper.readTree(get.getContentAsString())).isEmpty();
+    }
+
+    @Test
+    void oversizedDefaultPatchCountResponseRollsBackBeforeCommit() throws Exception {
+        createOrdersTable();
+        executor.executePost(serviceCtx(), "orders", dataPlaneObjectMapper.readTree("{\"title\":\"x\",\"qty\":1}"),
+                PreferHeader.parse(null), new MockHttpServletResponse());
+        long previousMaxBytes = properties.getResponseMaxBytes();
+        properties.setResponseMaxBytes(1L);
+        try {
+            assertThatThrownBy(() -> executor.executePatch(serviceCtx(), "orders",
+                    query(Map.of("title", new String[] { "eq.x" })),
+                    dataPlaneObjectMapper.readTree("{\"qty\":9}"), PreferHeader.parse(null),
+                    new MockHttpServletResponse()))
+                .isInstanceOf(DataApiException.class)
+                .satisfies(error -> assertThat(((DataApiException)error).status()).isEqualTo(413));
+        }
+        finally {
+            properties.setResponseMaxBytes(previousMaxBytes);
+        }
+
+        MockHttpServletResponse get = new MockHttpServletResponse();
+        executor.executeGet(serviceCtx(), "orders", query(Map.of()), PreferHeader.parse(null), get);
+        assertThat(dataPlaneObjectMapper.readTree(get.getContentAsString()).get(0).get("qty").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void oversizedDeleteCountResponseRollsBackBeforeCommit() throws Exception {
+        createOrdersTable();
+        executor.executePost(serviceCtx(), "orders", dataPlaneObjectMapper.readTree("{\"title\":\"x\",\"qty\":1}"),
+                PreferHeader.parse(null), new MockHttpServletResponse());
+        long previousMaxBytes = properties.getResponseMaxBytes();
+        properties.setResponseMaxBytes(1L);
+        try {
+            assertThatThrownBy(() -> executor.executeDelete(serviceCtx(), "orders",
+                    query(Map.of("title", new String[] { "eq.x" })), new MockHttpServletResponse()))
+                .isInstanceOf(DataApiException.class)
+                .satisfies(error -> assertThat(((DataApiException)error).status()).isEqualTo(413));
+        }
+        finally {
+            properties.setResponseMaxBytes(previousMaxBytes);
+        }
+
+        MockHttpServletResponse get = new MockHttpServletResponse();
+        executor.executeGet(serviceCtx(), "orders", query(Map.of()), PreferHeader.parse(null), get);
+        assertThat(dataPlaneObjectMapper.readTree(get.getContentAsString())).hasSize(1);
+    }
+
+    @Test
     void patchRepresentationReturnsChangedRowsByPrimaryKey() throws Exception {
         createOrdersTable();
         MockHttpServletResponse seed = new MockHttpServletResponse();
