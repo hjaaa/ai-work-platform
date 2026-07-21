@@ -15,11 +15,12 @@ import com.aiwork.baas.security.crypto.BaasCryptoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import java.time.Instant;
+import java.math.BigInteger;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Base64;
-import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 终端用户 access JWT 完整验签(spec §7.5 逐项清单,缺一即 401;密钥每请求直查、零缓存)。
@@ -31,11 +32,19 @@ import java.util.List;
 @RequiredArgsConstructor
 public class BaasJwtVerifier {
 
+    private static final String SUBJECT_CLAIM = "sub";
+
+    private static final String ISSUED_AT_CLAIM = "iat";
+
+    private static final String EXPIRATION_TIME_CLAIM = "exp";
+
     private final BaasJwtKeyMapper jwtKeyMapper;
 
     private final BaasCryptoService cryptoService;
 
     private final DataPlaneProperties properties;
+
+    private final Clock clock;
 
     public VerifiedEndUser verify(String token, BaasProject project) {
         SignedJWT jwt = parse(token);
@@ -49,17 +58,20 @@ public class BaasJwtVerifier {
         }
         BaasJwtKey key = resolveKey(project.getId(), kid);
         verifySignature(jwt, project, key);
+        Map<String, Object> rawClaims = rawClaimsOf(jwt);
+        Object rawSubject = rawClaims.get(SUBJECT_CLAIM);
+        if (!(rawSubject instanceof String subject)) {
+            throw unauthorized();
+        }
+        long issueTime = integerNumericDate(rawClaims, ISSUED_AT_CLAIM);
+        long expirationTime = integerNumericDate(rawClaims, EXPIRATION_TIME_CLAIM);
         JWTClaimsSet claims = claimsOf(jwt);
         // ② 必需 claim:iss/aud/sub/role/session_id/iat/exp
         String issuer = claims.getIssuer();
         List<String> audience = claims.getAudience();
-        String subject = claims.getSubject();
         Object role = claims.getClaim("role");
         Object sessionId = claims.getClaim("session_id");
-        Date issueTime = claims.getIssueTime();
-        Date expirationTime = claims.getExpirationTime();
-        if (issuer == null || audience == null || audience.isEmpty() || subject == null || role == null
-                || sessionId == null || issueTime == null || expirationTime == null) {
+        if (issuer == null || audience == null || audience.isEmpty() || role == null || sessionId == null) {
             throw unauthorized();
         }
         // ③ iss/aud/role 严格匹配(§7.4 三方一致性),sub 严格解析 Long
@@ -68,18 +80,7 @@ public class BaasJwtVerifier {
             throw unauthorized();
         }
         long userId = parseSubject(subject);
-        // ④ exp 未过期、iat 不在未来(时钟偏差 60 秒)
-        Instant now = Instant.now();
-        long skewSeconds = properties.getJwtClockSkewSeconds();
-        if (expirationTime.toInstant().plusSeconds(skewSeconds).isBefore(now)
-                || issueTime.toInstant().minusSeconds(skewSeconds).isAfter(now)) {
-            throw unauthorized();
-        }
-        // ⑤ exp − iat ≤ 1 小时
-        long ttlSeconds = (expirationTime.getTime() - issueTime.getTime()) / 1000;
-        if (ttlSeconds > properties.getJwtMaxTtlSeconds()) {
-            throw unauthorized();
-        }
+        validateTimeline(issueTime, expirationTime);
         return new VerifiedEndUser(userId, String.valueOf(sessionId));
     }
 
@@ -131,6 +132,41 @@ public class BaasJwtVerifier {
             return jwt.getJWTClaimsSet();
         }
         catch (Exception exception) {
+            throw unauthorized();
+        }
+    }
+
+    private static Map<String, Object> rawClaimsOf(SignedJWT jwt) {
+        Map<String, Object> claims = jwt.getPayload().toJSONObject();
+        if (claims == null) {
+            throw unauthorized();
+        }
+        return claims;
+    }
+
+    private static long integerNumericDate(Map<String, Object> claims, String claimName) {
+        Object value = claims.get(claimName);
+        if (!(value instanceof Long numericDate)) {
+            throw unauthorized();
+        }
+        return numericDate;
+    }
+
+    private void validateTimeline(long issueTime, long expirationTime) {
+        BigInteger issuedAt = BigInteger.valueOf(issueTime);
+        BigInteger expiresAt = BigInteger.valueOf(expirationTime);
+        if (expiresAt.compareTo(issuedAt) <= 0) {
+            throw unauthorized();
+        }
+
+        BigInteger now = BigInteger.valueOf(clock.instant().getEpochSecond());
+        BigInteger skew = BigInteger.valueOf(properties.getJwtClockSkewSeconds());
+        if (expiresAt.add(skew).compareTo(now) < 0 || issuedAt.subtract(skew).compareTo(now) > 0) {
+            throw unauthorized();
+        }
+
+        BigInteger maxTtl = BigInteger.valueOf(properties.getJwtMaxTtlSeconds());
+        if (expiresAt.subtract(issuedAt).compareTo(maxTtl) > 0) {
             throw unauthorized();
         }
     }

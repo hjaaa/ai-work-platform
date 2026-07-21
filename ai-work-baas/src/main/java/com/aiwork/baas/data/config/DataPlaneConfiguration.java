@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Clock;
 import java.util.concurrent.Semaphore;
 
 /**
@@ -40,6 +41,11 @@ public class DataPlaneConfiguration {
     @Bean
     public DataErrorWriter dataErrorWriter(@Qualifier("dataPlaneObjectMapper") ObjectMapper dataPlaneObjectMapper) {
         return new DataErrorWriter(dataPlaneObjectMapper);
+    }
+
+    @Bean
+    public Clock dataPlaneClock() {
+        return Clock.systemUTC();
     }
 
     /**

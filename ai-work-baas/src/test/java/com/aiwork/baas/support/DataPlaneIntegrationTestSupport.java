@@ -35,6 +35,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Date;
@@ -71,6 +72,9 @@ public abstract class DataPlaneIntegrationTestSupport extends PlanBContainerSupp
 
     @Autowired
     protected BaasCryptoService cryptoService;
+
+    @Autowired
+    protected Clock clock;
 
     @Autowired
     @Qualifier("dataPlaneObjectMapper")
@@ -184,7 +188,7 @@ public abstract class DataPlaneIntegrationTestSupport extends PlanBContainerSupp
     /** 签发规范 access JWT;customizer 可覆盖任意 claim 用于负面用例。 */
     protected String mintJwt(long userId, Consumer<JWTClaimsSet.Builder> customizer) {
         try {
-            Instant now = Instant.now();
+            Instant now = clock.instant();
             JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
                 .issuer("baas/" + fixture.project().getProjectRef())
                 .audience(fixture.project().getProjectRef())

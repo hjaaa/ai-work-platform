@@ -1,5 +1,10 @@
 package com.aiwork.baas.data.auth;
 
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.JWSObject;
+import com.nimbusds.jose.Payload;
+import com.nimbusds.jose.crypto.MACSigner;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.aiwork.baas.data.error.DataApiException;
 import com.aiwork.baas.entity.BaasJwtKey;
@@ -13,7 +18,9 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -36,6 +43,27 @@ class BaasJwtVerifierIntegrationTest extends DataPlaneIntegrationTestSupport {
     private void assert401(String token) {
         assertThatThrownBy(() -> verifier.verify(token, fixture.project())).isInstanceOf(DataApiException.class)
             .satisfies(e -> assertThat(((DataApiException)e).status()).isEqualTo(401));
+    }
+
+    private String mintRawJwt(Object subject, Number issuedAt, Number expirationTime) {
+        try {
+            Map<String, Object> claims = new LinkedHashMap<>();
+            claims.put("iss", "baas/" + fixture.project().getProjectRef());
+            claims.put("aud", fixture.project().getProjectRef());
+            claims.put("sub", subject);
+            claims.put("role", "authenticated");
+            claims.put("session_id", "s");
+            claims.put("iat", issuedAt);
+            claims.put("exp", expirationTime);
+            JWSObject jwt = new JWSObject(
+                    new JWSHeader.Builder(JWSAlgorithm.HS256).keyID(currentJwtKey().getKid()).build(),
+                    new Payload(claims));
+            jwt.sign(new MACSigner(currentJwtSecret()));
+            return jwt.serialize();
+        }
+        catch (Exception exception) {
+            throw new IllegalStateException("mint raw jwt failed", exception);
+        }
     }
 
     @Test
@@ -64,14 +92,16 @@ class BaasJwtVerifierIntegrationTest extends DataPlaneIntegrationTestSupport {
     @Test
     void rejectsExpiredToken() {
         // exp 在 90 秒前:超出 60 秒时钟偏差
-        assert401(mintJwt(1L, claims -> claims.expirationTime(Date.from(Instant.now().minusSeconds(90)))));
+        assert401(mintJwt(1L, claims -> claims.expirationTime(Date.from(clock.instant().minusSeconds(90)))));
     }
 
     @Test
     void acceptsExpWithinClockSkew() {
-        VerifiedEndUser user = verifier.verify(
-                mintJwt(1L, claims -> claims.expirationTime(Date.from(Instant.now().minusSeconds(30)))),
-                fixture.project());
+        VerifiedEndUser user = verifier.verify(mintJwt(1L, claims -> {
+            Instant now = clock.instant();
+            claims.issueTime(Date.from(now.minusSeconds(90)));
+            claims.expirationTime(Date.from(now.minusSeconds(30)));
+        }), fixture.project());
 
         assertThat(user.userId()).isEqualTo(1L);
     }
@@ -79,7 +109,7 @@ class BaasJwtVerifierIntegrationTest extends DataPlaneIntegrationTestSupport {
     @Test
     void rejectsFutureIat() {
         assert401(mintJwt(1L, claims -> {
-            Instant future = Instant.now().plusSeconds(120);
+            Instant future = clock.instant().plusSeconds(120);
             claims.issueTime(Date.from(future));
             claims.expirationTime(Date.from(future.plusSeconds(600)));
         }));
@@ -88,10 +118,89 @@ class BaasJwtVerifierIntegrationTest extends DataPlaneIntegrationTestSupport {
     @Test
     void rejectsTtlOverOneHour() {
         assert401(mintJwt(1L, claims -> {
-            Instant now = Instant.now();
+            Instant now = clock.instant();
             claims.issueTime(Date.from(now));
             claims.expirationTime(Date.from(now.plusSeconds(3600 + 120)));
         }));
+    }
+
+    @Test
+    void rejectsExpirationBeforeIssueTime() {
+        Instant now = clock.instant();
+        assert401(mintJwt(1L, claims -> {
+            claims.issueTime(Date.from(now));
+            claims.expirationTime(Date.from(now.minusSeconds(1)));
+        }));
+    }
+
+    @Test
+    void rejectsExpirationEqualToIssueTime() {
+        Instant now = clock.instant();
+        assert401(mintJwt(1L, claims -> {
+            claims.issueTime(Date.from(now));
+            claims.expirationTime(Date.from(now));
+        }));
+    }
+
+    @Test
+    void rejectsExtremeIssueTimeWithoutLifetimeOverflow() {
+        long extremePast = Long.MIN_VALUE / 1000;
+        assert401(mintRawJwt("1", extremePast, clock.instant().getEpochSecond() + 600));
+    }
+
+    @Test
+    void rejectsNumericSubjectBeforeNimbusNormalization() {
+        long now = clock.instant().getEpochSecond();
+        assert401(mintRawJwt(1L, now, now + 600));
+    }
+
+    @Test
+    void rejectsFractionalIssueTime() {
+        long now = clock.instant().getEpochSecond();
+        assert401(mintRawJwt("1", now + 0.5D, now + 600));
+    }
+
+    @Test
+    void rejectsFractionalExpirationTime() {
+        long now = clock.instant().getEpochSecond();
+        assert401(mintRawJwt("1", now, now + 600.5D));
+    }
+
+    @Test
+    void acceptsExpirationAtExactClockSkew() {
+        long expirationTime = clock.instant().getEpochSecond() - 60;
+        VerifiedEndUser user = verifier.verify(mintRawJwt("1", expirationTime - 600, expirationTime),
+                fixture.project());
+
+        assertThat(user.userId()).isEqualTo(1L);
+    }
+
+    @Test
+    void rejectsExpirationPastClockSkew() {
+        long expirationTime = clock.instant().getEpochSecond() - 61;
+        assert401(mintRawJwt("1", expirationTime - 600, expirationTime));
+    }
+
+    @Test
+    void acceptsIssueTimeAtExactClockSkew() {
+        long issueTime = clock.instant().getEpochSecond() + 60;
+        VerifiedEndUser user = verifier.verify(mintRawJwt("1", issueTime, issueTime + 600), fixture.project());
+
+        assertThat(user.userId()).isEqualTo(1L);
+    }
+
+    @Test
+    void rejectsIssueTimePastClockSkew() {
+        long issueTime = clock.instant().getEpochSecond() + 61;
+        assert401(mintRawJwt("1", issueTime, issueTime + 600));
+    }
+
+    @Test
+    void acceptsTtlAtExactMaximum() {
+        long issueTime = clock.instant().getEpochSecond();
+        VerifiedEndUser user = verifier.verify(mintRawJwt("1", issueTime, issueTime + 3600), fixture.project());
+
+        assertThat(user.userId()).isEqualTo(1L);
     }
 
     @Test

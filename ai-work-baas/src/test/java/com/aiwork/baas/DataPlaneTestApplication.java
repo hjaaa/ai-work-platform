@@ -6,7 +6,12 @@ import com.aiwork.baas.security.crypto.BaasCryptoService;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.Map;
 
@@ -31,6 +36,12 @@ public class DataPlaneTestApplication {
     @Bean
     public CurrentUserProvider currentUserProvider() {
         return new TestCurrentUserProvider();
+    }
+
+    @Bean
+    @Primary
+    public Clock testClock() {
+        return Clock.fixed(Instant.now().truncatedTo(ChronoUnit.SECONDS), ZoneOffset.UTC);
     }
 
 }
