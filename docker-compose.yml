@@ -67,6 +67,18 @@ services:
     networks:
       - spring_cloud_default
 
+  ai-work-baas:
+    build:
+      context: ./ai-work-baas
+    restart: always
+    container_name: ai-work-baas
+    image: ai-work-baas
+    environment:
+      BAAS_MASTER_KEYS: ${BAAS_MASTER_KEYS:?BAAS_MASTER_KEYS 未配置}
+      BAAS_ACTIVE_KEY_ID: ${BAAS_ACTIVE_KEY_ID:-k1}
+    networks:
+      - spring_cloud_default
+
   ai-work-monitor:
     build:
       context: ./ai-work-visual/ai-work-monitor
