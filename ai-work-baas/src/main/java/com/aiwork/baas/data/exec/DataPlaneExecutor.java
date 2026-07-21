@@ -267,12 +267,13 @@ public class DataPlaneExecutor {
                     T result = work.run(connection, meta);
                     connection.commit();
                     return result;
-                }
-                catch (Throwable throwable) {
-                    rollback(connection, throwable);
-                    throw asDataException(throwable);
-                }
-                finally {
+                } catch (Error error) {
+                    rollback(connection, error);
+                    throw error;
+                } catch (Exception exception) {
+                    rollback(connection, exception);
+                    throw asDataException(exception);
+                } finally {
                     try {
                         connection.setAutoCommit(previousAutoCommit);
                     }
@@ -470,17 +471,17 @@ public class DataPlaneExecutor {
         }
     }
 
-    private static RuntimeException asDataException(Throwable throwable) {
-        if (throwable instanceof DataApiException dataApiException) {
+    private static RuntimeException asDataException(Exception exception) {
+        if (exception instanceof DataApiException dataApiException) {
             return dataApiException;
         }
-        if (throwable instanceof SQLException sqlException) {
+        if (exception instanceof SQLException sqlException) {
             return translate(sqlException);
         }
-        if (throwable instanceof RuntimeException runtimeException) {
+        if (exception instanceof RuntimeException runtimeException) {
             return runtimeException;
         }
-        log.error("data plane unexpected error type={}", throwable.getClass().getName());
+        log.error("data plane unexpected error type={}", exception.getClass().getName());
         return DataApiException.internal("数据操作失败");
     }
 

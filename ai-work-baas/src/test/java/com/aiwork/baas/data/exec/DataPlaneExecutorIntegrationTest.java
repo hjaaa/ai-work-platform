@@ -1,30 +1,45 @@
 package com.aiwork.baas.data.exec;
 
 import com.aiwork.baas.controller.dto.AclRoleDTO;
+import com.aiwork.baas.data.bind.ValueCodec;
+import com.aiwork.baas.data.bind.WriteBodyParser;
 import com.aiwork.baas.data.config.DataPlaneProperties;
 import com.aiwork.baas.data.context.DataRequestContext;
 import com.aiwork.baas.data.context.DataRole;
 import com.aiwork.baas.data.error.DataApiException;
+import com.aiwork.baas.data.meta.AclChecker;
+import com.aiwork.baas.data.meta.DataMetadataService;
 import com.aiwork.baas.data.query.ParsedQuery;
 import com.aiwork.baas.data.query.QueryParser;
 import com.aiwork.baas.data.rest.PreferHeader;
+import com.aiwork.baas.data.sql.SqlBuilder;
 import com.aiwork.baas.datasource.ProjectDataSourceRegistry;
+import com.aiwork.baas.entity.BaasColumn;
 import com.aiwork.baas.support.DataPlaneIntegrationTestSupport;
 import com.alibaba.druid.pool.DruidDataSource;
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.datasource.AbstractDataSource;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import javax.sql.DataSource;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -48,6 +63,18 @@ class DataPlaneExecutorIntegrationTest extends DataPlaneIntegrationTestSupport {
 
     @Autowired
     private DataPlaneProperties properties;
+
+    @Autowired
+    private DataMetadataService metadataService;
+
+    @Autowired
+    private AclChecker aclChecker;
+
+    @Autowired
+    private SqlBuilder sqlBuilder;
+
+    @Autowired
+    private WriteBodyParser bodyParser;
 
     @Autowired
     @Qualifier("dataResponsePermits")
@@ -355,6 +382,76 @@ class DataPlaneExecutorIntegrationTest extends DataPlaneIntegrationTestSupport {
         MockHttpServletResponse get = new MockHttpServletResponse();
         executor.executeGet(serviceCtx(), "uniq2", query(Map.of()), PreferHeader.parse(null), get);
         assertThat(dataPlaneObjectMapper.readTree(get.getContentAsString())).isEmpty();
+    }
+
+    @Test
+    void errorIsRethrownAfterRollbackAndKeepsRollbackFailureSuppressed() throws Exception {
+        createOrdersTable();
+        executor.executePost(serviceCtx(), "orders", dataPlaneObjectMapper.readTree("{\"title\":\"x\",\"qty\":1}"),
+                PreferHeader.parse(null), new MockHttpServletResponse());
+        DataSource delegate = registry.execute(fixture.project(), dataSource -> dataSource);
+        AtomicBoolean rollbackCalled = new AtomicBoolean();
+        SQLException rollbackFailure = new SQLException("rollback failed");
+        DataSource trackingDataSource = trackingDataSource(delegate, rollbackCalled, rollbackFailure);
+        ProjectDataSourceRegistry trackingRegistry = new ProjectDataSourceRegistry(project -> trackingDataSource,
+                1, 1, 1);
+        LinkageError fatalError = new LinkageError("fatal codec failure");
+        ValueCodec fatalCodec = new ValueCodec() {
+            @Override
+            public void writeColumn(JsonGenerator generator, BaasColumn column, ResultSet resultSet, int columnIndex)
+                    throws IOException, SQLException {
+                throw fatalError;
+            }
+        };
+        DataPlaneExecutor fatalExecutor = new DataPlaneExecutor(trackingRegistry, metadataService, aclChecker,
+                sqlBuilder, fatalCodec, bodyParser, properties, responsePermits, dataPlaneObjectMapper);
+
+        try {
+            assertThatThrownBy(() -> fatalExecutor.executeGet(serviceCtx(), "orders", query(Map.of()),
+                    PreferHeader.parse(null), new MockHttpServletResponse()))
+                .isSameAs(fatalError)
+                .satisfies(error -> assertThat(error.getSuppressed()).containsExactly(rollbackFailure));
+            assertThat(rollbackCalled).isTrue();
+        } finally {
+            trackingRegistry.closeAll();
+        }
+    }
+
+    private static DataSource trackingDataSource(DataSource delegate, AtomicBoolean rollbackCalled,
+            SQLException rollbackFailure) {
+        return new AbstractDataSource() {
+            @Override
+            public Connection getConnection() throws SQLException {
+                return trackingConnection(delegate.getConnection(), rollbackCalled, rollbackFailure);
+            }
+
+            @Override
+            public Connection getConnection(String username, String password) throws SQLException {
+                return trackingConnection(delegate.getConnection(username, password), rollbackCalled,
+                        rollbackFailure);
+            }
+        };
+    }
+
+    private static Connection trackingConnection(Connection delegate, AtomicBoolean rollbackCalled,
+            SQLException rollbackFailure) {
+        return (Connection)Proxy.newProxyInstance(DataPlaneExecutorIntegrationTest.class.getClassLoader(),
+                new Class<?>[] { Connection.class }, (proxy, method, args) -> {
+                    if ("rollback".equals(method.getName()) && method.getParameterCount() == 0) {
+                        rollbackCalled.set(true);
+                        invoke(delegate, method, args);
+                        throw rollbackFailure;
+                    }
+                    return invoke(delegate, method, args);
+                });
+    }
+
+    private static Object invoke(Connection delegate, Method method, Object[] args) throws Throwable {
+        try {
+            return method.invoke(delegate, args);
+        } catch (InvocationTargetException exception) {
+            throw exception.getCause();
+        }
     }
 
 }

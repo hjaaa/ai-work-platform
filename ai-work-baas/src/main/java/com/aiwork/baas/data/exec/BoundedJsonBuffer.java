@@ -5,8 +5,10 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import jakarta.servlet.http.HttpServletResponse;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.util.Arrays;
+import java.util.Objects;
 
 /**
  * 有界响应缓冲(spec §13):逐行 flush 计数,超上限在响应提交前抛 413;
@@ -75,32 +77,67 @@ public class BoundedJsonBuffer implements AutoCloseable {
         return buffer.size();
     }
 
-    /** 在 ByteArrayOutputStream 扩容前拒绝,不允许单个超大行暂时突破堆上限。 */
-    private static final class LimitedByteArrayOutputStream extends ByteArrayOutputStream {
+    /** 仅向同包测试暴露实际 backing array 容量。 */
+    int allocatedCapacity() {
+        return buffer.capacity();
+    }
 
-        private final long maxBytes;
+    /** 在 backing array 扩容前拒绝,不允许单个超大行暂时突破堆上限。 */
+    private static final class LimitedByteArrayOutputStream extends OutputStream {
+
+        private static final int INITIAL_CAPACITY = 8192;
+
+        private final int maxBytes;
+
+        private byte[] bytes;
+
+        private int count;
 
         private LimitedByteArrayOutputStream(long maxBytes) {
-            super((int)Math.min(8192L, maxBytes));
-            this.maxBytes = maxBytes;
+            if (maxBytes < 0 || maxBytes > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException("maxBytes 必须在 0 到 Integer.MAX_VALUE 之间");
+            }
+            this.maxBytes = (int)maxBytes;
+            this.bytes = new byte[Math.min(INITIAL_CAPACITY, this.maxBytes)];
         }
 
         @Override
         public synchronized void write(int value) {
-            ensureWithinLimit(1);
-            super.write(value);
+            ensureCapacity(1);
+            bytes[count++] = (byte)value;
         }
 
         @Override
-        public synchronized void write(byte[] bytes, int offset, int length) {
-            ensureWithinLimit(length);
-            super.write(bytes, offset, length);
+        public synchronized void write(byte[] source, int offset, int length) {
+            Objects.checkFromIndexSize(offset, length, source.length);
+            ensureCapacity(length);
+            System.arraycopy(source, offset, bytes, count, length);
+            count += length;
         }
 
-        private void ensureWithinLimit(int additionalBytes) {
-            if ((long)count + additionalBytes > maxBytes) {
+        private void ensureCapacity(int additionalBytes) {
+            long requiredCapacity = (long)count + additionalBytes;
+            if (requiredCapacity > maxBytes) {
                 throw DataApiException.payloadTooLarge("响应体超过 " + maxBytes + " 字节上限");
             }
+            if (requiredCapacity <= bytes.length) {
+                return;
+            }
+            int doubledCapacity = bytes.length <= maxBytes / 2 ? bytes.length * 2 : maxBytes;
+            int newCapacity = Math.max((int)requiredCapacity, doubledCapacity);
+            bytes = Arrays.copyOf(bytes, newCapacity);
+        }
+
+        private int size() {
+            return count;
+        }
+
+        private synchronized void writeTo(OutputStream output) throws IOException {
+            output.write(bytes, 0, count);
+        }
+
+        private int capacity() {
+            return bytes.length;
         }
 
     }
