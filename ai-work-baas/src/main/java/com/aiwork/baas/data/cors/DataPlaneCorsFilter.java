@@ -49,9 +49,10 @@ public class DataPlaneCorsFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        boolean preflight = "OPTIONS".equals(request.getMethod())
-                && request.getHeader("Access-Control-Request-Method") != null;
         String origin = request.getHeader("Origin");
+        boolean preflight = "OPTIONS".equals(request.getMethod())
+                && origin != null
+                && request.getHeader("Access-Control-Request-Method") != null;
         // 实际响应与预检均设置 Vary(§12.2:防 per-project Origin 回显被中间缓存跨项目复用)
         response.addHeader("Vary", "Origin");
         if (preflight) {
