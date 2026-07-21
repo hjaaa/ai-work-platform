@@ -168,16 +168,21 @@ class DataRestLimitsIntegrationTest extends DataPlaneIntegrationTestSupport {
 
     @Test
     void semaphoreExhaustionReturns429NotBlocking() throws Exception {
-        permits.acquire(8);
+        int expectedPermits = 8;
+        assertThat(permits.availablePermits()).isEqualTo(expectedPermits);
+        boolean acquired = permits.tryAcquire(expectedPermits, 5, TimeUnit.SECONDS);
         try {
+            assertThat(acquired).as("应在 5 秒内取得全部响应许可").isTrue();
             ResponseEntity<String> response = call(HttpMethod.GET, blobsUrl("select=tag"), service, null);
             assertThat(response.getStatusCode().value()).isEqualTo(429);
         }
         finally {
-            permits.release(8);
+            if (acquired) {
+                permits.release(expectedPermits);
+            }
         }
         call(HttpMethod.GET, blobsUrl("select=tag"), service, null);
-        assertThat(permits.availablePermits()).isEqualTo(8);
+        assertThat(permits.availablePermits()).isEqualTo(expectedPermits);
     }
 
     @Test
