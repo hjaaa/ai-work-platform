@@ -1,10 +1,17 @@
 package com.aiwork.baas.data.config;
 
+import com.aiwork.baas.data.auth.ApiKeyAuthFilter;
+import com.aiwork.baas.data.auth.BaasJwtVerifier;
+import com.aiwork.baas.data.cors.DataPlaneCorsFilter;
 import com.aiwork.baas.data.error.DataErrorWriter;
+import com.aiwork.baas.mapper.BaasApiKeyMapper;
+import com.aiwork.baas.mapper.BaasProjectMapper;
+import com.aiwork.baas.security.key.ApiKeyGenerator;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -56,6 +63,30 @@ public class DataPlaneConfiguration {
     @Bean("dataResponsePermits")
     public Semaphore dataResponsePermits(DataPlaneProperties properties) {
         return new Semaphore(properties.getResponsePermits());
+    }
+
+    @Bean
+    public FilterRegistrationBean<DataPlaneCorsFilter> dataPlaneCorsFilterRegistration(
+            BaasProjectMapper projectMapper,
+            @Qualifier("dataPlaneObjectMapper") ObjectMapper dataPlaneObjectMapper,
+            DataPlaneProperties properties) {
+        FilterRegistrationBean<DataPlaneCorsFilter> registration = new FilterRegistrationBean<>(
+                new DataPlaneCorsFilter(projectMapper, dataPlaneObjectMapper, properties));
+        registration.addUrlPatterns("/data/*");
+        registration.setOrder(10);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<ApiKeyAuthFilter> apiKeyAuthFilterRegistration(BaasApiKeyMapper apiKeyMapper,
+            BaasProjectMapper projectMapper, ApiKeyGenerator keyGenerator, BaasJwtVerifier jwtVerifier,
+            DataErrorWriter errorWriter, DataPlaneProperties properties) {
+        FilterRegistrationBean<ApiKeyAuthFilter> registration = new FilterRegistrationBean<>(
+                new ApiKeyAuthFilter(apiKeyMapper, projectMapper, keyGenerator, jwtVerifier, errorWriter,
+                        properties));
+        registration.addUrlPatterns("/data/*");
+        registration.setOrder(20);
+        return registration;
     }
 
 }
