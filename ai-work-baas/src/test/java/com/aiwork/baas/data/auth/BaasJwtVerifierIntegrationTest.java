@@ -6,6 +6,7 @@ import com.nimbusds.jose.JWSObject;
 import com.nimbusds.jose.Payload;
 import com.nimbusds.jose.crypto.MACSigner;
 import com.nimbusds.jwt.JWTClaimsSet;
+import com.aiwork.baas.data.config.DataPlaneProperties;
 import com.aiwork.baas.data.error.DataApiException;
 import com.aiwork.baas.entity.BaasJwtKey;
 import com.aiwork.baas.entity.enums.JwtKeyStatus;
@@ -14,8 +15,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -36,13 +39,25 @@ class BaasJwtVerifierIntegrationTest extends DataPlaneIntegrationTestSupport {
     @Autowired
     private BaasJwtVerifier verifier;
 
+    @Autowired
+    private DataPlaneProperties properties;
+
     private static String base64Url(String value) {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
     }
 
     private void assert401(String token) {
-        assertThatThrownBy(() -> verifier.verify(token, fixture.project())).isInstanceOf(DataApiException.class)
+        assert401(verifier, token);
+    }
+
+    private void assert401(BaasJwtVerifier jwtVerifier, String token) {
+        assertThatThrownBy(() -> jwtVerifier.verify(token, fixture.project())).isInstanceOf(DataApiException.class)
             .satisfies(e -> assertThat(((DataApiException)e).status()).isEqualTo(401));
+    }
+
+    private BaasJwtVerifier verifierAt(Instant instant) {
+        Clock fixedClock = Clock.fixed(instant, ZoneOffset.UTC);
+        return new BaasJwtVerifier(jwtKeyMapper, cryptoService, properties, fixedClock);
     }
 
     private String mintRawJwt(Object subject, Number issuedAt, Number expirationTime) {
@@ -176,6 +191,15 @@ class BaasJwtVerifierIntegrationTest extends DataPlaneIntegrationTestSupport {
     }
 
     @Test
+    void rejectsExpirationOneNanosecondPastClockSkew() {
+        Instant exactBoundary = clock.instant();
+        long expirationTime = exactBoundary.getEpochSecond() - 60;
+
+        assert401(verifierAt(exactBoundary.plusNanos(1)),
+                mintRawJwt("1", expirationTime - 600, expirationTime));
+    }
+
+    @Test
     void rejectsExpirationPastClockSkew() {
         long expirationTime = clock.instant().getEpochSecond() - 61;
         assert401(mintRawJwt("1", expirationTime - 600, expirationTime));
@@ -187,6 +211,14 @@ class BaasJwtVerifierIntegrationTest extends DataPlaneIntegrationTestSupport {
         VerifiedEndUser user = verifier.verify(mintRawJwt("1", issueTime, issueTime + 600), fixture.project());
 
         assertThat(user.userId()).isEqualTo(1L);
+    }
+
+    @Test
+    void rejectsIssueTimeOneNanosecondPastClockSkew() {
+        Instant exactBoundary = clock.instant();
+        long issueTime = exactBoundary.getEpochSecond() + 60;
+
+        assert401(verifierAt(exactBoundary.minusNanos(1)), mintRawJwt("1", issueTime, issueTime + 600));
     }
 
     @Test

@@ -17,6 +17,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigInteger;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
@@ -159,9 +160,10 @@ public class BaasJwtVerifier {
             throw unauthorized();
         }
 
-        BigInteger now = BigInteger.valueOf(clock.instant().getEpochSecond());
+        Instant now = clock.instant();
         BigInteger skew = BigInteger.valueOf(properties.getJwtClockSkewSeconds());
-        if (expiresAt.add(skew).compareTo(now) < 0 || issuedAt.subtract(skew).compareTo(now) > 0) {
+        if (compareEpochSecondToInstant(expiresAt.add(skew), now) < 0
+                || compareEpochSecondToInstant(issuedAt.subtract(skew), now) > 0) {
             throw unauthorized();
         }
 
@@ -169,6 +171,14 @@ public class BaasJwtVerifier {
         if (expiresAt.subtract(issuedAt).compareTo(maxTtl) > 0) {
             throw unauthorized();
         }
+    }
+
+    private static int compareEpochSecondToInstant(BigInteger epochSecond, Instant instant) {
+        int secondComparison = epochSecond.compareTo(BigInteger.valueOf(instant.getEpochSecond()));
+        if (secondComparison != 0) {
+            return secondComparison;
+        }
+        return Integer.compare(0, instant.getNano());
     }
 
     private static long parseSubject(String subject) {
