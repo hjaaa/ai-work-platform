@@ -17,6 +17,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.format.ResolverStyle;
+import java.util.regex.Pattern;
 
 /**
  * 线协议编解码(spec §7.1 矩阵):解析/绑定严格按逻辑类型,输出与输入对称。
@@ -32,6 +33,11 @@ public class ValueCodec {
 
     private static final DateTimeFormatter DATETIME_FORMAT = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss")
         .withResolverStyle(ResolverStyle.STRICT);
+
+    private static final Pattern DATE_INPUT_PATTERN = Pattern.compile("[0-9]{4}-[0-9]{2}-[0-9]{2}");
+
+    private static final Pattern DATETIME_INPUT_PATTERN = Pattern
+        .compile("[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}");
 
     /**
      * 将 URL 过滤值解析为 JDBC 绑定值。
@@ -245,12 +251,14 @@ public class ValueCodec {
     }
 
     private static BigDecimal checkDecimal(BaasColumn column, BigDecimal value) {
+        BigDecimal normalizedValue = value.signum() == 0 ? BigDecimal.ZERO : value;
         int precision = column.getLength();
         int scale = column.getScale() == null ? 0 : column.getScale();
-        if (value.scale() > scale || value.precision() - value.scale() > precision - scale) {
+        if (normalizedValue.scale() > scale
+                || normalizedValue.precision() - normalizedValue.scale() > precision - scale) {
             throw valueError(column, "超出 decimal(" + precision + "," + scale + ") 值域");
         }
-        return value;
+        return normalizedValue;
     }
 
     private static Boolean parseBooleanLiteral(BaasColumn column, String raw) {
@@ -264,13 +272,17 @@ public class ValueCodec {
     }
 
     private static String checkVarcharLength(BaasColumn column, String value) {
-        if (column.getLength() != null && value.length() > column.getLength()) {
+        int codePointCount = value.codePointCount(0, value.length());
+        if (column.getLength() != null && codePointCount > column.getLength()) {
             throw valueError(column, "超出 varchar(" + column.getLength() + ") 长度");
         }
         return value;
     }
 
     private static LocalDate parseDate(BaasColumn column, String raw) {
+        if (!DATE_INPUT_PATTERN.matcher(raw).matches()) {
+            throw valueError(column, "date 须为 yyyy-MM-dd");
+        }
         try {
             return LocalDate.parse(raw, DATE_FORMAT);
         } catch (DateTimeParseException exception) {
@@ -279,6 +291,9 @@ public class ValueCodec {
     }
 
     private static LocalDateTime parseDatetime(BaasColumn column, String raw) {
+        if (!DATETIME_INPUT_PATTERN.matcher(raw).matches()) {
+            throw valueError(column, "datetime 须为 yyyy-MM-dd HH:mm:ss");
+        }
         try {
             return LocalDateTime.parse(raw, DATETIME_FORMAT);
         } catch (DateTimeParseException exception) {

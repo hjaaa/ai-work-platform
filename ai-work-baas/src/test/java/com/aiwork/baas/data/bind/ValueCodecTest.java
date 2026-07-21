@@ -67,6 +67,28 @@ class ValueCodecTest {
     }
 
     @Test
+    void filterDecimalNormalizesScientificZeroBeforeValidation() {
+        BaasColumn decimal = column("c", "decimal", 5, 2);
+        assertThat(codec.parseFilterValue(decimal, FilterOperator.EQ, "0E+100")).isEqualTo(BigDecimal.ZERO);
+        assertThat(codec.parseFilterValue(decimal, FilterOperator.EQ, "0E-100")).isEqualTo(BigDecimal.ZERO);
+        assertThat(codec.parseFilterValue(decimal, FilterOperator.EQ, "-0E+100")).isEqualTo(BigDecimal.ZERO);
+        assertThat(codec.parseFilterValue(decimal, FilterOperator.EQ, "-0E-100")).isEqualTo(BigDecimal.ZERO);
+    }
+
+    @Test
+    void filterDecimalPreservesNonZeroPrecisionAndScaleValidation() {
+        BaasColumn decimal = column("c", "decimal", 5, 2);
+        assertThat(codec.parseFilterValue(decimal, FilterOperator.GT, "-123.45"))
+            .isEqualTo(new BigDecimal("-123.45"));
+        assertThat(codec.parseFilterValue(decimal, FilterOperator.GT, "1E+2")).isEqualTo(new BigDecimal("1E+2"));
+        assertThat(codec.parseFilterValue(decimal, FilterOperator.GT, "-1E-2")).isEqualTo(new BigDecimal("-1E-2"));
+        assertThatThrownBy(() -> codec.parseFilterValue(decimal, FilterOperator.GT, "1E+3"))
+            .isInstanceOf(DataApiException.class);
+        assertThatThrownBy(() -> codec.parseFilterValue(decimal, FilterOperator.GT, "-1E-3"))
+            .isInstanceOf(DataApiException.class);
+    }
+
+    @Test
     void filterBooleanOnlyTrueFalse() {
         BaasColumn bool = column("c", "boolean", null, null);
         assertThat(codec.parseFilterValue(bool, FilterOperator.EQ, "true")).isEqualTo(Boolean.TRUE);
@@ -90,6 +112,32 @@ class ValueCodecTest {
     }
 
     @Test
+    void filterDateRequiresAsciiFixedWidthAndAllowsLeapDay() {
+        BaasColumn date = column("c", "date", null, null);
+        assertThat(codec.parseFilterValue(date, FilterOperator.EQ, "2024-02-29"))
+            .isEqualTo(LocalDate.of(2024, 2, 29));
+        assertThatThrownBy(() -> codec.parseFilterValue(date, FilterOperator.EQ, "2023-02-29"))
+            .isInstanceOf(DataApiException.class);
+        assertThatThrownBy(() -> codec.parseFilterValue(date, FilterOperator.EQ, "+10000-01-01"))
+            .isInstanceOf(DataApiException.class);
+        assertThatThrownBy(() -> codec.parseFilterValue(date, FilterOperator.EQ, "-0001-01-01"))
+            .isInstanceOf(DataApiException.class);
+        assertThatThrownBy(() -> codec.parseFilterValue(date, FilterOperator.EQ, "2024-2-29"))
+            .isInstanceOf(DataApiException.class);
+    }
+
+    @Test
+    void filterDatetimeRequiresAsciiFixedWidth() {
+        BaasColumn datetime = column("c", "datetime", null, null);
+        assertThatThrownBy(() -> codec.parseFilterValue(datetime, FilterOperator.EQ, "+10000-01-01 01:02:03"))
+            .isInstanceOf(DataApiException.class);
+        assertThatThrownBy(() -> codec.parseFilterValue(datetime, FilterOperator.EQ, "2026-7-21 10:30:00"))
+            .isInstanceOf(DataApiException.class);
+        assertThatThrownBy(() -> codec.parseFilterValue(datetime, FilterOperator.EQ, "2026-07-21 1:30:00"))
+            .isInstanceOf(DataApiException.class);
+    }
+
+    @Test
     void filterLikeOnlyOnStringColumns() {
         assertThat(codec.parseFilterValue(column("c", "varchar", 64, null), FilterOperator.LIKE, "a%"))
             .isEqualTo("a%");
@@ -106,6 +154,16 @@ class ValueCodecTest {
     @Test
     void filterVarcharOverLengthRejected() {
         assertThatThrownBy(() -> codec.parseFilterValue(column("c", "varchar", 3, null), FilterOperator.EQ, "abcd"))
+            .isInstanceOf(DataApiException.class);
+    }
+
+    @Test
+    void varcharLengthCountsUnicodeCodePoints() throws Exception {
+        assertThat(codec.parseFilterValue(column("c", "varchar", 1, null), FilterOperator.EQ, "😀"))
+            .isEqualTo("😀");
+        assertThat(codec.parseBodyValue(column("c", "varchar", 2, null), mapper.readTree("\"😀a\"")))
+            .isEqualTo("😀a");
+        assertThatThrownBy(() -> codec.parseFilterValue(column("c", "varchar", 1, null), FilterOperator.EQ, "😀a"))
             .isInstanceOf(DataApiException.class);
     }
 
@@ -128,6 +186,13 @@ class ValueCodecTest {
         assertThat(codec.parseBodyValue(decimal, mapper.readTree("\"19.99\""))).isEqualTo(new BigDecimal("19.99"));
         assertThatThrownBy(() -> codec.parseBodyValue(decimal, mapper.readTree("\"abc\"")))
             .isInstanceOf(DataApiException.class);
+    }
+
+    @Test
+    void bodyDecimalNormalizesScientificZeroString() throws Exception {
+        BaasColumn decimal = column("c", "decimal", 5, 2);
+        assertThat(codec.parseBodyValue(decimal, mapper.readTree("\"0E+100\""))).isEqualTo(BigDecimal.ZERO);
+        assertThat(codec.parseBodyValue(decimal, mapper.readTree("\"-0E-100\""))).isEqualTo(BigDecimal.ZERO);
     }
 
     @Test

@@ -1,5 +1,7 @@
 package com.aiwork.baas.data.meta;
 
+import java.util.Locale;
+
 /**
  * 数据面四操作(ACL 开关维度,spec §8.2)。
  *
@@ -23,7 +25,7 @@ public enum DataOperation {
      * @return 小写操作标记
      */
     public String aclLabel() {
-        return name().toLowerCase();
+        return name().toLowerCase(Locale.ROOT);
     }
 
 }
