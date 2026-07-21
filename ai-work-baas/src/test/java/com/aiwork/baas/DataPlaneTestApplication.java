@@ -3,6 +3,7 @@ package com.aiwork.baas;
 import com.aiwork.baas.security.CurrentUserProvider;
 import com.aiwork.baas.security.TestCurrentUserProvider;
 import com.aiwork.baas.security.crypto.BaasCryptoService;
+import com.aiwork.common.security.annotation.EnableAiWorkResourceServer;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -25,6 +26,7 @@ import java.util.Map;
 @SpringBootApplication(scanBasePackages = { "com.aiwork.baas.service", "com.aiwork.baas.provision",
         "com.aiwork.baas.datasource", "com.aiwork.baas.security.key", "com.aiwork.baas.ddl",
         "com.aiwork.baas.data" })
+@EnableAiWorkResourceServer
 @MapperScan("com.aiwork.baas.mapper")
 public class DataPlaneTestApplication {
 
