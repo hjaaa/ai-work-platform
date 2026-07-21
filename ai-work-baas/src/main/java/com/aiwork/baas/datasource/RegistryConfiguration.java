@@ -44,7 +44,8 @@ public class RegistryConfiguration {
         return new ProjectDataSourceRegistry(project -> {
             DruidDataSource dataSource = new DruidDataSource();
             dataSource.setUrl("jdbc:mysql://" + host + ":" + port + "/" + project.getDbName()
-                    + "?characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8");
+                    + "?characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8&useCursorFetch=true"
+                    + "&allowPublicKeyRetrieval=true");
             dataSource.setUsername(project.getRuntimeDbUser());
             dataSource.setPassword(cryptoService.decrypt(project.getRuntimeDbPasswordCipher(),
                     project.getId() + ":db_password:" + project.getId()));
