@@ -144,7 +144,8 @@ public class SqlBuilder {
         StringBuilder sql = new StringBuilder("SELECT `id` FROM ").append(quote(meta.table().getTableName()));
         List<Object> params = new ArrayList<>();
         appendWhere(sql, params, meta, query.filters(), ctx, false);
-        sql.append(" LIMIT ").append(probeLimit).append(" FOR UPDATE");
+        sql.append(" LIMIT ? FOR UPDATE");
+        params.add(probeLimit);
         return new BoundSql(sql.toString(), immutableParams(params));
     }
 

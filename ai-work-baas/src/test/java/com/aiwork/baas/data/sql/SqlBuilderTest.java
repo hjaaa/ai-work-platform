@@ -176,8 +176,8 @@ class SqlBuilderTest {
                 ctx(DataRole.AUTHENTICATED, 7L), 1001);
 
         assertThat(bound.sql()).isEqualTo(
-                "SELECT `id` FROM `orders` WHERE `qty` = ? AND `owner_id` = ? LIMIT 1001 FOR UPDATE");
-        assertThat(bound.params()).containsExactly(1, 7L);
+                "SELECT `id` FROM `orders` WHERE `qty` = ? AND `owner_id` = ? LIMIT ? FOR UPDATE");
+        assertThat(bound.params()).containsExactly(1, 7L, 1001);
     }
 
     @Test
