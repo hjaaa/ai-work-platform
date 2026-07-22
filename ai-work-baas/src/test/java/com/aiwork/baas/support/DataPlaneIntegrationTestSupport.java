@@ -98,6 +98,11 @@ public abstract class DataPlaneIntegrationTestSupport extends PlanBContainerSupp
         registry.add("baas.project-db.host", MYSQL::getHost);
         registry.add("baas.project-db.port", () -> MYSQL.getMappedPort(3306));
         registry.add("server.servlet.context-path", () -> "");
+        // 测试专用:全量套件在同一 Spring 上下文内累计创建的项目池数远超单类隔离运行场景。
+        // 生产默认 global-max-connections(200)= maxPools(50) * perPoolMax(10) / 2.5,
+        // 导致连接预算早于按池数淘汰的 LRU 机制触发就耗尽。此处仅在测试侧放宽预算至
+        // maxPools * perPoolMax 以上,让既有的按池数淘汰机制成为唯一有效上限,不改动生产配置。
+        registry.add("baas.registry.global-max-connections", () -> 600);
     }
 
     @BeforeEach
