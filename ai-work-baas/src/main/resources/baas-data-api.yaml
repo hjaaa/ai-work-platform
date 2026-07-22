@@ -163,6 +163,7 @@ paths:
               schema: { type: integer }
               description: 窗口剩余秒数
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '500': { $ref: '#/components/responses/internal' }
   /auth/v1/token:
     post:
       summary: 登录(grant_type=password)或刷新(grant_type=refresh_token)
@@ -193,6 +194,9 @@ paths:
         '401':
           description: 凭据错误、刷新令牌无效/已过期,或刷新令牌超窗重放判定泄露(会话已撤销)
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '403':
+          description: 项目不可用或系统表升级未完成(fail-closed)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         '429':
           description: 触发登录防暴力限速(仅 grant_type=password)
           headers:
@@ -200,6 +204,7 @@ paths:
               schema: { type: integer }
               description: 窗口剩余秒数
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '500': { $ref: '#/components/responses/internal' }
   /auth/v1/logout:
     post:
       summary: 注销(仅撤销当前 access JWT 所指会话;幂等)
@@ -211,6 +216,10 @@ paths:
         '401':
           description: 缺少或无效的 access JWT
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '403':
+          description: 项目不可用或系统表升级未完成(fail-closed)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '500': { $ref: '#/components/responses/internal' }
   /auth/v1/user:
     get:
       summary: 取当前用户
@@ -231,6 +240,10 @@ paths:
         '401':
           description: 缺少/无效 access JWT,或用户已软删
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '403':
+          description: 项目不可用或系统表升级未完成(fail-closed)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '500': { $ref: '#/components/responses/internal' }
   /auth/v1/user/password:
     put:
       summary: 修改密码(须提交当前密码;成功后撤销该用户全部会话,含当前)
@@ -255,6 +268,9 @@ paths:
         '401':
           description: 当前密码错误、access JWT 无效,或用户已软删
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '403':
+          description: 项目不可用或系统表升级未完成(fail-closed)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         '429':
           description: 触发登录防暴力限速(currentPassword 错误计入)
           headers:
@@ -262,6 +278,7 @@ paths:
               schema: { type: integer }
               description: 窗口剩余秒数
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '500': { $ref: '#/components/responses/internal' }
 components:
   securitySchemes:
     apiKey:
