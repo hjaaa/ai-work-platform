@@ -274,13 +274,13 @@ public class SystemTableMigrationService {
             for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
                 lockExecutor.assertStillHeld(handle);
                 PhysicalTable table = SchemaInspector.readTable(lockedJdbc, current.getDbName(), tableName);
-                if (SystemTableManifest.tableMatches(tableName, table, false)) {
+                if (SystemTableManifest.tableMatches(tableName, table, SystemTableManifest.CURRENT_VERSION)) {
                     continue;
                 }
                 lockExecutor.assertStillHeld(handle);
-                lockedJdbc.execute(SystemTableManifest.legacyMigrationSql(current.getDbName(), tableName));
+                lockedJdbc.execute(SystemTableManifest.migrationSql(current.getDbName(), tableName, 1));
                 PhysicalTable migrated = SchemaInspector.readTable(lockedJdbc, current.getDbName(), tableName);
-                if (!SystemTableManifest.tableMatches(tableName, migrated, false)) {
+                if (!SystemTableManifest.tableMatches(tableName, migrated, SystemTableManifest.CURRENT_VERSION)) {
                     throw new DdlConflictException("系统表迁移失败");
                 }
                 lockExecutor.assertStillHeld(handle);
@@ -353,7 +353,8 @@ public class SystemTableMigrationService {
     private boolean hasUnsignedOverflow(BaasProject current, JdbcTemplate lockedJdbc,
             Map<String, PhysicalTable> tables) {
         for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
-            if (SystemTableManifest.tableMatches(tableName, tables.get(tableName), false)) {
+            if (SystemTableManifest.tableMatches(tableName, tables.get(tableName),
+                    SystemTableManifest.CURRENT_VERSION)) {
                 continue;
             }
             Long overflow = lockedJdbc.queryForObject(

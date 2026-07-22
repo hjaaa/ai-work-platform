@@ -29,6 +29,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -58,7 +59,9 @@ public class ProjectProvisioner {
     private static final String CREATE_USERS_TABLE_SQL = "CREATE TABLE IF NOT EXISTS `%s`._users ("
             + "id bigint NOT NULL AUTO_INCREMENT, email varchar(255) NOT NULL, "
             + "password_hash varchar(100) NOT NULL, "
-            + "raw_meta json DEFAULT NULL, create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            + "raw_meta json DEFAULT NULL, "
+            + "deleted_at datetime DEFAULT NULL, "
+            + "create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP, "
             + "update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
             + "PRIMARY KEY (id), UNIQUE KEY uk_email (email))" + PHYSICAL_BASELINE;
 
@@ -141,7 +144,7 @@ public class ProjectProvisioner {
         jdbc.execute(CREATE_SESSIONS_TABLE_SQL.formatted(databaseName));
         jdbc.execute(CREATE_REFRESH_TOKENS_TABLE_SQL.formatted(databaseName));
         SystemTableManifest.MatchResult result = SystemTableManifest.compare(readSystemTables(jdbc, databaseName));
-        if (result == SystemTableManifest.MatchResult.MATCH_LEGACY_PLAN_A
+        if (result == SystemTableManifest.MatchResult.MATCH_LEGACY
                 || result == SystemTableManifest.MatchResult.MATCH_MIXED) {
             upgradeLegacySystemTables(jdbc, databaseName);
             result = SystemTableManifest.compare(readSystemTables(jdbc, databaseName));
@@ -167,26 +170,30 @@ public class ProjectProvisioner {
     private void upgradeLegacySystemTables(JdbcOperations jdbc, String databaseName) {
         Map<String, PhysicalTable> tables = readSystemTables(jdbc, databaseName);
         for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
-            PhysicalTable table = tables.get(tableName);
-            if (SystemTableManifest.tableMatches(tableName, table, false)) {
+            Set<Integer> versions = SystemTableManifest.matchedVersions(tableName, tables.get(tableName));
+            if (versions.contains(SystemTableManifest.CURRENT_VERSION)) {
                 continue;
             }
-            if (!SystemTableManifest.tableMatches(tableName, table, true)) {
+            if (versions.isEmpty()) {
                 throw new IllegalStateException("system table manifest mismatch: " + tableName);
             }
-            Long overflow = jdbc.queryForObject(
-                    SystemTableManifest.unsignedBoundsCheckSql(databaseName, tableName), Long.class);
-            if (overflow != null && overflow > 0) {
-                throw new IllegalStateException(
-                        "unsigned value exceeds signed bigint range, cannot migrate: " + tableName);
+            // 仅 v1(unsigned)迁移前需越界预检
+            if (versions.contains(1)) {
+                Long overflow = jdbc.queryForObject(
+                        SystemTableManifest.unsignedBoundsCheckSql(databaseName, tableName), Long.class);
+                if (overflow != null && overflow > 0) {
+                    throw new IllegalStateException(
+                            "unsigned value exceeds signed bigint range, cannot migrate: " + tableName);
+                }
             }
         }
         for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
-            PhysicalTable table = tables.get(tableName);
-            if (SystemTableManifest.tableMatches(tableName, table, false)) {
+            Set<Integer> versions = SystemTableManifest.matchedVersions(tableName, tables.get(tableName));
+            if (versions.contains(SystemTableManifest.CURRENT_VERSION)) {
                 continue;
             }
-            jdbc.execute(SystemTableManifest.legacyMigrationSql(databaseName, tableName));
+            int fromVersion = versions.stream().mapToInt(Integer::intValue).max().orElseThrow();
+            jdbc.execute(SystemTableManifest.migrationSql(databaseName, tableName, fromVersion));
         }
     }
 

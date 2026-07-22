@@ -201,7 +201,7 @@ class SystemTableMigrationTest extends PlanBContainerSupport {
     void startupScanResumesMigratingProjectAndSkipsAlreadyMigratedTables() {
         BaasProject project = createProject("mig-res");
         degradeToLegacy(project);
-        rootJdbc.execute(SystemTableManifest.legacyMigrationSql(project.getDbName(), "_users"));
+        rootJdbc.execute(SystemTableManifest.migrationSql(project.getDbName(), "_users", 1));
         setStatus(project, ProjectStatus.MIGRATING);
         long epochBefore = reload(project).getDdlFenceEpoch();
 
@@ -231,10 +231,10 @@ class SystemTableMigrationTest extends PlanBContainerSupport {
     void currentManifestRecoversOnlyConfirmedMigrationFailureWithoutAlter() {
         BaasProject project = createProject("mig-rec");
         degradeToLegacy(project);
-        rootJdbc.execute(SystemTableManifest.legacyMigrationSql(project.getDbName(), "_users"));
+        rootJdbc.execute(SystemTableManifest.migrationSql(project.getDbName(), "_users", 1));
         migrationService.scanOnce();
-        rootJdbc.execute(SystemTableManifest.legacyMigrationSql(project.getDbName(), "_sessions"));
-        rootJdbc.execute(SystemTableManifest.legacyMigrationSql(project.getDbName(), "_refresh_tokens"));
+        rootJdbc.execute(SystemTableManifest.migrationSql(project.getDbName(), "_sessions", 1));
+        rootJdbc.execute(SystemTableManifest.migrationSql(project.getDbName(), "_refresh_tokens", 1));
         long epochBefore = reload(project).getDdlFenceEpoch();
 
         SystemTableMigrationResult result = migrationService.migrate(reload(project));
@@ -268,7 +268,7 @@ class SystemTableMigrationTest extends PlanBContainerSupport {
     void activeMixedManifestFailsWithoutAlterThenConfirmedManualRetryResumes() {
         BaasProject project = createProject("mig-mix");
         degradeToLegacy(project);
-        rootJdbc.execute(SystemTableManifest.legacyMigrationSql(project.getDbName(), "_users"));
+        rootJdbc.execute(SystemTableManifest.migrationSql(project.getDbName(), "_users", 1));
 
         migrationService.scanOnce();
 

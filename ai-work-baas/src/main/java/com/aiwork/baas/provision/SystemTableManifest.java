@@ -23,6 +23,8 @@ import com.aiwork.baas.ddl.inspect.PhysicalIndex;
 import com.aiwork.baas.ddl.inspect.PhysicalTable;
 import com.aiwork.baas.ddl.inspect.SchemaInspector;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -31,9 +33,9 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 版本化系统表 manifest(spec §9.1)：覆盖列集合、类型及 signedness、NULL/default/EXTRA、
- * 精确 PRIMARY/自增、二级索引形状与列/表物理基线。当前版 = signed bigint + 显式基线；
- * 遗留版 = Plan A unsigned。
+ * 版本化系统表 manifest(spec §9.1)：v1/v2/v3 三版本链——v1 = Plan A unsigned；
+ * v2 = signed bigint + 显式基线；v3 = v2 + `_users.deleted_at`(软删除)。覆盖列集合、
+ * 类型及 signedness、NULL/default/EXTRA、精确 PRIMARY/自增、二级索引形状与列/表物理基线。
  *
  * @author ai-work
  * @date 2026/07/18
@@ -42,45 +44,74 @@ public final class SystemTableManifest {
 
     public enum MatchResult {
 
-        MATCH_CURRENT, MATCH_LEGACY_PLAN_A, MATCH_MIXED, MISMATCH
+        MATCH_CURRENT, MATCH_LEGACY, MATCH_MIXED, MISMATCH
 
     }
 
+    /** 当前系统表 manifest 版本(spec §9.1:v3 = v2 + _users.deleted_at)。 */
+    public static final int CURRENT_VERSION = 3;
+
+    private static final List<Integer> KNOWN_VERSIONS = List.of(1, 2, 3);
+
     public static final List<String> SYSTEM_TABLE_NAMES = List.of("_users", "_sessions", "_refresh_tokens");
 
-    private record ExpectedColumn(String name, String currentType, String legacyType, boolean nullable,
-            boolean autoIncrement) {
+    private record ExpectedColumn(String name, String columnType, boolean nullable, boolean autoIncrement) {
     }
 
     private record ExpectedIndex(String name, boolean unique, String column) {
     }
 
-    private static final Map<String, List<ExpectedColumn>> COLUMNS = Map.of(
-            "_users", List.of(
-                    new ExpectedColumn("id", "bigint", "bigint unsigned", false, true),
-                    new ExpectedColumn("email", "varchar(255)", "varchar(255)", false, false),
-                    new ExpectedColumn("password_hash", "varchar(100)", "varchar(100)", false, false),
-                    new ExpectedColumn("raw_meta", "json", "json", true, false),
-                    new ExpectedColumn("create_time", "datetime", "datetime", false, false),
-                    new ExpectedColumn("update_time", "datetime", "datetime", false, false)),
-            "_sessions", List.of(
-                    new ExpectedColumn("id", "bigint", "bigint unsigned", false, true),
-                    new ExpectedColumn("user_id", "bigint", "bigint unsigned", false, false),
-                    new ExpectedColumn("status", "varchar(16)", "varchar(16)", false, false),
-                    new ExpectedColumn("create_time", "datetime", "datetime", false, false),
-                    new ExpectedColumn("update_time", "datetime", "datetime", false, false),
-                    new ExpectedColumn("last_active_time", "datetime", "datetime", false, false)),
-            "_refresh_tokens", List.of(
-                    new ExpectedColumn("id", "bigint", "bigint unsigned", false, true),
-                    new ExpectedColumn("token_hash", "char(64)", "char(64)", false, false),
-                    new ExpectedColumn("session_id", "bigint", "bigint unsigned", false, false),
-                    new ExpectedColumn("expire_time", "datetime", "datetime", false, false),
-                    new ExpectedColumn("consumed_at", "datetime", "datetime", true, false),
-                    new ExpectedColumn("replacement_token_id", "bigint", "bigint unsigned", true, false),
-                    new ExpectedColumn("reuse_grace_until", "datetime", "datetime", true, false),
-                    new ExpectedColumn("replay_payload_ciphertext", "text", "text", true, false),
-                    new ExpectedColumn("create_time", "datetime", "datetime", false, false),
-                    new ExpectedColumn("update_time", "datetime", "datetime", false, false)));
+    // v1 = Plan A unsigned;v2 = signed;v3 = v2 + _users.deleted_at(datetime NULL 无默认值)
+    private static final Map<Integer, Map<String, List<ExpectedColumn>>> COLUMNS_BY_VERSION = buildColumns();
+
+    private static Map<Integer, Map<String, List<ExpectedColumn>>> buildColumns() {
+        Map<String, List<ExpectedColumn>> v1 = Map.of(
+                "_users", List.of(
+                        new ExpectedColumn("id", "bigint unsigned", false, true),
+                        new ExpectedColumn("email", "varchar(255)", false, false),
+                        new ExpectedColumn("password_hash", "varchar(100)", false, false),
+                        new ExpectedColumn("raw_meta", "json", true, false),
+                        new ExpectedColumn("create_time", "datetime", false, false),
+                        new ExpectedColumn("update_time", "datetime", false, false)),
+                "_sessions", List.of(
+                        new ExpectedColumn("id", "bigint unsigned", false, true),
+                        new ExpectedColumn("user_id", "bigint unsigned", false, false),
+                        new ExpectedColumn("status", "varchar(16)", false, false),
+                        new ExpectedColumn("create_time", "datetime", false, false),
+                        new ExpectedColumn("update_time", "datetime", false, false),
+                        new ExpectedColumn("last_active_time", "datetime", false, false)),
+                "_refresh_tokens", List.of(
+                        new ExpectedColumn("id", "bigint unsigned", false, true),
+                        new ExpectedColumn("token_hash", "char(64)", false, false),
+                        new ExpectedColumn("session_id", "bigint unsigned", false, false),
+                        new ExpectedColumn("expire_time", "datetime", false, false),
+                        new ExpectedColumn("consumed_at", "datetime", true, false),
+                        new ExpectedColumn("replacement_token_id", "bigint unsigned", true, false),
+                        new ExpectedColumn("reuse_grace_until", "datetime", true, false),
+                        new ExpectedColumn("replay_payload_ciphertext", "text", true, false),
+                        new ExpectedColumn("create_time", "datetime", false, false),
+                        new ExpectedColumn("update_time", "datetime", false, false)));
+        Map<String, List<ExpectedColumn>> v2 = Map.of(
+                "_users", v1.get("_users").stream()
+                    .map(SystemTableManifest::signed).toList(),
+                "_sessions", v1.get("_sessions").stream()
+                    .map(SystemTableManifest::signed).toList(),
+                "_refresh_tokens", v1.get("_refresh_tokens").stream()
+                    .map(SystemTableManifest::signed).toList());
+        List<ExpectedColumn> v3Users = new ArrayList<>(v2.get("_users"));
+        v3Users.add(new ExpectedColumn("deleted_at", "datetime", true, false));
+        Map<String, List<ExpectedColumn>> v3 = Map.of(
+                "_users", List.copyOf(v3Users),
+                "_sessions", v2.get("_sessions"),
+                "_refresh_tokens", v2.get("_refresh_tokens"));
+        return Map.of(1, v1, 2, v2, 3, v3);
+    }
+
+    private static ExpectedColumn signed(ExpectedColumn column) {
+        return "bigint unsigned".equals(column.columnType())
+                ? new ExpectedColumn(column.name(), "bigint", column.nullable(), column.autoIncrement())
+                : column;
+    }
 
     private static final Map<String, List<ExpectedIndex>> INDEXES = Map.of(
             "_users", List.of(new ExpectedIndex("uk_email", true, "email")),
@@ -103,24 +134,40 @@ public final class SystemTableManifest {
     }
 
     public static MatchResult compare(Map<String, PhysicalTable> tables) {
-        boolean anyCurrent = false;
-        boolean anyLegacy = false;
+        List<Set<Integer>> versionSets = new ArrayList<>();
         for (String tableName : SYSTEM_TABLE_NAMES) {
-            PhysicalTable table = tables.get(tableName);
-            if (tableMatches(tableName, table, false)) {
-                anyCurrent = true;
-                continue;
+            Set<Integer> versions = matchedVersions(tableName, tables.get(tableName));
+            if (versions.isEmpty()) {
+                return MatchResult.MISMATCH;
             }
-            if (tableMatches(tableName, table, true)) {
-                anyLegacy = true;
-                continue;
+            versionSets.add(versions);
+        }
+        if (versionSets.stream().allMatch(set -> set.contains(CURRENT_VERSION))) {
+            return MatchResult.MATCH_CURRENT;
+        }
+        for (int legacy = CURRENT_VERSION - 1; legacy >= 1; legacy--) {
+            int candidate = legacy;
+            if (versionSets.stream().allMatch(set -> set.contains(candidate))) {
+                return MatchResult.MATCH_LEGACY;
             }
-            return MatchResult.MISMATCH;
         }
-        if (anyCurrent && anyLegacy) {
-            return MatchResult.MATCH_MIXED;
+        return MatchResult.MATCH_MIXED;
+    }
+
+    /**
+     * 某物理表匹配的全部已知 manifest 版本(可能不止一个,例如 v2 与 v3 结构相同的表)。
+     * @param tableName 系统表名
+     * @param table 物理表快照
+     * @return 匹配的版本集合,均不匹配则为空集合
+     */
+    public static Set<Integer> matchedVersions(String tableName, PhysicalTable table) {
+        Set<Integer> versions = new LinkedHashSet<>();
+        for (int version : KNOWN_VERSIONS) {
+            if (tableMatches(tableName, table, version)) {
+                versions.add(version);
+            }
         }
-        return anyLegacy ? MatchResult.MATCH_LEGACY_PLAN_A : MatchResult.MATCH_CURRENT;
+        return versions;
     }
 
     /**
@@ -128,11 +175,12 @@ public final class SystemTableManifest {
      * 二级索引形状(名称+唯一性+列)、主键为 (id)、ENGINE=InnoDB 与字符集物理基线。
      * @param tableName 系统表名
      * @param table 物理表快照
-     * @param legacy 是否按 Plan A 遗留版本校验
+     * @param version 待校验的 manifest 版本(1/2/3)
      * @return 是否符合指定版本的完整结构
      */
-    public static boolean tableMatches(String tableName, PhysicalTable table, boolean legacy) {
-        List<ExpectedColumn> expectedColumns = COLUMNS.get(tableName);
+    public static boolean tableMatches(String tableName, PhysicalTable table, int version) {
+        List<ExpectedColumn> expectedColumns = COLUMNS_BY_VERSION.get(version) == null ? null
+                : COLUMNS_BY_VERSION.get(version).get(tableName);
         if (expectedColumns == null || table == null || !"BASE TABLE".equals(table.tableType())
                 || !"InnoDB".equals(table.engine()) || !"utf8mb4_general_ci".equals(table.collation())
                 || !"Dynamic".equals(table.rowFormat()) || table.hasTriggers() || table.hasForeignKeys()
@@ -144,7 +192,7 @@ public final class SystemTableManifest {
             if (column == null) {
                 return false;
             }
-            String expectedType = legacy ? expected.legacyType() : expected.currentType();
+            String expectedType = expected.columnType();
             if (!expectedType.equals(column.columnType().toLowerCase(Locale.ROOT))
                     || column.nullable() != expected.nullable() || column.isAutoIncrement() != expected.autoIncrement()) {
                 return false;
@@ -206,14 +254,28 @@ public final class SystemTableManifest {
     }
 
     /**
-     * 遗留 → 当前的单表升级 ALTER(signed 化 + 补物理基线)。
+     * 单表从 fromVersion 升级到当前版的 ALTER SQL。fromVersion=1 时一次性 signed 化 +
+     * 补物理基线 + (仅 _users)加 deleted_at；fromVersion=2 时仅 _users 补 deleted_at
+     * (_sessions/_refresh_tokens 的 v2 与 v3 结构相同,不存在该迁移)。
      * @param dbName 项目库名
      * @param tableName 系统表名
+     * @param fromVersion 迁移起点版本(1 或 2)
      * @return 单表 ALTER SQL
      */
-    public static String legacyMigrationSql(String dbName, String tableName) {
+    public static String migrationSql(String dbName, String tableName, int fromVersion) {
+        if (fromVersion == 2) {
+            if (!"_users".equals(tableName)) {
+                throw new IllegalArgumentException("v2 -> v3 only alters _users: " + tableName);
+            }
+            return "ALTER TABLE `%s`.`_users` ADD COLUMN deleted_at datetime DEFAULT NULL"
+                .formatted(dbName);
+        }
+        if (fromVersion != 1) {
+            throw new IllegalArgumentException("unknown migration source version: " + fromVersion);
+        }
         String modifies = switch (tableName) {
-            case "_users" -> "MODIFY id bigint NOT NULL AUTO_INCREMENT";
+            case "_users" -> "MODIFY id bigint NOT NULL AUTO_INCREMENT, "
+                    + "ADD COLUMN deleted_at datetime DEFAULT NULL";
             case "_sessions" -> "MODIFY id bigint NOT NULL AUTO_INCREMENT, MODIFY user_id bigint NOT NULL";
             case "_refresh_tokens" -> "MODIFY id bigint NOT NULL AUTO_INCREMENT, "
                     + "MODIFY session_id bigint NOT NULL, MODIFY replacement_token_id bigint DEFAULT NULL";
