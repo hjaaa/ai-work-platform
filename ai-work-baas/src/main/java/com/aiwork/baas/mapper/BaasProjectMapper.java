@@ -43,7 +43,8 @@ public interface BaasProjectMapper extends BaseMapper<BaasProject> {
      * @return 项目行,不存在返回 null
      */
     @Select("SELECT id, project_ref, name, db_name, status, provision_step, owner_user_id, allowed_origins, "
-            + "runtime_db_user, runtime_db_password_cipher, ddl_fence_epoch, delete_after, create_time, update_time "
+            + "runtime_db_user, runtime_db_password_cipher, ddl_fence_epoch, system_table_version, delete_after, "
+            + "create_time, update_time "
             + "FROM baas_project WHERE id = #{projectId} FOR UPDATE")
     @Results(id = "baasProjectResult", value = {
             @Result(column = "id", property = "id", id = true),
@@ -57,6 +58,7 @@ public interface BaasProjectMapper extends BaseMapper<BaasProject> {
             @Result(column = "runtime_db_user", property = "runtimeDbUser"),
             @Result(column = "runtime_db_password_cipher", property = "runtimeDbPasswordCipher"),
             @Result(column = "ddl_fence_epoch", property = "ddlFenceEpoch"),
+            @Result(column = "system_table_version", property = "systemTableVersion"),
             @Result(column = "delete_after", property = "deleteAfter"),
             @Result(column = "create_time", property = "createTime"),
             @Result(column = "update_time", property = "updateTime") })

@@ -60,6 +60,9 @@ public class BaasProject {
 
     private Long ddlFenceEpoch;
 
+    /** 已确认的系统表 manifest 版本,0 = 未确认(spec §9.1 系统表版本准入)。 */
+    private Integer systemTableVersion;
+
     private LocalDateTime deleteAfter;
 
     private LocalDateTime createTime;
