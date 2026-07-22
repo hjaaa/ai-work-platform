@@ -4,6 +4,7 @@ import com.aiwork.baas.data.auth.ApiKeyAuthFilter;
 import com.aiwork.baas.data.auth.BaasJwtVerifier;
 import com.aiwork.baas.data.cors.DataPlaneCorsFilter;
 import com.aiwork.baas.data.error.DataErrorWriter;
+import com.aiwork.baas.data.enduser.AuthProperties;
 import com.aiwork.baas.data.error.DataPlaneErrorBoundaryFilter;
 import com.aiwork.baas.mapper.BaasApiKeyMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
@@ -28,7 +29,7 @@ import java.util.concurrent.Semaphore;
  * @date 2026/07/21
  */
 @Configuration
-@EnableConfigurationProperties(DataPlaneProperties.class)
+@EnableConfigurationProperties({ DataPlaneProperties.class, AuthProperties.class })
 public class DataPlaneConfiguration {
 
     /**
