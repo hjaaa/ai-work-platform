@@ -160,9 +160,19 @@ public class SystemTableMigrationService {
             try {
                 if (project.getStatus() == ProjectStatus.MIGRATING) {
                     executeMigration(project, MigrationSource.BACKGROUND_RESUME, SYSTEM_OPERATOR_USER_ID);
+                    continue;
                 }
-                else if (SystemTableManifest.compare(readSystemTables(project.getDbName()))
-                        != SystemTableManifest.MatchResult.MATCH_CURRENT) {
+                // 快速跳过:已确认当前版的 ACTIVE 项目不再读项目库
+                if (Integer.valueOf(SystemTableManifest.CURRENT_VERSION).equals(project.getSystemTableVersion())) {
+                    continue;
+                }
+                SystemTableManifest.MatchResult result = SystemTableManifest
+                    .compare(readSystemTables(project.getDbName()));
+                if (result == SystemTableManifest.MatchResult.MATCH_CURRENT) {
+                    // 路径③:物理已是当前版,补写 version(条件更新,幂等;不进 MIGRATING、不取锁)
+                    confirmCurrentVersion(project.getId());
+                }
+                else {
                     executeMigration(project, MigrationSource.BACKGROUND_ACTIVE, SYSTEM_OPERATOR_USER_ID);
                 }
             }
@@ -171,6 +181,14 @@ public class SystemTableMigrationService {
                         failure.getClass().getSimpleName());
             }
         }
+    }
+
+    /** 条件补写已确认版本(spec §9.1 路径③);并发迁移同写同值,幂等。 */
+    private void confirmCurrentVersion(Long projectId) {
+        projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
+            .eq(BaasProject::getId, projectId)
+            .ne(BaasProject::getSystemTableVersion, SystemTableManifest.CURRENT_VERSION)
+            .set(BaasProject::getSystemTableVersion, SystemTableManifest.CURRENT_VERSION));
     }
 
     private List<BaasProject> loadLatestBatch() {
@@ -274,11 +292,14 @@ public class SystemTableMigrationService {
             for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
                 lockExecutor.assertStillHeld(handle);
                 PhysicalTable table = SchemaInspector.readTable(lockedJdbc, current.getDbName(), tableName);
-                if (SystemTableManifest.tableMatches(tableName, table, SystemTableManifest.CURRENT_VERSION)) {
+                java.util.Set<Integer> versions = SystemTableManifest.matchedVersions(tableName, table);
+                if (versions.contains(SystemTableManifest.CURRENT_VERSION)) {
                     continue;
                 }
+                int fromVersion = versions.stream().mapToInt(Integer::intValue).max()
+                    .orElseThrow(() -> new DdlConflictException("系统表迁移失败"));
                 lockExecutor.assertStillHeld(handle);
-                lockedJdbc.execute(SystemTableManifest.migrationSql(current.getDbName(), tableName, 1));
+                lockedJdbc.execute(SystemTableManifest.migrationSql(current.getDbName(), tableName, fromVersion));
                 PhysicalTable migrated = SchemaInspector.readTable(lockedJdbc, current.getDbName(), tableName);
                 if (!SystemTableManifest.tableMatches(tableName, migrated, SystemTableManifest.CURRENT_VERSION)) {
                     throw new DdlConflictException("系统表迁移失败");
@@ -353,8 +374,9 @@ public class SystemTableMigrationService {
     private boolean hasUnsignedOverflow(BaasProject current, JdbcTemplate lockedJdbc,
             Map<String, PhysicalTable> tables) {
         for (String tableName : SystemTableManifest.SYSTEM_TABLE_NAMES) {
-            if (SystemTableManifest.tableMatches(tableName, tables.get(tableName),
-                    SystemTableManifest.CURRENT_VERSION)) {
+            java.util.Set<Integer> versions = SystemTableManifest.matchedVersions(tableName,
+                    tables.get(tableName));
+            if (!versions.contains(1) || versions.contains(SystemTableManifest.CURRENT_VERSION)) {
                 continue;
             }
             Long overflow = lockedJdbc.queryForObject(
@@ -424,6 +446,9 @@ public class SystemTableMigrationService {
             fencingGuard.incrementEpochInTx(projectId);
             updateStatus(projectId, from, to);
             audit(projectId, operatorUserId, source, true, migratedTableCount);
+            if (to == ProjectStatus.ACTIVE) {
+                confirmCurrentVersion(projectId);
+            }
         });
     }
 
@@ -433,6 +458,9 @@ public class SystemTableMigrationService {
             fencingGuard.incrementEpochInTx(projectId);
             updateStatus(projectId, from, to);
             audit(projectId, operatorUserId, source, success, migratedTableCount);
+            if (to == ProjectStatus.ACTIVE) {
+                confirmCurrentVersion(projectId);
+            }
         });
     }
 

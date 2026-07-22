@@ -545,6 +545,10 @@ class SystemTableMigrationTest extends PlanBContainerSupport {
             rootJdbc.execute("DROP TABLE `" + project.getDbName() + "`.`" + tableName + "`");
         }
         LegacySystemTables.create(rootJdbc, project.getDbName());
+        // 模拟存量项目:物理已退化为 legacy,version 元数据同样归零(scanOnce 的快速跳过依赖该字段)。
+        projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
+            .eq(BaasProject::getId, project.getId())
+            .set(BaasProject::getSystemTableVersion, 0));
     }
 
     private String idColumnType(String dbName, String tableName) {
