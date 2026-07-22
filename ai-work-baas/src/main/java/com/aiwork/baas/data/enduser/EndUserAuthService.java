@@ -189,6 +189,63 @@ public class EndUserAuthService {
         return projectId + ":refresh_replay:" + sessionId + ":" + tokenId;
     }
 
+    public void logout(DataRequestContext ctx) {
+        versionGate.assertAuthReady(ctx.project());
+        inTransaction(ctx.project(), connection -> {
+            // §7.6:仅撤销 JWT 所指会话;会话已撤销时重复调用仍成功(幂等)
+            store.revokeSession(connection, ctx.sessionId());
+            return null;
+        });
+    }
+
+    public ObjectNode currentUser(DataRequestContext ctx) {
+        versionGate.assertAuthReady(ctx.project());
+        return inTransaction(ctx.project(), connection -> {
+            EndUserStore.EndUserRow user = store.findUserById(connection, ctx.endUserId());
+            // 软删用户即便持 TTL 内有效 JWT,也不再允许账户管理类操作(§7.3):返回 401。
+            // 与「数据面 /rest 不回查 _users、旧 JWT 仍可读业务数据」不冲突——那是 §7.5 的数据面口径,
+            // 此处是账户管理端点,必须回查软删状态。
+            if (user == null || user.deletedAt() != null) {
+                throw DataApiException.unauthorized("用户不存在");
+            }
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put("id", user.id());
+            node.put("email", user.email());
+            node.put("createTime", TIME_FORMAT.format(user.createTime()));
+            return node;
+        });
+    }
+
+    public void changePassword(DataRequestContext ctx, JsonNode body, String clientIp) {
+        versionGate.assertAuthReady(ctx.project());
+        // currentPassword 与 newPassword 一致走 8–72 字节校验(§7.2:统一密码输入约束,避免 bcrypt 截断歧义):
+        // 合法存量密码必在 8–72 字节内,超界的 currentPassword 不可能匹配,提前 400 拒绝而非落入 401
+        String currentPassword = validatedPassword(body, "currentPassword");
+        String newPassword = validatedPassword(body, "newPassword");
+        Long projectId = ctx.project().getId();
+        inTransaction(ctx.project(), connection -> {
+            EndUserStore.EndUserRow user = store.findUserById(connection, ctx.endUserId());
+            // 软删用户禁止改密(§7.3):持 TTL 内有效 JWT 也返回 401,不进入 bcrypt/限速
+            if (user == null || user.deletedAt() != null) {
+                throw DataApiException.unauthorized("用户不存在");
+            }
+            String emailKey = AuthRateLimiter.emailKey("login", projectId, keyGenerator.sha256Hex(user.email()));
+            String ipKey = AuthRateLimiter.ipKey("login", projectId, clientIp);
+            // 限速检查前置于 bcrypt(§12.2:currentPassword 错误与 login 失败共用维度)
+            assertNotBlocked(projectId, emailKey, properties.getLoginEmailLimit());
+            assertNotBlocked(projectId, ipKey, properties.getLoginIpLimit());
+            if (!passwordEncoder.matches(currentPassword, user.passwordHash())) {
+                countCredentialFailure(projectId, emailKey, ipKey);
+                // access JWT 可能被窃:旧密码校验阻止窃取者借改密永久接管账户(§7.2)
+                throw DataApiException.unauthorized("当前密码错误");
+            }
+            store.updatePassword(connection, user.id(), passwordEncoder.encode(newPassword));
+            // 成功后撤销该用户全部会话(含当前,§7.2)
+            store.revokeAllSessions(connection, user.id());
+            return null;
+        });
+    }
+
     // ===== 共享基建(Task 9/10 复用) =====
 
     @FunctionalInterface

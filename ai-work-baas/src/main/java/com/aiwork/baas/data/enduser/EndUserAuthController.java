@@ -2,6 +2,7 @@ package com.aiwork.baas.data.enduser;
 
 import com.aiwork.baas.data.config.DataPlaneProperties;
 import com.aiwork.baas.data.context.DataRequestContext;
+import com.aiwork.baas.data.context.DataRole;
 import com.aiwork.baas.data.error.DataApiException;
 import com.aiwork.baas.data.rest.BoundedInputStream;
 import com.aiwork.common.security.annotation.Inner;
@@ -12,7 +13,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -69,8 +72,33 @@ public class EndUserAuthController {
         throw DataApiException.badRequest("grant_type 仅支持 password 或 refresh_token");
     }
 
+    @PostMapping("/logout")
+    public void logout(HttpServletRequest request, HttpServletResponse response) {
+        authService.logout(requireAuthenticated(request));
+        response.setStatus(204);
+    }
+
+    @GetMapping("/user")
+    public void user(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        writeJson(response, 200, authService.currentUser(requireAuthenticated(request)));
+    }
+
+    @PutMapping("/user/password")
+    public void changePassword(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        authService.changePassword(requireAuthenticated(request), readBody(request), ipResolver.resolve(request));
+        response.setStatus(204);
+    }
+
     static DataRequestContext context(HttpServletRequest request) {
         return (DataRequestContext) request.getAttribute(DataRequestContext.ATTRIBUTE);
+    }
+
+    private static DataRequestContext requireAuthenticated(HttpServletRequest request) {
+        DataRequestContext ctx = context(request);
+        if (ctx.role() != DataRole.AUTHENTICATED) {
+            throw DataApiException.unauthorized("缺少有效的 access JWT");
+        }
+        return ctx;
     }
 
     /**
