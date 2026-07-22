@@ -37,9 +37,11 @@ class EndUserAuthFullFlowIntegrationTest extends DataPlaneIntegrationTestSupport
         openAcl("notes", allClosed(), allOpen(), "owner_id");
 
         // signup 即登录
-        JsonNode session = json(call(HttpMethod.POST, authUrl("/signup"),
+        ResponseEntity<String> signupResponse = call(HttpMethod.POST, authUrl("/signup"),
                 headers(fixture.publishableKey(), null),
-                "{\"email\":\"flow@example.com\",\"password\":\"password-ok\"}"));
+                "{\"email\":\"flow@example.com\",\"password\":\"password-ok\"}");
+        assertThat(signupResponse.getStatusCode().value()).isEqualTo(200);
+        JsonNode session = json(signupResponse);
         String access = session.get("access_token").textValue();
         long userId = session.get("user").get("id").longValue();
 
