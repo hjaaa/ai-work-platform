@@ -129,6 +129,139 @@ paths:
         '403': { $ref: '#/components/responses/forbidden' }
         '404': { $ref: '#/components/responses/notFound' }
         '500': { $ref: '#/components/responses/internal' }
+  /auth/v1/signup:
+    post:
+      summary: 注册(即视为邮箱已确认;注册即登录,响应与 login 同构)
+      description: |
+        邮箱 trim + 小写规范化;密码 8-72 字节(UTF-8),bcrypt 编码存储;
+        邮箱已被占用(含软删用户,唯一键不释放)返回 409;
+        项目不可用或系统表升级未完成时 fail-closed 返回 403;
+        (项目,IP)维度限速 10 次/小时(无论成败),超限 429 + Retry-After(窗口剩余秒)。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, description: 自动 trim + 小写规范化 }
+                password: { type: string, description: 8-72 字节(UTF-8) }
+      responses:
+        '200': { $ref: '#/components/responses/authSession' }
+        '400': { $ref: '#/components/responses/badRequest' }
+        '403':
+          description: 项目不可用或系统表升级未完成(fail-closed)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '409':
+          description: 该邮箱已被注册(含软删用户,邮箱唯一键不释放)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429':
+          description: 触发防暴力限速
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: 窗口剩余秒数
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /auth/v1/token:
+    post:
+      summary: 登录(grant_type=password)或刷新(grant_type=refresh_token)
+      description: |
+        登录:邮箱不存在/密码错误/用户已软删统一返回 401「邮箱或密码错误」(不泄露账户状态);
+        受(项目,邮箱)5 次/15 分钟与(项目,IP)30 次/15 分钟限速,登录成功清空邮箱计数。
+        刷新:一次性轮换,10 秒 reuse grace 内重放返回同一响应(幂等);超窗重放判定为令牌泄露,
+        撤销整个会话后返回 401;refresh 不限速。
+      parameters:
+        - name: grant_type
+          in: query
+          required: true
+          schema: { type: string, enum: [password, refresh_token] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: grant_type=password 时须含 {email,password};grant_type=refresh_token 时须含 {refresh_token}
+              properties:
+                email: { type: string }
+                password: { type: string }
+                refresh_token: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/authSession' }
+        '400': { $ref: '#/components/responses/badRequest' }
+        '401':
+          description: 凭据错误、刷新令牌无效/已过期,或刷新令牌超窗重放判定泄露(会话已撤销)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429':
+          description: 触发登录防暴力限速(仅 grant_type=password)
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: 窗口剩余秒数
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /auth/v1/logout:
+    post:
+      summary: 注销(仅撤销当前 access JWT 所指会话;幂等)
+      description: 已签发的 access JWT 在 TTL 内仍可解出该会话身份(无黑名单,即时失效依赖紧急密钥轮换)。
+      parameters:
+        - $ref: '#/components/parameters/authorization'
+      responses:
+        '204': { description: 已注销(会话已撤销时重复调用仍返回 204) }
+        '401':
+          description: 缺少或无效的 access JWT
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /auth/v1/user:
+    get:
+      summary: 取当前用户
+      description: 账户管理端点;已软删用户即便持 TTL 内有效 access JWT 也返回 401(与 /rest/v1 数据面不回查软删状态不同)。
+      parameters:
+        - $ref: '#/components/parameters/authorization'
+      responses:
+        '200':
+          description: 当前用户
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer, format: int64 }
+                  email: { type: string }
+                  createTime: { type: string, example: '2026-07-22 12:00:00' }
+        '401':
+          description: 缺少/无效 access JWT,或用户已软删
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  /auth/v1/user/password:
+    put:
+      summary: 修改密码(须提交当前密码;成功后撤销该用户全部会话,含当前)
+      description: |
+        currentPassword 与 newPassword 均须 8-72 字节(UTF-8);currentPassword 错误计入登录防暴力
+        限速(邮箱与 IP 维度,与 login 共用同一桶);已软删用户返回 401。
+      parameters:
+        - $ref: '#/components/parameters/authorization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, description: 8-72 字节(UTF-8) }
+                newPassword: { type: string, description: 8-72 字节(UTF-8) }
+      responses:
+        '204': { description: 已修改,该用户全部会话已撤销(含当前) }
+        '400': { $ref: '#/components/responses/badRequest' }
+        '401':
+          description: 当前密码错误、access JWT 无效,或用户已软删
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+        '429':
+          description: 触发登录防暴力限速(currentPassword 错误计入)
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: 窗口剩余秒数
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
 components:
   securitySchemes:
     apiKey:
@@ -192,6 +325,23 @@ components:
         details: { type: string, nullable: true }
         hint: { type: string, nullable: true }
   responses:
+    authSession:
+      description: 会话响应(signup/login/refresh 同构)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              access_token: { type: string, description: access JWT,TTL 见 expires_in }
+              token_type: { type: string, example: bearer }
+              expires_in: { type: integer, example: 3600, description: access_token 有效期(秒) }
+              refresh_token: { type: string, description: 一次性令牌,使用后即失效(reuse grace 10 秒) }
+              user:
+                type: object
+                properties:
+                  id: { type: integer, format: int64 }
+                  email: { type: string }
+                  createTime: { type: string, example: '2026-07-22 12:00:00' }
     badRequest:
       description: 语法/列名/值类型非法、批量键集合不一致、representation 超行数上限等
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
