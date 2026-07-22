@@ -12,6 +12,7 @@ import com.aiwork.baas.security.crypto.BaasCryptoService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.security.SecureRandom;
@@ -46,6 +47,7 @@ public class JwtKeyRotationService {
     private final TransactionTemplate transactionTemplate;
 
     public RotatedKey rotate(BaasProject project, Long operatorUserId) {
+        rejectAmbientTransaction();
         return transactionTemplate.execute(status -> {
             List<BaasJwtKey> keys = jwtKeyMapper.selectByProjectForUpdate(project.getId());
             BaasJwtKey current = keys.stream()
@@ -70,6 +72,7 @@ public class JwtKeyRotationService {
     }
 
     public RotatedKey emergencyRotate(BaasProject project, Long operatorUserId) {
+        rejectAmbientTransaction();
         return transactionTemplate.execute(status -> {
             jwtKeyMapper.selectByProjectForUpdate(project.getId());
             jwtKeyMapper.update(null, Wrappers.<BaasJwtKey>lambdaUpdate()
@@ -81,6 +84,12 @@ public class JwtKeyRotationService {
             audit(project.getId(), operatorUserId, "JWT_KEY_EMERGENCY_ROTATE", "kid=" + kid, "HIGH");
             return new RotatedKey(kid);
         });
+    }
+
+    private void rejectAmbientTransaction() {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("project key operation cannot run within an active transaction");
+        }
     }
 
     private String insertCurrentKey(Long projectId) {
