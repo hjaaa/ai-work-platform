@@ -39,17 +39,27 @@ class SystemTableVersionGateTest {
             .isInstanceOf(DdlConflictException.class);
         assertThatThrownBy(() -> gate.assertAuthReady(project(ProjectStatus.ACTIVE, null)))
             .isInstanceOf(DataApiException.class);
+        assertThatThrownBy(() -> gate.assertStudioReady(project(ProjectStatus.ACTIVE, null)))
+            .isInstanceOf(DdlConflictException.class);
     }
 
     @Test
     void nonActiveStatusesFailClosed() {
-        for (ProjectStatus status : new ProjectStatus[] { ProjectStatus.MIGRATING, ProjectStatus.FAILED,
-                ProjectStatus.DELETING }) {
+        for (ProjectStatus status : new ProjectStatus[] { ProjectStatus.PROVISIONING, ProjectStatus.MIGRATING,
+                ProjectStatus.FAILED, ProjectStatus.DELETING, ProjectStatus.DELETED }) {
             assertThatThrownBy(() -> gate.assertAuthReady(
                     project(status, SystemTableManifest.CURRENT_VERSION))).isInstanceOf(DataApiException.class);
             assertThatThrownBy(() -> gate.assertStudioReady(
                     project(status, SystemTableManifest.CURRENT_VERSION))).isInstanceOf(DdlConflictException.class);
         }
+    }
+
+    @Test
+    void nullProjectFailsClosed() {
+        assertThatThrownBy(() -> gate.assertAuthReady(null))
+            .isInstanceOf(DataApiException.class);
+        assertThatThrownBy(() -> gate.assertStudioReady(null))
+            .isInstanceOf(DdlConflictException.class);
     }
 
 }
