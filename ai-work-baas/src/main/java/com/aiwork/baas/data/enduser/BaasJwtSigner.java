@@ -12,6 +12,7 @@ import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.crypto.MACSigner;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -26,6 +27,7 @@ import java.util.Date;
  * @author ai-work
  * @date 2026/07/22
  */
+@Slf4j
 @Component
 public class BaasJwtSigner {
 
@@ -79,6 +81,7 @@ public class BaasJwtSigner {
             throw exception;
         }
         catch (Exception exception) {
+            log.error("jwt sign failed projectId={} errorType={}", project.getId(), exception.getClass().getSimpleName());
             throw DataApiException.internal("签发失败");
         }
     }
