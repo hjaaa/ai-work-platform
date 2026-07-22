@@ -27,7 +27,7 @@ import java.util.List;
 @Slf4j
 public class DataPlaneCorsFilter extends OncePerRequestFilter {
 
-    private static final String ALLOW_METHODS = "GET, POST, PATCH, DELETE, OPTIONS";
+    private static final String ALLOW_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
 
     private static final String ALLOW_HEADERS = "apikey, Authorization, Content-Type, Prefer";
 

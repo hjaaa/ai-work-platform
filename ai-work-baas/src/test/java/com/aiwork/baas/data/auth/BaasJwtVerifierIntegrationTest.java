@@ -67,7 +67,7 @@ class BaasJwtVerifierIntegrationTest extends DataPlaneIntegrationTestSupport {
             claims.put("aud", fixture.project().getProjectRef());
             claims.put("sub", subject);
             claims.put("role", "authenticated");
-            claims.put("session_id", "s");
+            claims.put("session_id", 1L);
             claims.put("iat", issuedAt);
             claims.put("exp", expirationTime);
             JWSObject jwt = new JWSObject(
@@ -86,7 +86,7 @@ class BaasJwtVerifierIntegrationTest extends DataPlaneIntegrationTestSupport {
         VerifiedEndUser user = verifier.verify(mintJwt(42L, null), fixture.project());
 
         assertThat(user.userId()).isEqualTo(42L);
-        assertThat(user.sessionId()).isNotBlank();
+        assertThat(user.sessionId()).isEqualTo(1L);
     }
 
     @Test
@@ -258,6 +258,16 @@ class BaasJwtVerifierIntegrationTest extends DataPlaneIntegrationTestSupport {
     @Test
     void rejectsNonNumericSub() {
         assert401(mintJwt(1L, claims -> claims.subject("abc")));
+    }
+
+    @Test
+    void stringSessionIdRejected() {
+        assert401(mintJwt(1L, claims -> claims.claim("session_id", "12345")));
+    }
+
+    @Test
+    void decimalSessionIdRejected() {
+        assert401(mintJwt(1L, claims -> claims.claim("session_id", 1.5)));
     }
 
     @Test

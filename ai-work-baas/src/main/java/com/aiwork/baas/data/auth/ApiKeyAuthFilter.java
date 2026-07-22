@@ -106,18 +106,29 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         String authorization = request.getHeader("Authorization");
         boolean hasBearer = authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7);
         if (apiKey.getKeyType() == KeyType.SECRET) {
+            if (isAuthPath(request)) {
+                // spec §7.6:secret key 调用 auth 端点一律 403,不做身份混合
+                throw DataApiException.forbidden("secret key 不得调用 auth 端点", null);
+            }
             if (hasBearer) {
                 // secret key 与终端用户 JWT 互斥(§7.4)
                 throw DataApiException.unauthorized("secret key 不得同时携带终端用户 JWT");
             }
-            return new DataRequestContext(project, DataRole.SERVICE_ROLE, null);
+            return new DataRequestContext(project, DataRole.SERVICE_ROLE, null, null);
         }
         if (!hasBearer) {
-            return new DataRequestContext(project, DataRole.ANON, null);
+            return new DataRequestContext(project, DataRole.ANON, null, null);
         }
 
         VerifiedEndUser user = jwtVerifier.verify(authorization.substring(7).trim(), project);
-        return new DataRequestContext(project, DataRole.AUTHENTICATED, user.userId());
+        return new DataRequestContext(project, DataRole.AUTHENTICATED, user.userId(), user.sessionId());
+    }
+
+    /** 服务内路径形如 /data/{ref}/auth/v1/…;第 3 段为 auth 即 auth 端点。 */
+    private static boolean isAuthPath(HttpServletRequest request) {
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        String[] segments = path.split("/");
+        return segments.length >= 4 && "auth".equals(segments[3]);
     }
 
     private void touchKeyBestEffort(BaasApiKey apiKey) {

@@ -194,7 +194,7 @@ public abstract class DataPlaneIntegrationTestSupport extends PlanBContainerSupp
                 .audience(fixture.project().getProjectRef())
                 .subject(String.valueOf(userId))
                 .claim("role", "authenticated")
-                .claim("session_id", UUID.randomUUID().toString())
+                .claim("session_id", 1L)
                 .issueTime(Date.from(now))
                 .expirationTime(Date.from(now.plusSeconds(3600)));
             if (customizer != null) {

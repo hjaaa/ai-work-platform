@@ -71,10 +71,11 @@ public class BaasJwtVerifier {
         String issuer = claims.getIssuer();
         List<String> audience = claims.getAudience();
         Object role = claims.getClaim("role");
-        Object sessionId = claims.getClaim("session_id");
+        Object sessionId = rawClaims.get("session_id");
         if (issuer == null || audience == null || audience.isEmpty() || role == null || sessionId == null) {
             throw unauthorized();
         }
+        long sessionIdValue = parseSessionId(sessionId);
         // ③ iss/aud/role 严格匹配(§7.4 三方一致性),sub 严格解析 Long
         if (!("baas/" + project.getProjectRef()).equals(issuer)
                 || !audience.equals(List.of(project.getProjectRef())) || !"authenticated".equals(role)) {
@@ -82,7 +83,7 @@ public class BaasJwtVerifier {
         }
         long userId = parseSubject(subject);
         validateTimeline(issueTime, expirationTime);
-        return new VerifiedEndUser(userId, String.valueOf(sessionId));
+        return new VerifiedEndUser(userId, sessionIdValue);
     }
 
     private BaasJwtKey resolveKey(Long projectId, String kid) {
@@ -188,6 +189,16 @@ public class BaasJwtVerifier {
         catch (NumberFormatException exception) {
             throw unauthorized();
         }
+    }
+
+    private static long parseSessionId(Object sessionId) {
+        if (sessionId instanceof Long longValue) {
+            return longValue;
+        }
+        if (sessionId instanceof Integer intValue) {
+            return intValue.longValue();
+        }
+        throw unauthorized();
     }
 
     private static DataApiException unauthorized() {
