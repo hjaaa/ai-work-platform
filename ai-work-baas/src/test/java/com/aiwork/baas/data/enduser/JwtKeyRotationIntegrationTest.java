@@ -11,6 +11,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.http.HttpMethod;
 
 import java.util.concurrent.CountDownLatch;
@@ -103,6 +104,11 @@ class JwtKeyRotationIntegrationTest extends DataPlaneIntegrationTestSupport {
                     rotationService.rotate(fixture.project(), 1L);
                 }
                 catch (DdlConflictException conflict) {
+                    conflicts.incrementAndGet();
+                }
+                // 高并发 DB 争用下,轮换失败者也可能表现为 InnoDB 死锁(事务被回滚),
+                // 而非干净的 409 冲突;两者都满足"未产生双 CURRENT"的安全不变式,同样计入败者。
+                catch (TransientDataAccessException deadlock) {
                     conflicts.incrementAndGet();
                 }
             };
