@@ -17,6 +17,7 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.time.Clock;
 import java.util.concurrent.Semaphore;
@@ -55,6 +56,11 @@ public class DataPlaneConfiguration {
     @Bean
     public Clock dataPlaneClock() {
         return Clock.systemUTC();
+    }
+
+    @Bean
+    public BCryptPasswordEncoder endUserPasswordEncoder() {
+        return new BCryptPasswordEncoder(10);
     }
 
     /**

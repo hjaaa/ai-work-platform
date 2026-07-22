@@ -1,0 +1,86 @@
+package com.aiwork.baas.data.enduser;
+
+import com.aiwork.baas.data.error.DataApiException;
+import com.aiwork.baas.entity.BaasJwtKey;
+import com.aiwork.baas.entity.BaasProject;
+import com.aiwork.baas.entity.enums.JwtKeyStatus;
+import com.aiwork.baas.mapper.BaasJwtKeyMapper;
+import com.aiwork.baas.security.crypto.BaasCryptoService;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.MACSigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
+import org.springframework.stereotype.Component;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.Date;
+
+/**
+ * access JWT 签发器(spec §7.6):每次签发直查项目 CURRENT baas_jwt_key(不缓存,
+ * 与 Plan C 验签对称支撑 §6.1 紧急轮换立即生效);claims 按 §7.2 固定。
+ *
+ * @author ai-work
+ * @date 2026/07/22
+ */
+@Component
+public class BaasJwtSigner {
+
+    public record SignedAccessToken(String token, long expiresInSeconds) {
+    }
+
+    private final BaasJwtKeyMapper jwtKeyMapper;
+
+    private final BaasCryptoService cryptoService;
+
+    private final AuthProperties properties;
+
+    private final Clock clock;
+
+    public BaasJwtSigner(BaasJwtKeyMapper jwtKeyMapper, BaasCryptoService cryptoService, AuthProperties properties,
+            Clock clock) {
+        this.jwtKeyMapper = jwtKeyMapper;
+        this.cryptoService = cryptoService;
+        this.properties = properties;
+        this.clock = clock;
+    }
+
+    public SignedAccessToken sign(BaasProject project, long userId, long sessionId) {
+        BaasJwtKey key = jwtKeyMapper.selectOne(Wrappers.<BaasJwtKey>lambdaQuery()
+            .eq(BaasJwtKey::getProjectId, project.getId())
+            .eq(BaasJwtKey::getStatus, JwtKeyStatus.CURRENT));
+        if (key == null) {
+            throw DataApiException.internal("签发密钥不可用");
+        }
+        try {
+            String secretBase64 = cryptoService.decrypt(key.getSecretCipher(),
+                    project.getId() + ":jwt_secret:" + key.getKid());
+            byte[] secret = Base64.getDecoder().decode(secretBase64);
+            Instant now = clock.instant();
+            long expiresIn = properties.getAccessTtlSeconds();
+            JWTClaimsSet claims = new JWTClaimsSet.Builder()
+                .issuer("baas/" + project.getProjectRef())
+                .audience(project.getProjectRef())
+                .subject(String.valueOf(userId))
+                .claim("role", "authenticated")
+                .claim("session_id", sessionId)
+                .issueTime(Date.from(now))
+                .expirationTime(Date.from(now.plusSeconds(expiresIn)))
+                .build();
+            SignedJWT jwt = new SignedJWT(
+                    new JWSHeader.Builder(JWSAlgorithm.HS256).keyID(key.getKid()).build(), claims);
+            jwt.sign(new MACSigner(secret));
+            return new SignedAccessToken(jwt.serialize(), expiresIn);
+        }
+        catch (DataApiException exception) {
+            throw exception;
+        }
+        catch (Exception exception) {
+            throw DataApiException.internal("签发失败");
+        }
+    }
+
+}
