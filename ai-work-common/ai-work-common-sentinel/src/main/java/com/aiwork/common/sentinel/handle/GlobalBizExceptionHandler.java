@@ -62,7 +62,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @RestControllerAdvice
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 1)
 public class GlobalBizExceptionHandler {
 
 	/**

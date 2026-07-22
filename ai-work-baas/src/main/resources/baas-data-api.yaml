@@ -1,0 +1,218 @@
+openapi: 3.0.3
+info:
+  title: ai-work BaaS 数据面 API
+  version: 0.1.0
+  description: |
+    PostgREST-inspired 简化子集(spec §7.1)。所有路径相对 base_url = 外部前缀 + /data/{projectRef}。
+    Cloud 形态外部前缀 http://gw:9999/baas,Boot 形态 http://host:9999/admin。
+    差异与限制:
+    - like 通配符 %/_ 原样传递,不做 PostgREST 的 * → % 转换
+    - bigint(含 id 与 owner 列)以 JSON number 原样输出,JavaScript 侧超过 2^53 有精度风险
+    - json 列写入的 JSON literal null 与 SQL NULL 不区分(显式 null 恒为 SQL NULL)
+    - 关联/嵌套查询、OR 过滤、聚合不支持
+servers:
+  - url: /
+security:
+  - apiKey: []
+paths:
+  /rest/v1/{table}:
+    parameters:
+      - $ref: '#/components/parameters/table'
+    get:
+      summary: 按条件查询
+      description: |
+        过滤条件为 查询参数 列名=操作符.值,操作符:eq/neq/gt/gte/lt/lte/like/in/is。
+        in 语法 col=in.(a,b,c),不支持值内嵌逗号与引号转义;is 仅 is.null / is.not_null;
+        json 列仅支持 is 过滤;多条件之间为 AND;同名参数多次出现为多个 AND 条件。
+      parameters:
+        - $ref: '#/components/parameters/select'
+        - $ref: '#/components/parameters/order'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
+        - $ref: '#/components/parameters/preferCount'
+        - $ref: '#/components/parameters/authorization'
+      responses:
+        '200':
+          description: 行数组;零匹配返回 [](不是 404);Prefer count=exact 时响应头含 Content-Range
+          headers:
+            Content-Range:
+              schema: { type: string, example: 0-19/87 }
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '400': { $ref: '#/components/responses/badRequest' }
+        '401': { $ref: '#/components/responses/unauthorized' }
+        '403': { $ref: '#/components/responses/forbidden' }
+        '404': { $ref: '#/components/responses/notFound' }
+        '413': { $ref: '#/components/responses/tooLarge' }
+        '429': { $ref: '#/components/responses/rateLimited' }
+        '500': { $ref: '#/components/responses/internal' }
+    post:
+      summary: 单条或数组批量插入(批量为单事务原子,任一行失败整体回滚)
+      description: |
+        body 为对象或对象数组(≤1000 行);数组各行字段集合必须一致;body 含 id 列一律 400;
+        配置 owner 列的表:anon/authenticated 的 body 不得包含 owner 列;
+        Prefer return=representation 需同时具备 insert 与 select 权限,返回完整行(≤1000 行、≤16 MiB)。
+      parameters:
+        - $ref: '#/components/parameters/preferReturn'
+        - $ref: '#/components/parameters/authorization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                - type: array
+                  items: { type: object }
+      responses:
+        '201':
+          description: 默认返回主键数组 [{"id":1},…];representation 时返回完整行数组
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+        '400': { $ref: '#/components/responses/badRequest' }
+        '401': { $ref: '#/components/responses/unauthorized' }
+        '403': { $ref: '#/components/responses/forbidden' }
+        '404': { $ref: '#/components/responses/notFound' }
+        '409': { $ref: '#/components/responses/conflict' }
+        '413': { $ref: '#/components/responses/tooLarge' }
+        '429': { $ref: '#/components/responses/rateLimited' }
+        '500': { $ref: '#/components/responses/internal' }
+    patch:
+      summary: 按条件更新(必须携带至少一个过滤条件)
+      description: |
+        默认返回 {"count":n},匹配零行返回 200 + 0;
+        Prefer return=representation 需同时具备 update 与 select 权限,按捕获主键返回被改行,
+        匹配超过 1000 行返回 400。
+      parameters:
+        - $ref: '#/components/parameters/preferReturn'
+        - $ref: '#/components/parameters/authorization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200':
+          description: '{"count":n} 或(representation)完整行数组'
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    properties: { count: { type: integer } }
+                  - type: array
+                    items: { type: object }
+        '400': { $ref: '#/components/responses/badRequest' }
+        '401': { $ref: '#/components/responses/unauthorized' }
+        '403': { $ref: '#/components/responses/forbidden' }
+        '404': { $ref: '#/components/responses/notFound' }
+        '409': { $ref: '#/components/responses/conflict' }
+        '413': { $ref: '#/components/responses/tooLarge' }
+        '429': { $ref: '#/components/responses/rateLimited' }
+        '500': { $ref: '#/components/responses/internal' }
+    delete:
+      summary: 按条件删除(必须携带至少一个过滤条件;不支持 representation)
+      parameters:
+        - $ref: '#/components/parameters/authorization'
+      responses:
+        '200':
+          description: '{"count":n}'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { count: { type: integer } }
+        '400': { $ref: '#/components/responses/badRequest' }
+        '401': { $ref: '#/components/responses/unauthorized' }
+        '403': { $ref: '#/components/responses/forbidden' }
+        '404': { $ref: '#/components/responses/notFound' }
+        '500': { $ref: '#/components/responses/internal' }
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: apikey
+      description: publishable key(anon/authenticated)或 secret key(service_role,仅服务端)
+  parameters:
+    table:
+      name: table
+      in: path
+      required: true
+      schema: { type: string }
+      description: 表名;_ 前缀系统表不可见(404)
+    authorization:
+      name: Authorization
+      in: header
+      required: false
+      schema: { type: string, example: Bearer <access JWT> }
+      description: 终端用户 access JWT;仅可与 publishable key 组合,secret key 携带 JWT 返回 401
+    select:
+      name: select
+      in: query
+      required: false
+      schema: { type: string, example: id,name }
+      description: 逗号分隔投影列;缺省全列
+    order:
+      name: order
+      in: query
+      required: false
+      schema: { type: string, example: created_at.desc,name }
+      description: 逗号分隔,每列可选 .asc/.desc,缺省 asc
+    limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, default: 100, maximum: 1000, minimum: 1 }
+    offset:
+      name: offset
+      in: query
+      required: false
+      schema: { type: integer, default: 0, minimum: 0 }
+    preferCount:
+      name: Prefer
+      in: header
+      required: false
+      schema: { type: string, example: count=exact }
+      description: count=exact 时以同过滤条件执行第二条 COUNT 并返回 Content-Range
+    preferReturn:
+      name: Prefer
+      in: header
+      required: false
+      schema: { type: string, example: return=representation }
+  schemas:
+    Error:
+      type: object
+      description: PostgREST 风格错误体(spec §11)
+      properties:
+        code: { type: string, example: BAD_REQUEST }
+        message: { type: string }
+        details: { type: string, nullable: true }
+        hint: { type: string, nullable: true }
+  responses:
+    badRequest:
+      description: 语法/列名/值类型非法、批量键集合不一致、representation 超行数上限等
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    unauthorized:
+      description: apikey 无效、三方项目标识不一致、JWT 无效、secret key 携带 JWT
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    forbidden:
+      description: ACL/owner 策略拒绝、representation 缺 select 权限、项目或表暂不可用
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    notFound:
+      description: 表不存在(含 tombstone 与系统表)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    conflict:
+      description: 唯一键冲突或约束违反
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    tooLarge:
+      description: 请求体超 1 MB 或响应体超 16 MiB(representation 超限时写入已回滚)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    rateLimited:
+      description: 并发响应构建繁忙(信号量耗尽)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    internal:
+      description: SQL 执行超时或内部错误(message 脱敏)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }

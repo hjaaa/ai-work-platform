@@ -58,6 +58,14 @@ public class AiWorkBearerTokenExtractor implements BearerTokenResolver {
 		String requestUri = request.getRequestURI();
 		String relativePath = requestUri.substring(request.getContextPath().length());
 
+		boolean skipResolve = urlProperties.getSkipResolveUrls()
+			.stream()
+			.anyMatch(url -> pathMatcher.match(url, relativePath));
+
+		if (skipResolve) {
+			return null;
+		}
+
 		if (urlProperties.isSkipPublicUrl()) {
 			boolean match = urlProperties.getIgnoreUrls()
 				.stream()

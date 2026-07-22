@@ -55,6 +55,9 @@ security:
         - /druid/**
         - /actuator/**
         - /code/**
+        - /data/**
+      skip-resolve-urls:
+        - /data/**
 
 #--------------如下配置尽量不要变动-------------
 management.endpoints.access.default: none # 默认所有端点都不允许访问
