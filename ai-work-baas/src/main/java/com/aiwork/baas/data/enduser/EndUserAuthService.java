@@ -121,6 +121,74 @@ public class EndUserAuthService {
         });
     }
 
+    /** 四分支结果:③ 需要「先提交撤销、再 401」,不能靠抛异常回滚,故以结果对象承载。 */
+    private record RefreshOutcome(String responseJson, boolean leakedReuse) {
+    }
+
+    public ObjectNode refresh(DataRequestContext ctx, JsonNode body) {
+        versionGate.assertAuthReady(ctx.project());
+        JsonNode tokenNode = body == null ? null : body.get("refresh_token");
+        if (tokenNode == null || !tokenNode.isTextual() || tokenNode.textValue().isBlank()) {
+            throw DataApiException.badRequest("refresh_token 缺失或类型错误");
+        }
+        String tokenHash = keyGenerator.sha256Hex(tokenNode.textValue());
+        Long projectId = ctx.project().getId();
+        RefreshOutcome outcome = inTransaction(ctx.project(), connection -> {
+            EndUserStore.RefreshTokenRow row = store.lockRefreshToken(connection, tokenHash);
+            LocalDateTime now = LocalDateTime.now();
+            if (row == null || row.expireTime().isBefore(now) || !"ACTIVE".equals(row.sessionStatus())) {
+                // 分支④:过期/不存在/会话非 ACTIVE
+                throw DataApiException.unauthorized("刷新令牌无效");
+            }
+            if (row.consumedAt() != null) {
+                if (row.reuseGraceUntil() != null && !now.isAfter(row.reuseGraceUntil())) {
+                    // 分支②:grace 内重放,解密返回同一响应(幂等)
+                    if (row.replayPayloadCiphertext() == null) {
+                        throw DataApiException.unauthorized("刷新令牌无效");
+                    }
+                    return new RefreshOutcome(cryptoService.decrypt(row.replayPayloadCiphertext(),
+                            replayAad(projectId, row.sessionId(), row.id())), false);
+                }
+                // 分支③:超窗重放判定泄露——撤销整个会话并提交,随后 401;顺带惰性清密文(§7.6)
+                store.clearReplayCiphertext(connection, row.id());
+                store.revokeSession(connection, row.sessionId());
+                return new RefreshOutcome(null, true);
+            }
+            // 分支①:行锁事务内轮换
+            EndUserStore.EndUserRow user = store.findUserById(connection, row.userId());
+            if (user == null) {
+                throw DataApiException.unauthorized("刷新令牌无效");
+            }
+            String newRefreshPlaintext = generateRefreshToken();
+            long childTokenId = store.insertRefreshToken(connection, row.sessionId(),
+                    keyGenerator.sha256Hex(newRefreshPlaintext),
+                    now.plusDays(properties.getRefreshTtlDays()));
+            BaasJwtSigner.SignedAccessToken access = jwtSigner.sign(ctx.project(), user.id(), row.sessionId());
+            ObjectNode response = authResponse(user, access, newRefreshPlaintext);
+            String responseJson = response.toString();
+            store.consumeToken(connection, row.id(), childTokenId,
+                    now.plusSeconds(properties.getReuseGraceSeconds()),
+                    cryptoService.encrypt(responseJson, replayAad(projectId, row.sessionId(), row.id())));
+            store.touchSessionLastActive(connection, row.sessionId());
+            return new RefreshOutcome(responseJson, false);
+        });
+        if (outcome.leakedReuse()) {
+            // 撤销已提交,再返回 401(§7.2 超窗重放判定为泄露)
+            throw DataApiException.unauthorized("刷新令牌已失效,会话已撤销");
+        }
+        try {
+            return (ObjectNode) objectMapper.readTree(outcome.responseJson());
+        }
+        catch (java.io.IOException exception) {
+            throw DataApiException.internal("刷新响应解析失败");
+        }
+    }
+
+    private static String replayAad(Long projectId, long sessionId, long tokenId) {
+        // AAD 绑定 project + session + token,防密文跨记录替换(§7.2)
+        return projectId + ":refresh_replay:" + sessionId + ":" + tokenId;
+    }
+
     // ===== 共享基建(Task 9/10 复用) =====
 
     @FunctionalInterface

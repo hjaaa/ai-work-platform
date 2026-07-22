@@ -62,6 +62,10 @@ public class EndUserAuthController {
                     authService.login(context(request), readBody(request), ipResolver.resolve(request)));
             return;
         }
+        if ("refresh_token".equals(grantType)) {
+            writeJson(response, 200, authService.refresh(context(request), readBody(request)));
+            return;
+        }
         throw DataApiException.badRequest("grant_type 仅支持 password 或 refresh_token");
     }
 
