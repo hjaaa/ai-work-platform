@@ -9,9 +9,11 @@ import com.aiwork.baas.data.context.DataRole;
 import com.aiwork.baas.data.error.DataApiException;
 import com.aiwork.baas.data.meta.AclChecker;
 import com.aiwork.baas.data.meta.DataMetadataService;
+import com.aiwork.baas.data.meta.TableMeta;
 import com.aiwork.baas.data.query.ParsedQuery;
 import com.aiwork.baas.data.query.QueryParser;
 import com.aiwork.baas.data.rest.PreferHeader;
+import com.aiwork.baas.data.sql.BoundSql;
 import com.aiwork.baas.data.sql.SqlBuilder;
 import com.aiwork.baas.datasource.ProjectDataSourceRegistry;
 import com.aiwork.baas.entity.BaasColumn;
@@ -36,10 +38,15 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -75,6 +82,9 @@ class DataPlaneExecutorIntegrationTest extends DataPlaneIntegrationTestSupport {
 
     @Autowired
     private WriteBodyParser bodyParser;
+
+    @Autowired
+    private ValueCodec codec;
 
     @Autowired
     @Qualifier("dataResponsePermits")
@@ -258,6 +268,86 @@ class DataPlaneExecutorIntegrationTest extends DataPlaneIntegrationTestSupport {
         com.fasterxml.jackson.databind.JsonNode rows = dataPlaneObjectMapper.readTree(patch.getContentAsString());
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).get("qty").asInt()).isEqualTo(9);
+    }
+
+    @Test
+    void patchRepresentationExcludesMatchingRowInsertedAfterIdCapture() throws Exception {
+        createOrdersTable();
+        executor.executePost(serviceCtx(), "orders", dataPlaneObjectMapper.readTree("{\"title\":\"x\",\"qty\":1}"),
+                PreferHeader.parse(null), new MockHttpServletResponse());
+        DataSource delegate = registry.execute(fixture.project(), dataSource -> dataSource);
+        CountDownLatch idsCaptured = new CountDownLatch(1);
+        CountDownLatch insertFinished = new CountDownLatch(1);
+        AtomicLong insertedId = new AtomicLong();
+        AtomicReference<Throwable> insertFailure = new AtomicReference<>();
+        Thread inserter = new Thread(() -> {
+            try {
+                if (!idsCaptured.await(30, TimeUnit.SECONDS)) {
+                    throw new AssertionError("PATCH 未在 30 秒内捕获主键");
+                }
+                insertedId.set(insertMatchingOrder(delegate));
+            }
+            catch (Throwable throwable) {
+                insertFailure.set(throwable);
+            }
+            finally {
+                insertFinished.countDown();
+            }
+        }, "patch-representation-concurrent-insert");
+        inserter.start();
+
+        SqlBuilder pausingSqlBuilder = new SqlBuilder(codec) {
+            @Override
+            public BoundSql buildUpdateByIds(TableMeta meta, WriteBodyParser.ParsedWrite write, List<Long> ids) {
+                idsCaptured.countDown();
+                try {
+                    if (!insertFinished.await(30, TimeUnit.SECONDS)) {
+                        throw new AssertionError("并发插入未在 30 秒内完成");
+                    }
+                }
+                catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError("等待并发插入时被中断", exception);
+                }
+                if (insertFailure.get() != null) {
+                    throw new AssertionError("并发插入失败", insertFailure.get());
+                }
+                return super.buildUpdateByIds(meta, write, ids);
+            }
+        };
+        ProjectDataSourceRegistry readCommittedRegistry = new ProjectDataSourceRegistry(
+                project -> readCommittedDataSource(delegate), 1, 2, 2);
+        DataPlaneExecutor concurrentExecutor = new DataPlaneExecutor(readCommittedRegistry, metadataService,
+                aclChecker, pausingSqlBuilder, codec, bodyParser, properties, responsePermits,
+                dataPlaneObjectMapper);
+        MockHttpServletResponse patch = new MockHttpServletResponse();
+
+        try {
+            concurrentExecutor.executePatch(serviceCtx(), "orders",
+                    query(Map.of("title", new String[] { "eq.x" })),
+                    dataPlaneObjectMapper.readTree("{\"qty\":9}"), PreferHeader.parse("return=representation"),
+                    patch);
+        }
+        finally {
+            readCommittedRegistry.closeAll();
+            inserter.join(TimeUnit.SECONDS.toMillis(30));
+        }
+
+        assertThat(inserter.isAlive()).isFalse();
+        assertThat(insertFailure.get()).isNull();
+        assertThat(insertedId).hasValueGreaterThan(0L);
+        JsonNode representation = dataPlaneObjectMapper.readTree(patch.getContentAsString());
+        assertThat(representation).hasSize(1);
+        assertThat(representation.get(0).get("id").asLong()).isNotEqualTo(insertedId.get());
+        assertThat(representation.get(0).get("qty").asInt()).isEqualTo(9);
+
+        MockHttpServletResponse allRows = new MockHttpServletResponse();
+        executor.executeGet(serviceCtx(), "orders", query(Map.of("order", new String[] { "id.asc" })),
+                PreferHeader.parse(null), allRows);
+        JsonNode persistedRows = dataPlaneObjectMapper.readTree(allRows.getContentAsString());
+        assertThat(persistedRows).hasSize(2);
+        assertThat(persistedRows.get(1).get("id").asLong()).isEqualTo(insertedId.get());
+        assertThat(persistedRows.get(1).get("qty").asInt()).isEqualTo(1);
     }
 
     @Test
@@ -498,6 +588,54 @@ class DataPlaneExecutorIntegrationTest extends DataPlaneIntegrationTestSupport {
                         rollbackFailure);
             }
         };
+    }
+
+    private static DataSource readCommittedDataSource(DataSource delegate) {
+        return new AbstractDataSource() {
+            @Override
+            public Connection getConnection() throws SQLException {
+                return readCommittedConnection(delegate.getConnection());
+            }
+
+            @Override
+            public Connection getConnection(String username, String password) throws SQLException {
+                return readCommittedConnection(delegate.getConnection(username, password));
+            }
+        };
+    }
+
+    private static Connection readCommittedConnection(Connection delegate) throws SQLException {
+        int previousIsolation = delegate.getTransactionIsolation();
+        delegate.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        return (Connection)Proxy.newProxyInstance(DataPlaneExecutorIntegrationTest.class.getClassLoader(),
+                new Class<?>[] { Connection.class }, (proxy, method, args) -> {
+                    if ("close".equals(method.getName()) && method.getParameterCount() == 0) {
+                        try {
+                            if (!delegate.isClosed()) {
+                                delegate.setTransactionIsolation(previousIsolation);
+                            }
+                        }
+                        finally {
+                            delegate.close();
+                        }
+                        return null;
+                    }
+                    return invoke(delegate, method, args);
+                });
+    }
+
+    private static long insertMatchingOrder(DataSource dataSource) throws SQLException {
+        try (Connection connection = dataSource.getConnection(); PreparedStatement statement = connection
+            .prepareStatement("INSERT INTO `orders` (`title`, `qty`) VALUES (?, ?)",
+                    Statement.RETURN_GENERATED_KEYS)) {
+            statement.setString(1, "x");
+            statement.setInt(2, 1);
+            statement.executeUpdate();
+            try (ResultSet keys = statement.getGeneratedKeys()) {
+                assertThat(keys.next()).isTrue();
+                return keys.getLong(1);
+            }
+        }
     }
 
     private static Connection trackingConnection(Connection delegate, AtomicBoolean rollbackCalled,
