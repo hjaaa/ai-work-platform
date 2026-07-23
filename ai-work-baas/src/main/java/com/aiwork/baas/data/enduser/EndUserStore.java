@@ -62,6 +62,20 @@ public class EndUserStore {
         }
     }
 
+    /**
+     * 锁定读用户行(SELECT ... FOR UPDATE):login 用此在同一事务内与 softDelete/changePassword 的
+     * `_users` 行 X 锁串行化,消除"login 无锁读到旧 active 用户 → 撤销事务先提交 → login 随后建的
+     * 新会话逃逸 revokeAllSessions"竞态(§7.2/§7.3)。锁定读返回最新已提交状态,调用方据此复查 deletedAt。
+     */
+    public EndUserRow findUserByEmailForUpdate(Connection connection, String email) throws SQLException {
+        try (PreparedStatement statement = prepare(connection, SELECT_USER_COLUMNS + "WHERE email = ? FOR UPDATE")) {
+            statement.setString(1, email);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? readUser(resultSet) : null;
+            }
+        }
+    }
+
     public EndUserRow findUserById(Connection connection, long userId) throws SQLException {
         try (PreparedStatement statement = prepare(connection, SELECT_USER_COLUMNS + "WHERE id = ?")) {
             statement.setLong(1, userId);
@@ -150,15 +164,17 @@ public class EndUserStore {
     }
 
     public void revokeSession(Connection connection, long sessionId) throws SQLException {
-        try (PreparedStatement statement = prepare(connection,
-                "UPDATE `_sessions` SET status = 'REVOKED' WHERE id = ?")) {
-            statement.setLong(1, sessionId);
-            statement.executeUpdate();
-        }
+        // 加锁顺序须与 lockRefreshToken 一致(先 _refresh_tokens 后 _sessions):
+        // logout(此方法)与 refresh 若对同一会话反向加锁会 AB-BA 死锁,inTransaction 不重试 → 500。
         try (PreparedStatement statement = prepare(connection,
                 "UPDATE `_refresh_tokens` SET consumed_at = ? WHERE session_id = ? AND consumed_at IS NULL")) {
             statement.setTimestamp(1, Timestamp.valueOf(LocalDateTime.now()));
             statement.setLong(2, sessionId);
+            statement.executeUpdate();
+        }
+        try (PreparedStatement statement = prepare(connection,
+                "UPDATE `_sessions` SET status = 'REVOKED' WHERE id = ?")) {
+            statement.setLong(1, sessionId);
             statement.executeUpdate();
         }
     }

@@ -109,7 +109,9 @@ public class EndUserAuthService {
         assertNotBlocked(projectId, emailKey, properties.getLoginEmailLimit());
         assertNotBlocked(projectId, ipKey, properties.getLoginIpLimit());
         return inTransaction(ctx.project(), connection -> {
-            EndUserStore.EndUserRow user = store.findUserByEmail(connection, email);
+            // 锁定读:与 softDelete/changePassword 的 _users 行 X 锁串行化,确保 issueSession 建的新会话
+            // 不会逃逸并发撤销事务的 revokeAllSessions(§7.2/§7.3);锁定读见最新状态,deletedAt 复查即时生效。
+            EndUserStore.EndUserRow user = store.findUserByEmailForUpdate(connection, email);
             if (user == null || user.deletedAt() != null
                     || !passwordEncoder.matches(password, user.passwordHash())) {
                 countCredentialFailure(projectId, emailKey, ipKey);
@@ -156,7 +158,9 @@ public class EndUserAuthService {
             }
             // 分支①:行锁事务内轮换
             EndUserStore.EndUserRow user = store.findUserById(connection, row.userId());
-            if (user == null) {
+            // 软删用户禁止刷新(§7.3):与 currentUser/changePassword 的 deletedAt 复查同口径,
+            // 兜住任何逃逸会话撤销的 ACTIVE 会话,不再为软删账户续签 access token。
+            if (user == null || user.deletedAt() != null) {
                 throw DataApiException.unauthorized("刷新令牌无效");
             }
             String newRefreshPlaintext = generateRefreshToken();

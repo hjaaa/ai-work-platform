@@ -1,6 +1,7 @@
 package com.aiwork.baas.data.enduser;
 
 import com.aiwork.baas.controller.dto.AclRoleDTO;
+import com.aiwork.baas.datasource.ProjectDataSourceRegistry;
 import com.aiwork.baas.service.EndUserAdminService;
 import com.aiwork.baas.support.DataPlaneIntegrationTestSupport;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -10,6 +11,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.TestPropertySource;
 
+import java.sql.Connection;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,8 +28,39 @@ class EndUserAuthFullFlowIntegrationTest extends DataPlaneIntegrationTestSupport
     @Autowired
     EndUserAdminService adminService;
 
+    @Autowired
+    ProjectDataSourceRegistry registry;
+
     private String authUrl(String path) {
         return "http://localhost:" + port + "/data/" + fixture.project().getProjectRef() + "/auth/v1" + path;
+    }
+
+    /**
+     * 软删用户即便存在逃逸会话撤销的 ACTIVE 会话也不得 refresh(§7.3):直接改项目库 _users.deleted_at 而
+     * 不撤销会话,模拟 login/撤销竞态遗留的逃逸态,验证 refresh 的 deletedAt 兜底守卫返回 401 而非续签。
+     */
+    @Test
+    void softDeletedUserCannotRefreshEvenWithActiveSession() {
+        JsonNode session = json(call(HttpMethod.POST, authUrl("/signup"), headers(fixture.publishableKey(), null),
+                "{\"email\":\"escaped@example.com\",\"password\":\"password-ok\"}"));
+        long userId = session.get("user").get("id").longValue();
+        String refreshToken = session.get("refresh_token").textValue();
+        // 仅软删 _users,保留会话 ACTIVE、refresh_token 未消费(绕过 revokeAllSessions)
+        registry.execute(fixture.project(), dataSource -> {
+            try (Connection connection = dataSource.getConnection();
+                    var statement = connection.prepareStatement(
+                            "UPDATE `_users` SET deleted_at = NOW() WHERE id = ?")) {
+                statement.setLong(1, userId);
+                statement.executeUpdate();
+            }
+            catch (java.sql.SQLException exception) {
+                throw new IllegalStateException(exception);
+            }
+            return null;
+        });
+        assertThat(call(HttpMethod.POST, authUrl("/token?grant_type=refresh_token"),
+                headers(fixture.publishableKey(), null),
+                "{\"refresh_token\":\"" + refreshToken + "\"}").getStatusCode().value()).isEqualTo(401);
     }
 
     @Test
