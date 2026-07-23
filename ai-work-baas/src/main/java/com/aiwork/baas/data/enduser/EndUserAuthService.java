@@ -62,6 +62,9 @@ public class EndUserAuthService {
 
     private final SecureRandom secureRandom = new SecureRandom();
 
+    /** 固定 dummy bcrypt hash(与 passwordEncoder 同强度):login 对不存在/软删用户比对它以对齐 bcrypt 时延。 */
+    private final String dummyPasswordHash;
+
     public EndUserAuthService(ProjectDataSourceRegistry registry, EndUserStore store,
             BCryptPasswordEncoder passwordEncoder, BaasJwtSigner jwtSigner, AuthRateLimiter rateLimiter,
             AuthProperties properties, BaasCryptoService cryptoService, ApiKeyGenerator keyGenerator,
@@ -76,6 +79,7 @@ public class EndUserAuthService {
         this.keyGenerator = keyGenerator;
         this.versionGate = versionGate;
         this.objectMapper = objectMapper;
+        this.dummyPasswordHash = passwordEncoder.encode("timing-equalizer");
     }
 
     public ObjectNode signup(DataRequestContext ctx, JsonNode body, String clientIp) {
@@ -112,8 +116,11 @@ public class EndUserAuthService {
             // 锁定读:与 softDelete/changePassword 的 _users 行 X 锁串行化,确保 issueSession 建的新会话
             // 不会逃逸并发撤销事务的 revokeAllSessions(§7.2/§7.3);锁定读见最新状态,deletedAt 复查即时生效。
             EndUserStore.EndUserRow user = store.findUserByEmailForUpdate(connection, email);
-            if (user == null || user.deletedAt() != null
-                    || !passwordEncoder.matches(password, user.passwordHash())) {
+            boolean eligible = user != null && user.deletedAt() == null;
+            // 对不存在/软删邮箱也执行一次等价 bcrypt(比对固定 dummy hash),对齐响应时延、消除
+            // 「已注册 active 邮箱」的时序侧信道防用户枚举(§7.2);无论结果均走统一失败计数与 401。
+            boolean passwordOk = passwordEncoder.matches(password, eligible ? user.passwordHash() : dummyPasswordHash);
+            if (!eligible || !passwordOk) {
                 countCredentialFailure(projectId, emailKey, ipKey);
                 // 统一文案:不泄露邮箱注册状态/软删状态(§7.2)
                 throw DataApiException.unauthorized("邮箱或密码错误");
