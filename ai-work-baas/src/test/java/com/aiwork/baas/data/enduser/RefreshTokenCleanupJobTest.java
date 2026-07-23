@@ -29,7 +29,7 @@ class RefreshTokenCleanupJobTest {
         when(registry.execute(eq(failing), any())).thenThrow(new IllegalStateException("boom"));
         when(registry.execute(eq(healthy), any())).thenReturn(null);
 
-        new RefreshTokenCleanupJob(mapper, registry).cleanupOnce();
+        new RefreshTokenCleanupJob(mapper, registry, new AuthProperties()).cleanupOnce();
 
         // 第一个项目抛错被捕获后,第二个项目仍被处理
         verify(registry, times(1)).execute(eq(failing), any());

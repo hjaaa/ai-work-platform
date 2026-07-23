@@ -52,4 +52,7 @@ public class AuthProperties {
 
     private long cleanupInitialDelayMillis = 60000;
 
+    /** 清理任务单批 delete/update 行数上限(spec §7.6/§13):分批独立提交保证有界推进,防整体回滚丢进度。 */
+    private int cleanupBatchSize = 1000;
+
 }
