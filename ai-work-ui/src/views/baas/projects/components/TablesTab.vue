@@ -5,7 +5,7 @@
         <div class="table-title">表</div>
         <div class="head-actions">
           <el-button @click="loadTables">刷新</el-button>
-          <el-button type="primary" disabled title="Task 9 启用">＋ 新建表</el-button>
+          <el-button type="primary" @click="editorRef?.openCreate()">＋ 新建表</el-button>
         </div>
       </div>
       <el-table v-loading="loading" :data="tables" style="width: 100%">
@@ -26,7 +26,7 @@
         <el-table-column label="操作" width="220">
           <template #default="{ row }">
             <template v-if="row.status !== 'DELETED'">
-              <el-button link type="primary" disabled title="Task 9 启用">编辑结构</el-button>
+              <el-button link type="primary" @click="editorRef?.openEdit(row.tableName)">编辑结构</el-button>
               <el-button link type="primary" disabled title="Task 10 启用">ACL</el-button>
               <el-button link type="danger" @click="onDrop(row)">删表</el-button>
             </template>
@@ -35,19 +35,23 @@
         </el-table-column>
       </el-table>
     </div>
+    <TableEditorDrawer ref="editorRef" :ref-id="refId" @saved="loadTables" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, useTemplateRef } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { dropTable, listTables } from '@/api/baas/table'
 import type { TableSummary } from '@/api/baas/table'
 import type { TableStatus } from '@/api/baas/types'
 import { newOperationId } from '@/api/baas/base'
 import { TABLE_STATUS_MAP } from '../statusMaps'
+import TableEditorDrawer from './TableEditorDrawer.vue'
 
 const props = defineProps<{ refId: string }>()
+
+const editorRef = useTemplateRef<InstanceType<typeof TableEditorDrawer>>('editorRef')
 
 const tables = ref<TableSummary[]>([])
 const loading = ref(false)
