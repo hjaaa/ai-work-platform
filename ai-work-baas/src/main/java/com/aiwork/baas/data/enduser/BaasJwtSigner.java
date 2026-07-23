@@ -50,13 +50,34 @@ public class BaasJwtSigner {
         this.clock = clock;
     }
 
+    /** 签发期间与 emergencyRotate 竞态的有界重试上限。 */
+    private static final int MAX_SIGN_ATTEMPTS = 3;
+
     public SignedAccessToken sign(BaasProject project, long userId, long sessionId) {
-        BaasJwtKey key = jwtKeyMapper.selectOne(Wrappers.<BaasJwtKey>lambdaQuery()
-            .eq(BaasJwtKey::getProjectId, project.getId())
-            .eq(BaasJwtKey::getStatus, JwtKeyStatus.CURRENT));
-        if (key == null) {
-            throw DataApiException.internal("签发密钥不可用");
+        for (int attempt = 1; attempt <= MAX_SIGN_ATTEMPTS; attempt++) {
+            BaasJwtKey key = selectCurrentKey(project.getId());
+            if (key == null) {
+                throw DataApiException.internal("签发密钥不可用");
+            }
+            SignedAccessToken token = signWithKey(project, userId, sessionId, key);
+            // 签名期间若发生 emergencyRotate,该 kid 已被置 REVOKED,验签会立即 401;复查 CURRENT 是否仍是
+            // 同一 kid,不是则用新 CURRENT 重签,避免返回 200 但 access token 出生即死(§6.1)。
+            BaasJwtKey afterSign = selectCurrentKey(project.getId());
+            if (afterSign != null && afterSign.getKid().equals(key.getKid())) {
+                return token;
+            }
         }
+        // 连续多次都撞上轮换(极罕见):不返回出生即死 token,让调用方重试
+        throw DataApiException.internal("签发密钥轮换中,请重试");
+    }
+
+    private BaasJwtKey selectCurrentKey(Long projectId) {
+        return jwtKeyMapper.selectOne(Wrappers.<BaasJwtKey>lambdaQuery()
+            .eq(BaasJwtKey::getProjectId, projectId)
+            .eq(BaasJwtKey::getStatus, JwtKeyStatus.CURRENT));
+    }
+
+    private SignedAccessToken signWithKey(BaasProject project, long userId, long sessionId, BaasJwtKey key) {
         try {
             String secretBase64 = cryptoService.decrypt(key.getSecretCipher(),
                     project.getId() + ":jwt_secret:" + key.getKid());
