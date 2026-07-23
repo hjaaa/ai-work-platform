@@ -145,7 +145,8 @@ function validateRow(row: EditorRow): string[] {
     return errors
   }
   const length = row.lengthText.trim() === '' ? null : parsePositiveInt(row.lengthText)
-  const scale = row.scaleText.trim() === '' ? null : parsePositiveInt(row.scaleText)
+  const scaleProvided = row.scaleText.trim() !== ''
+  const scale = scaleProvided ? parsePositiveInt(row.scaleText) : null
   if (row.dataType === 'varchar') {
     if (length === null || length < 1 || length > 4096) {
       errors.push(`列「${name}」:varchar 长度须满足 1 <= n <= 4096`)
@@ -154,6 +155,8 @@ function validateRow(row: EditorRow): string[] {
   } else if (row.dataType === 'decimal') {
     if (length === null || length < 1 || length > 65) {
       errors.push(`列「${name}」:decimal 精度 p 须满足 1 <= p <= 65`)
+    } else if (scaleProvided && scale === null) {
+      errors.push(`列「${name}」:decimal 小数位 s 须满足 0 <= s <= min(30, p)`)
     } else {
       const s = scale ?? 0
       if (s < 0 || s > Math.min(30, length)) {
@@ -254,10 +257,13 @@ export function buildAlterBody(
   const dropColumns: string[] = []
   const modifyRows: EditorRow[] = []
   const renameColumns: { from: string; to: string }[] = []
+  // 未删除行 alter 之后的最终列名(add 的新名/modify 与 unchanged 的原名/renamed 的目标名),用于重名检测
+  const finalNames: string[] = []
 
   for (const row of rows) {
     if (row.original === null) {
       addRows.push(row)
+      finalNames.push(row.columnName.trim())
       continue
     }
     if (row.dropped) {
@@ -278,9 +284,18 @@ export function buildAlterBody(
         continue
       }
       renameColumns.push({ from: row.original.columnName, to: row.columnName.trim() })
+      finalNames.push(row.columnName.trim())
       continue
     }
     if (modified) modifyRows.push(row)
+    finalNames.push(row.original.columnName)
+  }
+
+  // 重名检测:add 的新名与 modify/unchanged/renamed 的最终名同属一个命名空间,不得重复(rule 2)
+  const finalNameCounts = new Map<string, number>()
+  for (const n of finalNames) finalNameCounts.set(n, (finalNameCounts.get(n) ?? 0) + 1)
+  for (const [n, count] of finalNameCounts) {
+    if (count > 1) errors.push(`列名「${n}」重复`)
   }
 
   // 仅对加列与改列行做字段级校验(重命名行/未变行/删除行不校验字段)

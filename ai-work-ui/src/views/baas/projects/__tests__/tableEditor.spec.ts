@@ -110,6 +110,41 @@ describe('buildCreateBody', () => {
     expect(buildCreateBody('t1', '', [d], OP_ID).errors[0]).toContain('decimal')
   })
 
+  it('decimal scale 文本非法(非空但无法解析)须报错,不得静默当作 0', () => {
+    const negative = blankRow(1)
+    negative.columnName = 'price'
+    negative.dataType = 'decimal'
+    negative.lengthText = '10'
+    negative.scaleText = '-3'
+    expect(buildCreateBody('t1', '', [negative], OP_ID).errors[0]).toContain('decimal')
+
+    const nonNumeric = blankRow(1)
+    nonNumeric.columnName = 'price'
+    nonNumeric.dataType = 'decimal'
+    nonNumeric.lengthText = '10'
+    nonNumeric.scaleText = 'abc'
+    expect(buildCreateBody('t1', '', [nonNumeric], OP_ID).errors[0]).toContain('decimal')
+  })
+
+  it('decimal 默认值以字符串原样提交(保精度),int 默认值以 number 提交', () => {
+    const dec = blankRow(1)
+    dec.columnName = 'price'
+    dec.dataType = 'decimal'
+    dec.lengthText = '10'
+    dec.scaleText = '2'
+    dec.defaultText = '9.99'
+    const num = blankRow(2)
+    num.columnName = 'views'
+    num.dataType = 'int'
+    num.defaultText = '0'
+    const result = buildCreateBody('t1', '', [dec, num], OP_ID)
+    expect(result.errors).toEqual([])
+    expect(result.body!.columns[0]!.defaultValue).toBe('9.99')
+    expect(typeof result.body!.columns[0]!.defaultValue).toBe('string')
+    expect(result.body!.columns[1]!.defaultValue).toBe(0)
+    expect(typeof result.body!.columns[1]!.defaultValue).toBe('number')
+  })
+
   it('默认值类型化:int 整数、text/json 禁默认值、datetime CURRENT_TIMESTAMP 归一大写', () => {
     const n = blankRow(1)
     n.columnName = 'views'
@@ -213,6 +248,56 @@ describe('buildAlterBody:操作推导', () => {
     const rows = snap.columns.map((c, i) => rowFromSnapshot(c, i + 1))
     const result = buildAlterBody(snap, '', '', rows, OP_ID, false)
     expect(result.errors).toContain('未做任何修改')
+  })
+
+  it('defaultValue: null 的列往返不产生虚假 modify', () => {
+    const snap = snapshot([
+      snapCol({ columnName: 'note', dataType: 'varchar', length: 100, defaultValue: null }),
+    ])
+    const row = rowFromSnapshot(snap.columns[0]!, 1)
+    const result = buildAlterBody(snap, '', '', [row], OP_ID, false)
+    expect(result.errors).toContain('未做任何修改')
+  })
+
+  it('rename 目标与其他未删除行重名 → 报错,不得静默产出重复列名', () => {
+    const snap = snapshot([
+      snapCol({ columnName: 'a', dataType: 'int' }),
+      snapCol({ columnName: 'b', dataType: 'int' }),
+    ])
+    const rowA = rowFromSnapshot(snap.columns[0]!, 1)
+    rowA.columnName = 'b'
+    const rowB = rowFromSnapshot(snap.columns[1]!, 2)
+    const result = buildAlterBody(snap, '', '', [rowA, rowB], OP_ID, false)
+    expect(result.body).toBeNull()
+    expect(result.errors.some((e) => e.includes('重复'))).toBe(true)
+  })
+
+  it('单独修改 unique/indexed/comment 触发 modifyColumns', () => {
+    const snap = snapshot([snapCol({ columnName: 'email', dataType: 'varchar', length: 255 })])
+
+    const uniqueRow = rowFromSnapshot(snap.columns[0]!, 1)
+    uniqueRow.unique = true
+    const uniqueResult = buildAlterBody(snap, '', '', [uniqueRow], OP_ID, false)
+    expect(uniqueResult.errors).toEqual([])
+    expect(uniqueResult.body!.modifyColumns).toEqual([
+      { columnName: 'email', dataType: 'varchar', length: 255, unique: true },
+    ])
+
+    const indexedRow = rowFromSnapshot(snap.columns[0]!, 1)
+    indexedRow.indexed = true
+    const indexedResult = buildAlterBody(snap, '', '', [indexedRow], OP_ID, false)
+    expect(indexedResult.errors).toEqual([])
+    expect(indexedResult.body!.modifyColumns).toEqual([
+      { columnName: 'email', dataType: 'varchar', length: 255, indexed: true },
+    ])
+
+    const commentRow = rowFromSnapshot(snap.columns[0]!, 1)
+    commentRow.comment = '邮箱地址'
+    const commentResult = buildAlterBody(snap, '', '', [commentRow], OP_ID, false)
+    expect(commentResult.errors).toEqual([])
+    expect(commentResult.body!.modifyColumns).toEqual([
+      { columnName: 'email', dataType: 'varchar', length: 255, comment: '邮箱地址' },
+    ])
   })
 })
 
