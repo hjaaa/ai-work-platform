@@ -103,6 +103,25 @@ class SystemTableVersionWriteTest extends PlanBContainerSupport {
         assertThat(after.getStatus()).isEqualTo(ProjectStatus.ACTIVE);
     }
 
+    /**
+     * 路径③(手动):物理已是 v3 而 version=0 的 ACTIVE 项目,管理员手动 migrate() 也须回填当前版
+     * (与后台扫描同口径)。否则手动迁移在后台回填前/扫描禁用时"看似成功"却仍被 SystemTableVersionGate 拦截。
+     */
+    @Test
+    void manualMigrationBackfillsVersionWhenPhysicalAlreadyCurrent() {
+        var created = lifecycleService.createProject("verwrite-e", 1L);
+        Long id = created.project().getId();
+        projectMapper.update(null, com.baomidou.mybatisplus.core.toolkit.Wrappers.<BaasProject>lambdaUpdate()
+            .eq(BaasProject::getId, id).set(BaasProject::getSystemTableVersion, 0));
+        com.aiwork.baas.security.TestCurrentUserProvider.userId = 1L;
+
+        migrationService.migrate(projectMapper.selectById(id));
+
+        BaasProject after = projectMapper.selectById(id);
+        assertThat(after.getStatus()).isEqualTo(ProjectStatus.ACTIVE);
+        assertThat(after.getSystemTableVersion()).isEqualTo(SystemTableManifest.CURRENT_VERSION);
+    }
+
     /** 不写路径:迁移失败置 FAILED 时绝不写当前版。用 MISMATCH 结构触发 preflight 失败。 */
     @Test
     void failedMigrationNeverWritesVersion() {

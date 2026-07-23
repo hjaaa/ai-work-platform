@@ -390,10 +390,17 @@ public class SystemTableMigrationService {
 
     private SystemTableMigrationResult recoverCurrentProject(BaasProject current, LockHandle handle,
             MigrationSource source, Long operatorUserId) {
+        lockExecutor.assertStillHeld(handle);
         if (current.getStatus() != ProjectStatus.ACTIVE) {
-            lockExecutor.assertStillHeld(handle);
             transitionWithEpochAndAudit(current.getId(), current.getStatus(), ProjectStatus.ACTIVE,
                     source, operatorUserId, 0, true);
+        }
+        else {
+            // ACTIVE 但物理已是当前版:补写 version(§9.1 路径③),与后台扫描 MATCH_CURRENT 分支同口径。
+            // 否则物理已 v3、version 仍为 0 的存量项目在后台回填前或扫描禁用时,手动 migrate() 返回成功却
+            // 不回填版本,SystemTableVersionGate 仍拦截全部 auth/终端用户端点。confirmCurrentVersion 为
+            // 条件更新,已确认时幂等无副作用。
+            confirmCurrentVersion(current.getId());
         }
         return new SystemTableMigrationResult(ProjectStatus.ACTIVE.name(), false);
     }
