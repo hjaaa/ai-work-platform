@@ -85,6 +85,20 @@ public class EndUserStore {
         }
     }
 
+    /**
+     * 锁定读用户行(SELECT ... FOR UPDATE):changePassword 用此串行化并发改密,消除两个请求都读到旧
+     * 密码哈希、各自校验通过、后写覆盖前写的丢失更新;后到者阻塞至前者提交后见新哈希,旧 currentPassword
+     * 不再匹配而 401(§7.2)。与 findUserByEmailForUpdate 一并覆盖 _users 行的账号变更串行化。
+     */
+    public EndUserRow findUserByIdForUpdate(Connection connection, long userId) throws SQLException {
+        try (PreparedStatement statement = prepare(connection, SELECT_USER_COLUMNS + "WHERE id = ? FOR UPDATE")) {
+            statement.setLong(1, userId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? readUser(resultSet) : null;
+            }
+        }
+    }
+
     public long insertUser(Connection connection, String email, String passwordHash) throws SQLException {
         try (PreparedStatement statement = prepareWithKeys(connection,
                 "INSERT INTO `_users` (email, password_hash) VALUES (?, ?)")) {

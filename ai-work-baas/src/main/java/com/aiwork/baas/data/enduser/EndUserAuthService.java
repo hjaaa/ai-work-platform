@@ -228,7 +228,9 @@ public class EndUserAuthService {
         String newPassword = validatedPassword(body, "newPassword");
         Long projectId = ctx.project().getId();
         inTransaction(ctx.project(), connection -> {
-            EndUserStore.EndUserRow user = store.findUserById(connection, ctx.endUserId());
+            // 锁定读:串行化并发改密,消除两个请求都读旧哈希、各自校验通过、后写覆盖前写的丢失更新;
+            // 同时与 login/softDelete 的 _users 行锁串行化(§7.2)。
+            EndUserStore.EndUserRow user = store.findUserByIdForUpdate(connection, ctx.endUserId());
             // 软删用户禁止改密(§7.3):持 TTL 内有效 JWT 也返回 401,不进入 bcrypt/限速
             if (user == null || user.deletedAt() != null) {
                 throw DataApiException.unauthorized("用户不存在");
