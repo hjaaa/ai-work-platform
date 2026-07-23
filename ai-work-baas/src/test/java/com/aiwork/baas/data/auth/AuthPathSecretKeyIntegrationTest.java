@@ -33,6 +33,26 @@ class AuthPathSecretKeyIntegrationTest extends DataPlaneIntegrationTestSupport {
     }
 
     @Test
+    void secretKeyOnSignupIs403() {
+        ResponseEntity<String> response = call(HttpMethod.POST, authUrl("/signup"),
+                headers(fixture.secretKey(), null), "{\"email\":\"x@example.com\",\"password\":\"password-ok\"}");
+        assertThat(response.getStatusCode().value()).isEqualTo(403);
+    }
+
+    /**
+     * 编码路径绕过面(§7.6):getRequestURI() 保留 %61uth 原文,Spring 路由解码为 auth 命中 signup;
+     * 过滤器基于原始 URI 的 isAuthPath 判定会漏判,controller 层兜底须仍返回 403 而非放行创建用户。
+     */
+    @Test
+    void secretKeyOnPercentEncodedAuthPathIs403() {
+        String encoded = "http://localhost:" + port + "/data/" + fixture.project().getProjectRef()
+                + "/%61uth/v1/signup";
+        ResponseEntity<String> response = call(HttpMethod.POST, encoded, headers(fixture.secretKey(), null),
+                "{\"email\":\"x@example.com\",\"password\":\"password-ok\"}");
+        assertThat(response.getStatusCode().value()).isEqualTo(403);
+    }
+
+    @Test
     void corsPreflightAllowsPut() {
         org.springframework.http.HttpHeaders preflight = new org.springframework.http.HttpHeaders();
         preflight.setOrigin("https://app.example.com");

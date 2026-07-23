@@ -90,7 +90,14 @@ public class EndUserAuthController {
     }
 
     static DataRequestContext context(HttpServletRequest request) {
-        return (DataRequestContext) request.getAttribute(DataRequestContext.ATTRIBUTE);
+        DataRequestContext ctx = (DataRequestContext) request.getAttribute(DataRequestContext.ATTRIBUTE);
+        // §7.6:secret key 一律不得调用 auth 端点。ApiKeyAuthFilter 基于原始 getRequestURI() 判定 auth
+        // 路径,在百分号编码(如 %61uth)/矩阵变量等形态下与 Spring 路由的归一化匹配结果不一致,存在
+        // 绕过面;此处在路由已解析后用鉴权结果(SERVICE_ROLE ⟺ secret key)兜底,任何编码形态下都返回 403。
+        if (ctx.role() == DataRole.SERVICE_ROLE) {
+            throw DataApiException.forbidden("secret key 不得调用 auth 端点", null);
+        }
+        return ctx;
     }
 
     private static DataRequestContext requireAuthenticated(HttpServletRequest request) {
