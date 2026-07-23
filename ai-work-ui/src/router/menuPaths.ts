@@ -27,3 +27,10 @@ export function collectMenuPaths(menus: MenuTree[]): Set<string> {
   walk(menus)
   return paths
 }
+
+// 侧边栏/面包屑高亮判定:精确命中,或当前路径是该菜单路径的子路径
+// (以 `/` 为边界,避免 `/baas/projects` 误命中同前缀平级菜单 `/baas/projects-x`)。空 path 不高亮。
+export function isMenuPathActive(itemPath: string, currentPath: string): boolean {
+  if (!itemPath) return false
+  return currentPath === itemPath || currentPath.startsWith(itemPath + '/')
+}

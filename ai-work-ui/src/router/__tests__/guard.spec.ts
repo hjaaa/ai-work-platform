@@ -23,6 +23,9 @@ vi.mock('@/views/placeholder/index.vue', () => ({
 vi.mock('@/views/members/index.vue', () => ({
   default: { name: 'MembersStub', render: () => null },
 }))
+vi.mock('@/views/baas/projects/detail.vue', () => ({
+  default: { name: 'BaasProjectDetailStub', render: () => null },
+}))
 
 const ACCESS_TOKEN_KEY = 'ai-work-access-token'
 
@@ -111,6 +114,15 @@ describe('路由守卫', () => {
     expect(router.currentRoute.value.path).toBe('/report')
     expect(router.currentRoute.value.matched.map((r) => r.name)).toEqual(['layout', 'not-found'])
     expect(mocks.getUserInfo).toHaveBeenCalledTimes(1)
+  })
+
+  it('BaaS 项目详情带参路由走静态注册,不落 not-found', async () => {
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'token-1')
+    const router = await freshRouter()
+    await router.push('/baas/projects/proj_abc123?tab=tables')
+    expect(router.currentRoute.value.name).toBe('baas-project-detail')
+    expect(router.currentRoute.value.params.ref).toBe('proj_abc123')
+    expect(router.currentRoute.value.query.tab).toBe('tables')
   })
 
   it('拉取用户信息失败时清登录态,回登录页并携带回跳地址', async () => {
