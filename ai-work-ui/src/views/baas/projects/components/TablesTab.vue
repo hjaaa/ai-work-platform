@@ -27,7 +27,7 @@
           <template #default="{ row }">
             <template v-if="row.status !== 'DELETED'">
               <el-button link type="primary" @click="editorRef?.openEdit(row.tableName)">编辑结构</el-button>
-              <el-button link type="primary" disabled title="Task 10 启用">ACL</el-button>
+              <el-button link type="primary" @click="aclRef?.openFor(row.tableName)">ACL</el-button>
               <el-button link type="danger" @click="onDrop(row)">删表</el-button>
             </template>
             <span v-else class="tombstone">删除保护期(同名禁重建)</span>
@@ -36,6 +36,7 @@
       </el-table>
     </div>
     <TableEditorDrawer ref="editorRef" :ref-id="refId" @saved="loadTables" />
+    <AclConfigDialog ref="aclRef" :ref-id="refId" @saved="loadTables" />
   </div>
 </template>
 
@@ -48,10 +49,12 @@ import type { TableStatus } from '@/api/baas/types'
 import { newOperationId } from '@/api/baas/base'
 import { TABLE_STATUS_MAP } from '../statusMaps'
 import TableEditorDrawer from './TableEditorDrawer.vue'
+import AclConfigDialog from './AclConfigDialog.vue'
 
 const props = defineProps<{ refId: string }>()
 
 const editorRef = useTemplateRef<InstanceType<typeof TableEditorDrawer>>('editorRef')
+const aclRef = useTemplateRef<InstanceType<typeof AclConfigDialog>>('aclRef')
 
 const tables = ref<TableSummary[]>([])
 const loading = ref(false)
