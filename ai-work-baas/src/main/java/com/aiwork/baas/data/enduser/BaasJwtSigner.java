@@ -13,6 +13,7 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -41,22 +42,27 @@ public class BaasJwtSigner {
 
     private final Clock clock;
 
+    private final TransactionTemplate transactionTemplate;
+
     public BaasJwtSigner(BaasJwtKeyMapper jwtKeyMapper, BaasCryptoService cryptoService, AuthProperties properties,
-            Clock clock) {
+            Clock clock, TransactionTemplate transactionTemplate) {
         this.jwtKeyMapper = jwtKeyMapper;
         this.cryptoService = cryptoService;
         this.properties = properties;
         this.clock = clock;
+        this.transactionTemplate = transactionTemplate;
     }
 
     public SignedAccessToken sign(BaasProject project, long userId, long sessionId) {
-        // 共享锁读(FOR SHARE)与 emergencyRotate 的 FOR UPDATE 互斥同步:轮换事务持锁未提交时本读阻塞,
-        // 待其提交后读到新 CURRENT,不会用轮换中(已撤销未提交)的旧 kid 签发出生即死 token(§6.1)。
-        BaasJwtKey key = selectCurrentKeyLocking(project.getId());
-        if (key == null) {
-            throw DataApiException.internal("签发密钥不可用");
-        }
-        return signWithKey(project, userId, sessionId, key);
+        // 在一个显式平台库事务内完成 FOR SHARE 锁定读 + 签名:共享锁与 emergencyRotate 的 FOR UPDATE 互斥,
+        // 且锁持有至签名完成、事务提交,轮换无法在读语句结束后、签名期间提交撤销该 kid(§6.1/§7.6)。
+        return transactionTemplate.execute(status -> {
+            BaasJwtKey key = selectCurrentKeyLocking(project.getId());
+            if (key == null) {
+                throw DataApiException.internal("签发密钥不可用");
+            }
+            return signWithKey(project, userId, sessionId, key);
+        });
     }
 
     private BaasJwtKey selectCurrentKeyLocking(Long projectId) {

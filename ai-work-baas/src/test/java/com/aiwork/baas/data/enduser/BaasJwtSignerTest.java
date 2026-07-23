@@ -6,6 +6,8 @@ import com.aiwork.baas.entity.enums.JwtKeyStatus;
 import com.aiwork.baas.security.crypto.BaasCryptoService;
 import com.nimbusds.jwt.SignedJWT;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -15,6 +17,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -33,8 +36,18 @@ class BaasJwtSignerTest {
 
     private final AuthProperties properties = new AuthProperties();
 
+    private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
+
     private final BaasJwtSigner signer = new BaasJwtSigner(jwtKeyMapper, cryptoService, properties,
-            Clock.fixed(Instant.parse("2026-07-23T00:00:00Z"), ZoneOffset.UTC));
+            Clock.fixed(Instant.parse("2026-07-23T00:00:00Z"), ZoneOffset.UTC), transactionTemplate);
+
+    {
+        // mock 事务模板:直接同步执行回调,等价于在事务内运行
+        when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(org.springframework.transaction.TransactionStatus.class));
+        });
+    }
 
     private BaasProject project() {
         BaasProject project = mock(BaasProject.class);
