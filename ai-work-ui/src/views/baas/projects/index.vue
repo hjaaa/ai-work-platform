@@ -66,7 +66,7 @@
     </el-dialog>
 
     <!-- 明文 key 仅此一次 -->
-    <el-dialog v-model="keysOpen" title="API Key(仅显示一次)" width="560px" :close-on-click-modal="false">
+    <el-dialog v-model="keysOpen" title="API Key(仅显示一次)" width="560px" :close-on-click-modal="false" @close="closeKeys">
       <el-alert type="warning" :closable="false" show-icon title="请立即保存以下密钥,关闭后将无法再次查看明文" />
       <div v-if="createdKeys" class="key-rows">
         <div class="key-row">
