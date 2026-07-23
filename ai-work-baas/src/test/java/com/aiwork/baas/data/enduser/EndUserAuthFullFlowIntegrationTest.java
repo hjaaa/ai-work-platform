@@ -36,6 +36,23 @@ class EndUserAuthFullFlowIntegrationTest extends DataPlaneIntegrationTestSupport
     }
 
     /**
+     * active 用户以超 72 字节密码登录返回 401 而非 500(§7.2):Spring Security 7.0.6 的
+     * BCryptPasswordEncoder.matches 走 checkpw(forCheck=true)路径,跳过 72 字节抛出、直接返回 false,
+     * 故落入统一 401 且经 countCredentialFailure 计数,不逃逸限速、不 500。
+     */
+    @Test
+    void loginWithOverlongPasswordForActiveUserIs401NotError() {
+        assertThat(call(HttpMethod.POST, authUrl("/signup"), headers(fixture.publishableKey(), null),
+                "{\"email\":\"overlong@example.com\",\"password\":\"password-ok\"}").getStatusCode().value())
+            .isEqualTo(200);
+        String overlong = "x".repeat(100); // 100 字节 > bcrypt 72 字节上限
+        assertThat(call(HttpMethod.POST, authUrl("/token?grant_type=password"),
+                headers(fixture.publishableKey(), null),
+                "{\"email\":\"overlong@example.com\",\"password\":\"" + overlong + "\"}").getStatusCode().value())
+            .isEqualTo(401);
+    }
+
+    /**
      * 软删用户即便存在逃逸会话撤销的 ACTIVE 会话也不得 refresh(§7.3):直接改项目库 _users.deleted_at 而
      * 不撤销会话,模拟 login/撤销竞态遗留的逃逸态,验证 refresh 的 deletedAt 兜底守卫返回 401 而非续签。
      */
