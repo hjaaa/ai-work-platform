@@ -61,6 +61,13 @@ describe('请求拦截器', () => {
     })
     expect(captured?.headers.Authorization).toBeUndefined()
   })
+
+  it('patch 方法与其余动词同构解包 R', async () => {
+    const res = await request.patch<null>('/demo', { a: 1 }, {
+      adapter: okAdapter({ code: 0, msg: '', data: null }),
+    })
+    expect(res.code).toBe(0)
+  })
 })
 
 describe('响应拦截器', () => {

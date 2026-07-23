@@ -64,6 +64,9 @@ const request = {
   put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) {
     return service.put<T, R<T>>(url, data, config)
   },
+  patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) {
+    return service.patch<T, R<T>>(url, data, config)
+  },
   delete<T = unknown>(url: string, config?: AxiosRequestConfig) {
     return service.delete<T, R<T>>(url, config)
   },
