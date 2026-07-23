@@ -56,7 +56,7 @@ class WriteBodyParserTest {
     }
 
     private static DataRequestContext ctx(DataRole role, Long userId) {
-        return new DataRequestContext(new BaasProject(), role, userId);
+        return new DataRequestContext(new BaasProject(), role, userId, userId == null ? null : 1L);
     }
 
     @Test

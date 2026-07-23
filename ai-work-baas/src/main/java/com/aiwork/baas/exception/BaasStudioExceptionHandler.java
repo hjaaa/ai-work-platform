@@ -56,6 +56,12 @@ public class BaasStudioExceptionHandler {
         return R.failed("表不存在");
     }
 
+    @ExceptionHandler(EndUserNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public R<Void> handleEndUserNotFound(EndUserNotFoundException exception) {
+        return R.failed("终端用户不存在");
+    }
+
     @ExceptionHandler(BaasBadRequestException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public R<Void> handleBaasBadRequest(BaasBadRequestException exception) {

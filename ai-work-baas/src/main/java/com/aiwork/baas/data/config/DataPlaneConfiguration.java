@@ -4,6 +4,7 @@ import com.aiwork.baas.data.auth.ApiKeyAuthFilter;
 import com.aiwork.baas.data.auth.BaasJwtVerifier;
 import com.aiwork.baas.data.cors.DataPlaneCorsFilter;
 import com.aiwork.baas.data.error.DataErrorWriter;
+import com.aiwork.baas.data.enduser.AuthProperties;
 import com.aiwork.baas.data.error.DataPlaneErrorBoundaryFilter;
 import com.aiwork.baas.mapper.BaasApiKeyMapper;
 import com.aiwork.baas.mapper.BaasProjectMapper;
@@ -16,6 +17,7 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.time.Clock;
 import java.util.concurrent.Semaphore;
@@ -28,7 +30,7 @@ import java.util.concurrent.Semaphore;
  * @date 2026/07/21
  */
 @Configuration
-@EnableConfigurationProperties(DataPlaneProperties.class)
+@EnableConfigurationProperties({ DataPlaneProperties.class, AuthProperties.class })
 public class DataPlaneConfiguration {
 
     /**
@@ -54,6 +56,11 @@ public class DataPlaneConfiguration {
     @Bean
     public Clock dataPlaneClock() {
         return Clock.systemUTC();
+    }
+
+    @Bean
+    public BCryptPasswordEncoder endUserPasswordEncoder() {
+        return new BCryptPasswordEncoder(10);
     }
 
     /**

@@ -41,6 +41,7 @@ import com.aiwork.baas.mapper.BaasProjectMapper;
 import com.aiwork.baas.mapper.BaasDdlLogMapper;
 import com.aiwork.baas.provision.PhysicalPreconditions;
 import com.aiwork.baas.provision.ProjectProvisioner;
+import com.aiwork.baas.provision.SystemTableManifest;
 import com.aiwork.baas.security.crypto.BaasCryptoService;
 import com.aiwork.baas.security.key.ApiKeyGenerator;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -318,10 +319,14 @@ public class ProjectLifecycleService {
                 if (!casStatus(project.getId(), ProjectStatus.PROVISIONING, ProjectStatus.ACTIVE)) {
                     throw new IllegalStateException("concurrent state change during provisioning");
                 }
+                projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
+                    .eq(BaasProject::getId, project.getId())
+                    .set(BaasProject::getSystemTableVersion, SystemTableManifest.CURRENT_VERSION));
 
                 audit(project.getId(), operatorUserId, "PROJECT_CREATE", "ref=" + project.getProjectRef(), "INFO");
             });
             project.setStatus(ProjectStatus.ACTIVE);
+            project.setSystemTableVersion(SystemTableManifest.CURRENT_VERSION);
             return new CreatedProject(project, publishableKey.plaintext(), secretKey.plaintext());
         }
         catch (Exception exception) {

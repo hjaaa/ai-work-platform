@@ -77,7 +77,7 @@ class DataPlaneCorsIntegrationTest extends DataPlaneIntegrationTestSupport {
         assertThat(response.getStatusCode().value()).isEqualTo(204);
         assertThat(response.getHeaders().getFirst("Access-Control-Allow-Origin")).isEqualTo("*");
         assertThat(response.getHeaders().getFirst("Access-Control-Allow-Methods"))
-            .isEqualTo("GET, POST, PATCH, DELETE, OPTIONS");
+            .isEqualTo("GET, POST, PUT, PATCH, DELETE, OPTIONS");
         assertThat(response.getHeaders().getFirst("Access-Control-Allow-Headers"))
             .isEqualTo("apikey, Authorization, Content-Type, Prefer");
         assertThat(response.getHeaders().getFirst("Access-Control-Max-Age")).isEqualTo("3600");
@@ -146,7 +146,8 @@ class DataPlaneCorsIntegrationTest extends DataPlaneIntegrationTestSupport {
 
         ResponseEntity<String> response = call(HttpMethod.GET, baseUrl() + "/corsy", headers, null);
 
-        assertThat(response.getHeaders().getFirst("Access-Control-Expose-Headers")).isEqualTo("Content-Range");
+        assertThat(response.getHeaders().getFirst("Access-Control-Expose-Headers"))
+            .isEqualTo("Content-Range, Retry-After");
         assertThat(response.getHeaders().get("Vary")).contains("Origin");
     }
 

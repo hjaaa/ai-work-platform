@@ -201,7 +201,7 @@ class SystemTableMigrationTest extends PlanBContainerSupport {
     void startupScanResumesMigratingProjectAndSkipsAlreadyMigratedTables() {
         BaasProject project = createProject("mig-res");
         degradeToLegacy(project);
-        rootJdbc.execute(SystemTableManifest.legacyMigrationSql(project.getDbName(), "_users"));
+        rootJdbc.execute(SystemTableManifest.migrationSql(project.getDbName(), "_users", 1));
         setStatus(project, ProjectStatus.MIGRATING);
         long epochBefore = reload(project).getDdlFenceEpoch();
 
@@ -231,10 +231,10 @@ class SystemTableMigrationTest extends PlanBContainerSupport {
     void currentManifestRecoversOnlyConfirmedMigrationFailureWithoutAlter() {
         BaasProject project = createProject("mig-rec");
         degradeToLegacy(project);
-        rootJdbc.execute(SystemTableManifest.legacyMigrationSql(project.getDbName(), "_users"));
+        rootJdbc.execute(SystemTableManifest.migrationSql(project.getDbName(), "_users", 1));
         migrationService.scanOnce();
-        rootJdbc.execute(SystemTableManifest.legacyMigrationSql(project.getDbName(), "_sessions"));
-        rootJdbc.execute(SystemTableManifest.legacyMigrationSql(project.getDbName(), "_refresh_tokens"));
+        rootJdbc.execute(SystemTableManifest.migrationSql(project.getDbName(), "_sessions", 1));
+        rootJdbc.execute(SystemTableManifest.migrationSql(project.getDbName(), "_refresh_tokens", 1));
         long epochBefore = reload(project).getDdlFenceEpoch();
 
         SystemTableMigrationResult result = migrationService.migrate(reload(project));
@@ -268,7 +268,7 @@ class SystemTableMigrationTest extends PlanBContainerSupport {
     void activeMixedManifestFailsWithoutAlterThenConfirmedManualRetryResumes() {
         BaasProject project = createProject("mig-mix");
         degradeToLegacy(project);
-        rootJdbc.execute(SystemTableManifest.legacyMigrationSql(project.getDbName(), "_users"));
+        rootJdbc.execute(SystemTableManifest.migrationSql(project.getDbName(), "_users", 1));
 
         migrationService.scanOnce();
 
@@ -545,6 +545,10 @@ class SystemTableMigrationTest extends PlanBContainerSupport {
             rootJdbc.execute("DROP TABLE `" + project.getDbName() + "`.`" + tableName + "`");
         }
         LegacySystemTables.create(rootJdbc, project.getDbName());
+        // 模拟存量项目:物理已退化为 legacy,version 元数据同样归零(scanOnce 的快速跳过依赖该字段)。
+        projectMapper.update(null, Wrappers.<BaasProject>lambdaUpdate()
+            .eq(BaasProject::getId, project.getId())
+            .set(BaasProject::getSystemTableVersion, 0));
     }
 
     private String idColumnType(String dbName, String tableName) {

@@ -1951,6 +1951,7 @@ CREATE TABLE `baas_project` (
   `runtime_db_user` varchar(32) DEFAULT NULL COMMENT '项目 Runtime 账号名',
   `runtime_db_password_cipher` varchar(512) DEFAULT NULL COMMENT 'Runtime 账号密码密文(v1:{keyId}:...)',
   `ddl_fence_epoch` bigint unsigned NOT NULL DEFAULT 0 COMMENT '项目级单调 fencing 计数(spec §9.2)',
+  `system_table_version` int NOT NULL DEFAULT 0 COMMENT '已确认的系统表 manifest 版本,0=未确认(spec §9.1)',
   `delete_after` datetime DEFAULT NULL COMMENT '延迟物理清理时间点',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

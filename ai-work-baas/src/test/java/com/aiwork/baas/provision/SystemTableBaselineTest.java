@@ -82,7 +82,7 @@ class SystemTableBaselineTest {
         provisioner.createDatabase("baas_legacy1");
         LegacySystemTables.create(rootJdbc, "baas_legacy1");
         assertThat(SystemTableManifest.compare(readSystemTables("baas_legacy1")))
-            .isEqualTo(SystemTableManifest.MatchResult.MATCH_LEGACY_PLAN_A);
+            .isEqualTo(SystemTableManifest.MatchResult.MATCH_LEGACY);
 
         provisioner.initSystemTables("baas_legacy1");
 
@@ -94,7 +94,7 @@ class SystemTableBaselineTest {
     void partiallyUpgradedLegacyTablesAreExplicitlyMixed() {
         provisioner.createDatabase("baas_mixed1");
         LegacySystemTables.create(rootJdbc, "baas_mixed1");
-        rootJdbc.execute(SystemTableManifest.legacyMigrationSql("baas_mixed1", "_users"));
+        rootJdbc.execute(SystemTableManifest.migrationSql("baas_mixed1", "_users", 1));
 
         assertThat(SystemTableManifest.compare(readSystemTables("baas_mixed1")))
             .isEqualTo(SystemTableManifest.MatchResult.MATCH_MIXED);

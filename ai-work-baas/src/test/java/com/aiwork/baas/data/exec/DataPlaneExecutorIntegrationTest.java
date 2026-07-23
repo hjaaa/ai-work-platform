@@ -91,11 +91,11 @@ class DataPlaneExecutorIntegrationTest extends DataPlaneIntegrationTestSupport {
     private Semaphore responsePermits;
 
     private DataRequestContext serviceCtx() {
-        return new DataRequestContext(fixture.project(), DataRole.SERVICE_ROLE, null);
+        return new DataRequestContext(fixture.project(), DataRole.SERVICE_ROLE, null, null);
     }
 
     private DataRequestContext authenticatedCtx() {
-        return new DataRequestContext(fixture.project(), DataRole.AUTHENTICATED, 42L);
+        return new DataRequestContext(fixture.project(), DataRole.AUTHENTICATED, 42L, 1L);
     }
 
     private ParsedQuery query(Map<String, String[]> params) {

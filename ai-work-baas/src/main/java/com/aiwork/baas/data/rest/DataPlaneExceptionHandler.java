@@ -2,6 +2,7 @@ package com.aiwork.baas.data.rest;
 
 import com.aiwork.baas.data.error.DataApiException;
 import com.aiwork.baas.data.error.DataErrorWriter;
+import com.aiwork.baas.data.error.RateLimitedException;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +26,12 @@ import java.io.IOException;
 public class DataPlaneExceptionHandler {
 
     private final DataErrorWriter errorWriter;
+
+    @ExceptionHandler(RateLimitedException.class)
+    public void handleRateLimited(RateLimitedException exception, HttpServletResponse response) throws IOException {
+        response.setHeader("Retry-After", String.valueOf(exception.retryAfterSeconds()));
+        errorWriter.write(response, exception);
+    }
 
     @ExceptionHandler(DataApiException.class)
     public void handleDataApiException(DataApiException exception, HttpServletResponse response) throws IOException {

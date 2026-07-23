@@ -106,44 +106,4 @@ public class DataRestController {
         }
     }
 
-    private static final class BoundedInputStream extends InputStream {
-
-        private final InputStream delegate;
-
-        private final long maxBytes;
-
-        private long readBytes;
-
-        private BoundedInputStream(InputStream delegate, long maxBytes) {
-            this.delegate = delegate;
-            this.maxBytes = maxBytes;
-        }
-
-        @Override
-        public int read() throws IOException {
-            int value = delegate.read();
-            if (value >= 0) {
-                count(1);
-            }
-            return value;
-        }
-
-        @Override
-        public int read(byte[] buffer, int offset, int length) throws IOException {
-            int read = delegate.read(buffer, offset, length);
-            if (read > 0) {
-                count(read);
-            }
-            return read;
-        }
-
-        private void count(int read) {
-            readBytes += read;
-            if (readBytes > maxBytes) {
-                throw DataApiException.payloadTooLarge("请求体超过 " + maxBytes + " 字节上限");
-            }
-        }
-
-    }
-
 }

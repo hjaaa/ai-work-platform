@@ -6,5 +6,5 @@ package com.aiwork.baas.data.auth;
  * @author ai-work
  * @date 2026/07/21
  */
-public record VerifiedEndUser(Long userId, String sessionId) {
+public record VerifiedEndUser(Long userId, Long sessionId) {
 }
