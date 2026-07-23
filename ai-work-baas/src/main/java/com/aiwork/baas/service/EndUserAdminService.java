@@ -86,7 +86,11 @@ public class EndUserAdminService {
                 // 已软删重复 DELETE:幂等成功,不重复审计
                 return false;
             }
-            store.softDeleteUser(connection, userId);
+            // 条件 UPDATE(WHERE deleted_at IS NULL)的影响行数作串行化裁决:并发双删下只有一方置位成功,
+            // 另一方 affected=0 视为幂等成功、不重复撤销/审计(避免重复审计事件)。
+            if (store.softDeleteUser(connection, userId) == 0) {
+                return false;
+            }
             // 同一项目库事务内按 §7.2 会话撤销语义撤销该用户全部会话
             store.revokeAllSessions(connection, userId);
             return true;
@@ -106,9 +110,9 @@ public class EndUserAdminService {
             if (user.deletedAt() == null) {
                 return false;
             }
-            // 恢复仅清 deleted_at;旧会话不复活(§7.3)
-            store.restoreUser(connection, userId);
-            return true;
+            // 条件 UPDATE(WHERE deleted_at IS NOT NULL)影响行数作串行化裁决:并发双恢复只有一方成功,
+            // 另一方 affected=0 视为幂等成功、不重复审计。恢复仅清 deleted_at;旧会话不复活(§7.3)。
+            return store.restoreUser(connection, userId) != 0;
         });
         if (restored) {
             auditBestEffort(project.getId(), operatorUserId, "END_USER_RESTORE", "userId=" + userId);
