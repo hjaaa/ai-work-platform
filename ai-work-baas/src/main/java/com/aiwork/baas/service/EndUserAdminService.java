@@ -56,7 +56,13 @@ public class EndUserAdminService {
         int safeSize = Math.min(Math.max(1, size), MAX_PAGE_SIZE);
         return inTransaction(project, connection -> {
             long total = store.countUsers(connection);
-            List<EndUserVO> records = store.listUsers(connection, (safePage - 1) * safeSize, safeSize)
+            // §10 分页规约第9条【强制】:页码超过总页数时返回最后一页,避免越界返回空列表。
+            // 先按 total 求末页并钳制,再算 offset;用 long 参与运算,消除 page 取极大值时
+            // (safePage-1)*safeSize int 相乘溢出为负 offset 导致 SQL 报错的风险。
+            long totalPages = Math.max(1L, (total + safeSize - 1) / safeSize);
+            int clampedPage = (int) Math.min(safePage, totalPages);
+            int offset = (clampedPage - 1) * safeSize;
+            List<EndUserVO> records = store.listUsers(connection, offset, safeSize)
                 .stream()
                 .map(user -> new EndUserVO(user.id(), user.email(), TIME_FORMAT.format(user.createTime()),
                         user.deletedAt() == null ? null : TIME_FORMAT.format(user.deletedAt())))

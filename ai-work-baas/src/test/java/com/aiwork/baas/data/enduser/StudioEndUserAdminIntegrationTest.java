@@ -103,6 +103,21 @@ class StudioEndUserAdminIntegrationTest extends DataPlaneIntegrationTestSupport 
         Mockito.reset(auditLogMapper);
     }
 
+    /** 分页越界(spec §10 分页规约第9条【强制】):页码超总页数返回末页而非空列表,极大页码不溢出。 */
+    @Test
+    void listClampsOutOfRangePageToLastPage() {
+        signup("pg1@example.com");
+        signup("pg2@example.com");
+        signup("pg3@example.com");
+        // 3 条 / size=2 → 共 2 页;请求远超范围的 page 应返回末页(第 2 页)而非空列表
+        EndUserAdminService.UserPage lastPage = adminService.list(fixture.project(), 9999, 2);
+        assertThat(lastPage.total()).isEqualTo(3L);
+        assertThat(lastPage.records()).hasSize(1);
+        // page 取 int 极大值不应因 (page-1)*size 溢出为负 offset 而抛 SQL 异常
+        assertThatCode(() -> adminService.list(fixture.project(), Integer.MAX_VALUE, 100))
+            .doesNotThrowAnyException();
+    }
+
     @Test
     void userNotFoundIs404Semantics() {
         assertThatThrownBy(() -> adminService.softDelete(fixture.project(), 999999L, 1L))
