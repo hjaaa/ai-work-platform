@@ -56,6 +56,10 @@ public class EndUserAdminService {
         int safeSize = Math.min(Math.max(1, size), MAX_PAGE_SIZE);
         return inTransaction(project, connection -> {
             long total = store.countUsers(connection);
+            if (total == 0) {
+                // mysql/03-sql.md 规则5【强制】:count 为 0 直接返回,不执行后续分页查询
+                return new UserPage(0, List.of());
+            }
             // §10 分页规约第9条【强制】:页码超过总页数时返回最后一页,避免越界返回空列表。
             // 先按 total 求末页并钳制,再算 offset;用 long 参与运算,消除 page 取极大值时
             // (safePage-1)*safeSize int 相乘溢出为负 offset 导致 SQL 报错的风险。

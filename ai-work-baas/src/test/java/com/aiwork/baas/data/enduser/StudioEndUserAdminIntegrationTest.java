@@ -103,6 +103,14 @@ class StudioEndUserAdminIntegrationTest extends DataPlaneIntegrationTestSupport 
         Mockito.reset(auditLogMapper);
     }
 
+    /** 空项目(mysql/03-sql.md 规则5【强制】):count 为 0 直接返回空页,total=0、records 为空。 */
+    @Test
+    void listReturnsEmptyPageWhenNoUsers() {
+        EndUserAdminService.UserPage page = adminService.list(fixture.project(), 1, 20);
+        assertThat(page.total()).isEqualTo(0L);
+        assertThat(page.records()).isEmpty();
+    }
+
     /** 分页越界(spec §10 分页规约第9条【强制】):页码超总页数返回末页而非空列表,极大页码不溢出。 */
     @Test
     void listClampsOutOfRangePageToLastPage() {
