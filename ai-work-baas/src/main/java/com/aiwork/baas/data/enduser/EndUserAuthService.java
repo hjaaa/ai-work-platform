@@ -110,28 +110,44 @@ public class EndUserAuthService {
         Long projectId = ctx.project().getId();
         String emailKey = AuthRateLimiter.emailKey("login", projectId, keyGenerator.sha256Hex(email));
         String ipKey = AuthRateLimiter.ipKey("login", projectId, clientIp);
-        assertNotBlocked(projectId, emailKey, properties.getLoginEmailLimit());
-        assertNotBlocked(projectId, ipKey, properties.getLoginIpLimit());
-        return inTransaction(ctx.project(), connection -> {
-            // 锁定读:与 softDelete/changePassword 的 _users 行 X 锁串行化,确保 issueSession 建的新会话
-            // 不会逃逸并发撤销事务的 revokeAllSessions(§7.2/§7.3);锁定读见最新状态,deletedAt 复查即时生效。
-            EndUserStore.EndUserRow user = store.findUserByEmailForUpdate(connection, email);
-            // 取行锁后复查限速:并发同邮箱请求都通过前置 GET 检查后排队于此 FOR UPDATE,先到者失败已原子
-            // INCR 计数;后到者在此即时命中 429,避免每个排队请求都执行昂贵 bcrypt、占满项目库连接池(§12.2)。
-            assertNotBlocked(projectId, emailKey, properties.getLoginEmailLimit());
-            assertNotBlocked(projectId, ipKey, properties.getLoginIpLimit());
-            boolean eligible = user != null && user.deletedAt() == null;
-            // 对不存在/软删邮箱也执行一次等价 bcrypt(比对固定 dummy hash),对齐响应时延、消除
-            // 「已注册 active 邮箱」的时序侧信道防用户枚举(§7.2);无论结果均走统一失败计数与 401。
-            boolean passwordOk = passwordEncoder.matches(password, eligible ? user.passwordHash() : dummyPasswordHash);
-            if (!eligible || !passwordOk) {
-                countCredentialFailure(projectId, emailKey, ipKey);
-                // 统一文案:不泄露邮箱注册状态/软删状态(§7.2)
-                throw DataApiException.unauthorized("邮箱或密码错误");
+        // bcrypt 前原子预留 email + IP 配额:INCR 返回值即失败计数,超阈值即 429。并发(含跨邮箱同 IP,
+        // 不被 FOR UPDATE 行锁串行化的场景)在昂贵 bcrypt 前即被硬闸挡下,pre-increment 的 bcrypt 数量
+        // 严格限制在阈值内、且不占用项目库连接(§12.2);成功认证后退还本次 IP 预留(成功不计失败配额)。
+        AuthRateLimiter.RateProbe emailProbe = rateLimiter.increment(projectId, emailKey,
+                properties.getLoginEmailWindowSeconds());
+        throwIfOverLimit(emailProbe, properties.getLoginEmailLimit());
+        AuthRateLimiter.RateProbe ipProbe = rateLimiter.increment(projectId, ipKey,
+                properties.getLoginIpWindowSeconds());
+        throwIfOverLimit(ipProbe, properties.getLoginIpLimit());
+        boolean success = false;
+        try {
+            ObjectNode session = inTransaction(ctx.project(), connection -> {
+                // 锁定读:与 softDelete/changePassword 的 _users 行 X 锁串行化,确保 issueSession 建的新会话
+                // 不逃逸并发撤销事务的 revokeAllSessions(§7.2/§7.3);锁定读见最新状态,deletedAt 复查即时生效。
+                EndUserStore.EndUserRow user = store.findUserByEmailForUpdate(connection, email);
+                boolean eligible = user != null && user.deletedAt() == null;
+                // 对不存在/软删邮箱也执行一次等价 bcrypt(比对固定 dummy hash),对齐响应时延、消除
+                // 「已注册 active 邮箱」的时序侧信道防用户枚举(§7.2)。
+                boolean passwordOk = passwordEncoder.matches(password,
+                        eligible ? user.passwordHash() : dummyPasswordHash);
+                if (!eligible || !passwordOk) {
+                    // 前置预留即失败计数,无需再 INCR;统一文案不泄露注册/软删状态(§7.2)
+                    throw DataApiException.unauthorized("邮箱或密码错误");
+                }
+                return issueSession(ctx.project(), connection, user);
+            });
+            success = true;
+            return session;
+        }
+        finally {
+            if (success) {
+                // 成功:清空 email 失败计数;退还本次 IP 预留(成功不占 IP 失败配额,§12.2)
+                rateLimiter.clear(emailKey);
+                if (ipProbe != null) {
+                    rateLimiter.decrement(projectId, ipKey);
+                }
             }
-            rateLimiter.clear(emailKey);
-            return issueSession(ctx.project(), connection, user);
-        });
+        }
     }
 
     /** 四分支结果:③ 需要「先提交撤销、再 401」,不能靠抛异常回滚,故以结果对象承载。 */

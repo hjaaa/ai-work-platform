@@ -153,6 +153,24 @@ class EndUserSignupLoginIntegrationTest extends DataPlaneIntegrationTestSupport 
         assertThat(blocked.getHeaders().getFirst("Retry-After")).isNotBlank();
     }
 
+    /** 成功登录退还 IP 预留(§12.2):bcrypt 前预留的 IP 配额在认证成功后 DECR 归还,不占失败配额。 */
+    @Test
+    void successfulLoginRefundsIpReservation() {
+        clearRateLimitKeys();
+        signup("refund@example.com", "password-ok");
+        assertThat(login("refund@example.com", "password-ok").getStatusCode().value()).isEqualTo(200);
+        // 成功登录后 login IP 计数应被退还:不残留 count>0 的 login IP 键
+        java.util.Set<String> ipKeys = redisTemplate
+            .keys("baas:auth:rl:login:ip:" + fixture.project().getId() + ":*");
+        if (ipKeys != null) {
+            for (String key : ipKeys) {
+                String value = redisTemplate.opsForValue().get(key);
+                assertThat(value == null || Long.parseLong(value) == 0L)
+                    .as("login IP 预留应已退还,实际计数=%s", value).isTrue();
+            }
+        }
+    }
+
     /**
      * 并发失败登录不得穿透邮箱维度阈值(§12.2):基于原子 INCR 返回值硬闸,
      * 至多 loginEmailLimit 个失败以 401 通过,其余必被 429 拦截。

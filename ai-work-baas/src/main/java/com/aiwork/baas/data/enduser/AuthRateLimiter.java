@@ -40,6 +40,18 @@ public class AuthRateLimiter {
     private static final DefaultRedisScript<List> INCREMENT_SCRIPT = new DefaultRedisScript<>(INCREMENT_LUA,
             List.class);
 
+    /** 守卫式 DECR:仅当键存在且计数 > 0 才递减,避免退还预留时把计数打成负值或创建无 TTL 的孤儿键。 */
+    private static final String DECREMENT_LUA = """
+            local v = redis.call('GET', KEYS[1])
+            if v and tonumber(v) > 0 then
+              return redis.call('DECR', KEYS[1])
+            end
+            return 0
+            """;
+
+    private static final DefaultRedisScript<Long> DECREMENT_SCRIPT = new DefaultRedisScript<>(DECREMENT_LUA,
+            Long.class);
+
     private final StringRedisTemplate redisTemplate;
 
     private final AuthProperties properties;
@@ -111,6 +123,20 @@ public class AuthRateLimiter {
         }
         catch (Exception exception) {
             logFailOpen(null, exception);
+        }
+    }
+
+    /**
+     * 退还一次预留计数(守卫式 DECR,不低于 0);Redis 故障 best-effort 忽略。
+     * @param projectId 项目 ID(仅用于 fail-open 日志限频)
+     * @param key 完整 Redis 键
+     */
+    public void decrement(Long projectId, String key) {
+        try {
+            redisTemplate.execute(DECREMENT_SCRIPT, List.of(key));
+        }
+        catch (Exception exception) {
+            logFailOpen(projectId, exception);
         }
     }
 
