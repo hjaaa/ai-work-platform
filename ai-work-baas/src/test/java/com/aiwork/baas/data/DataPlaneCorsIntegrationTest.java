@@ -146,7 +146,8 @@ class DataPlaneCorsIntegrationTest extends DataPlaneIntegrationTestSupport {
 
         ResponseEntity<String> response = call(HttpMethod.GET, baseUrl() + "/corsy", headers, null);
 
-        assertThat(response.getHeaders().getFirst("Access-Control-Expose-Headers")).isEqualTo("Content-Range");
+        assertThat(response.getHeaders().getFirst("Access-Control-Expose-Headers"))
+            .isEqualTo("Content-Range, Retry-After");
         assertThat(response.getHeaders().get("Vary")).contains("Origin");
     }
 

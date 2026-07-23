@@ -31,7 +31,8 @@ public class DataPlaneCorsFilter extends OncePerRequestFilter {
 
     private static final String ALLOW_HEADERS = "apikey, Authorization, Content-Type, Prefer";
 
-    private static final String EXPOSE_HEADERS = "Content-Range";
+    // Retry-After 非 CORS 安全列响应头,须显式暴露,跨域 signup/login 收到 429 才能读到限速剩余窗口(§12.2)
+    private static final String EXPOSE_HEADERS = "Content-Range, Retry-After";
 
     private final BaasProjectMapper projectMapper;
 
