@@ -6,7 +6,6 @@ import com.aiwork.baas.entity.BaasProject;
 import com.aiwork.baas.entity.enums.JwtKeyStatus;
 import com.aiwork.baas.mapper.BaasJwtKeyMapper;
 import com.aiwork.baas.security.crypto.BaasCryptoService;
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.crypto.MACSigner;
@@ -50,31 +49,21 @@ public class BaasJwtSigner {
         this.clock = clock;
     }
 
-    /** 签发期间与 emergencyRotate 竞态的有界重试上限。 */
-    private static final int MAX_SIGN_ATTEMPTS = 3;
-
     public SignedAccessToken sign(BaasProject project, long userId, long sessionId) {
-        for (int attempt = 1; attempt <= MAX_SIGN_ATTEMPTS; attempt++) {
-            BaasJwtKey key = selectCurrentKey(project.getId());
-            if (key == null) {
-                throw DataApiException.internal("签发密钥不可用");
-            }
-            SignedAccessToken token = signWithKey(project, userId, sessionId, key);
-            // 签名期间若发生 emergencyRotate,该 kid 已被置 REVOKED,验签会立即 401;复查 CURRENT 是否仍是
-            // 同一 kid,不是则用新 CURRENT 重签,避免返回 200 但 access token 出生即死(§6.1)。
-            BaasJwtKey afterSign = selectCurrentKey(project.getId());
-            if (afterSign != null && afterSign.getKid().equals(key.getKid())) {
-                return token;
-            }
+        // 共享锁读(FOR SHARE)与 emergencyRotate 的 FOR UPDATE 互斥同步:轮换事务持锁未提交时本读阻塞,
+        // 待其提交后读到新 CURRENT,不会用轮换中(已撤销未提交)的旧 kid 签发出生即死 token(§6.1)。
+        BaasJwtKey key = selectCurrentKeyLocking(project.getId());
+        if (key == null) {
+            throw DataApiException.internal("签发密钥不可用");
         }
-        // 连续多次都撞上轮换(极罕见):不返回出生即死 token,让调用方重试
-        throw DataApiException.internal("签发密钥轮换中,请重试");
+        return signWithKey(project, userId, sessionId, key);
     }
 
-    private BaasJwtKey selectCurrentKey(Long projectId) {
-        return jwtKeyMapper.selectOne(Wrappers.<BaasJwtKey>lambdaQuery()
-            .eq(BaasJwtKey::getProjectId, projectId)
-            .eq(BaasJwtKey::getStatus, JwtKeyStatus.CURRENT));
+    private BaasJwtKey selectCurrentKeyLocking(Long projectId) {
+        return jwtKeyMapper.selectByProjectForShare(projectId).stream()
+            .filter(key -> key.getStatus() == JwtKeyStatus.CURRENT)
+            .findFirst()
+            .orElse(null);
     }
 
     private SignedAccessToken signWithKey(BaasProject project, long userId, long sessionId, BaasJwtKey key) {

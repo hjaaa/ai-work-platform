@@ -56,4 +56,24 @@ public interface BaasJwtKeyMapper extends BaseMapper<BaasJwtKey> {
             @Result(column = "update_time", property = "updateTime") })
     List<BaasJwtKey> selectByProjectForUpdate(@Param("projectId") Long projectId);
 
+    /**
+     * 共享锁读项目全部 JWT 密钥行(FOR SHARE):与 emergencyRotate 的 FOR UPDATE 互斥同步。
+     * 签发期间轮换事务持 FOR UPDATE 未提交时,本读阻塞至其提交,之后读到新 CURRENT,
+     * 不会用轮换中(已撤销未提交)的旧 kid 签发出生即死 token(spec §6.1/§7.6)。
+     * @param projectId 项目 ID
+     * @return 该项目全部密钥行
+     */
+    @Select("SELECT id, project_id, kid, secret_cipher, status, valid_until, create_time, update_time "
+            + "FROM baas_jwt_key WHERE project_id = #{projectId} FOR SHARE")
+    @Results(value = {
+            @Result(column = "id", property = "id", id = true),
+            @Result(column = "project_id", property = "projectId"),
+            @Result(column = "kid", property = "kid"),
+            @Result(column = "secret_cipher", property = "secretCipher"),
+            @Result(column = "status", property = "status"),
+            @Result(column = "valid_until", property = "validUntil"),
+            @Result(column = "create_time", property = "createTime"),
+            @Result(column = "update_time", property = "updateTime") })
+    List<BaasJwtKey> selectByProjectForShare(@Param("projectId") Long projectId);
+
 }

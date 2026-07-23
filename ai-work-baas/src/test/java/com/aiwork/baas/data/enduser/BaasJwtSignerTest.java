@@ -11,17 +11,18 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * BaasJwtSigner 与 emergencyRotate 竞态处理(spec §6.1/§7.6):签名期间 CURRENT 密钥被紧急轮换为
- * REVOKED 时,签名器复查发现 kid 已变,用新 CURRENT 重签,避免返回 200 但 access token 出生即死。
+ * BaasJwtSigner 与 emergencyRotate 竞态处理(spec §6.1/§7.6):签发以 FOR SHARE 锁定读密钥,
+ * 与轮换的 FOR UPDATE 互斥同步,从锁定读的密钥集中选 CURRENT 签发,不用已撤销 kid 出生即死。
  */
 class BaasJwtSignerTest {
 
@@ -56,25 +57,23 @@ class BaasJwtSignerTest {
     }
 
     @Test
-    void reSignsWithNewCurrentKeyWhenRotatedMidSign() throws Exception {
+    void signsWithCurrentKeyFromLockingRead() throws Exception {
         when(cryptoService.decrypt(anyString(), anyString()))
             .thenReturn(Base64.getEncoder().encodeToString(new byte[32]));
-        BaasJwtKey oldKey = key("kid-old", JwtKeyStatus.CURRENT);
-        BaasJwtKey newKey = key("kid-new", JwtKeyStatus.CURRENT);
-        // 序列:①初选=old ②签后复查=new(轮换发生)③重试初选=new ④重试复查=new(稳定)
-        when(jwtKeyMapper.selectOne(any())).thenReturn(oldKey, newKey, newKey, newKey);
+        // 锁定读返回轮换后的密钥集(旧 REVOKED + 新 CURRENT):签发器只取 CURRENT,不用已撤销的旧 kid
+        when(jwtKeyMapper.selectByProjectForShare(anyLong()))
+            .thenReturn(List.of(key("kid-old", JwtKeyStatus.REVOKED), key("kid-new", JwtKeyStatus.CURRENT)));
 
         BaasJwtSigner.SignedAccessToken token = signer.sign(project(), 42L, 7L);
-        // 最终 token 必须用轮换后的新 CURRENT kid 签发,而非出生即死的 old kid
         assertThat(signedKid(token)).isEqualTo("kid-new");
     }
 
     @Test
-    void signsWithCurrentKidWhenNoRotation() throws Exception {
+    void signsWithSingleCurrentKey() throws Exception {
         when(cryptoService.decrypt(anyString(), anyString()))
             .thenReturn(Base64.getEncoder().encodeToString(new byte[32]));
-        BaasJwtKey current = key("kid-stable", JwtKeyStatus.CURRENT);
-        when(jwtKeyMapper.selectOne(any())).thenReturn(current);
+        when(jwtKeyMapper.selectByProjectForShare(anyLong()))
+            .thenReturn(List.of(key("kid-stable", JwtKeyStatus.CURRENT)));
 
         BaasJwtSigner.SignedAccessToken token = signer.sign(project(), 42L, 7L);
         assertThat(signedKid(token)).isEqualTo("kid-stable");
@@ -82,7 +81,9 @@ class BaasJwtSignerTest {
 
     @Test
     void throwsWhenNoCurrentKey() {
-        when(jwtKeyMapper.selectOne(any())).thenReturn(null);
+        // 仅有非 CURRENT 密钥(如全部被紧急撤销、CURRENT 尚未可见)时不签发
+        when(jwtKeyMapper.selectByProjectForShare(anyLong()))
+            .thenReturn(List.of(key("kid-revoked", JwtKeyStatus.REVOKED)));
         assertThatThrownBy(() -> signer.sign(project(), 42L, 7L))
             .isInstanceOf(com.aiwork.baas.data.error.DataApiException.class);
     }
