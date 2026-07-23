@@ -26,9 +26,9 @@ export interface ReconcileEntry {
 }
 
 export interface ReconcileReport {
-  corrected: ReconcileEntry[]
+  corrected: string[] // 表名字符串数组(后端 .add(tableName))
   imported: string[] // 表名字符串数组(后端 imported.add(key))
-  recovered: ReconcileEntry[]
+  recovered: string[] // 表名字符串数组(后端 .add(tableName))
   conflicts: ReconcileEntry[]
   rejectedImports: ReconcileEntry[]
 }
