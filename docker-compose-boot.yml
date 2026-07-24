@@ -2,6 +2,12 @@
 # 1. 先构建单体 JAR: mvn clean install -Pboot -DskipTests
 # 2. 启动服务: docker compose -f docker-compose-boot.yml up -d
 # 3. 静静等待服务启动
+#
+# 数据持久化：容器默认无卷，删除/重建即丢数据。以下两个环境变量控制宿主机落点，
+# 不配置时落到仓库内 ./docker-data（已在 .gitignore 忽略）：
+#   AI_WORK_INFRA_ROOT  基础设施数据（MySQL 数据目录）
+#   AI_WORK_LOG_ROOT    应用日志（logback 输出的 debug.log/error.log）
+# 建议指向仓库外目录，避免 git clean -xfd 连同数据一并删除。
 services:
   ai-work-mysql:
     build:
@@ -13,6 +19,9 @@ services:
     container_name: ai-work-mysql
     image: ai-work-mysql
     command: --lower_case_table_names=1
+    volumes:
+      # 数据目录为空时才会执行镜像内的种子 SQL，已有数据的目录直接复用
+      - ${AI_WORK_INFRA_ROOT:-./docker-data/infra}/mysql/data:/var/lib/mysql
     networks:
       - spring_cloud_default
 
@@ -35,6 +44,8 @@ services:
     environment:
       BAAS_MASTER_KEYS: ${BAAS_MASTER_KEYS:?BAAS_MASTER_KEYS 未配置}
       BAAS_ACTIVE_KEY_ID: ${BAAS_ACTIVE_KEY_ID:-k1}
+    volumes:
+      - ${AI_WORK_LOG_ROOT:-./docker-data/logs}/boot:/ai-work-boot/logs
     networks:
       - spring_cloud_default
 

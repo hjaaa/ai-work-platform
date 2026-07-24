@@ -72,3 +72,6 @@ docs/plans/
 ### test
 aitest
 .vectorex
+
+### docker 数据持久化默认落点(AI_WORK_INFRA_ROOT / AI_WORK_LOG_ROOT 未配置时)
+docker-data/
