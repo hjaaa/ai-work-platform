@@ -25,12 +25,31 @@
         </el-table-column>
         <el-table-column label="操作" width="220">
           <template #default="{ row }">
-            <template v-if="row.status !== 'DELETED'">
-              <el-button link type="primary" @click="editorRef?.openEdit(row.tableName)">编辑结构</el-button>
-              <el-button link type="primary" @click="aclRef?.openFor(row.tableName)">ACL</el-button>
-              <el-button link type="danger" @click="onDrop(row)">删表</el-button>
+            <span v-if="row.status === 'DELETED'" class="tombstone">删除保护期(同名禁重建)</span>
+            <template v-else>
+              <el-button
+                v-if="canAlter(row.status)"
+                link
+                type="primary"
+                @click="editorRef?.openEdit(row.tableName)"
+              >
+                编辑结构
+              </el-button>
+              <el-button
+                v-if="canConfigAcl(row.status)"
+                link
+                type="primary"
+                @click="aclRef?.openFor(row.tableName, row.status)"
+              >
+                ACL
+              </el-button>
+              <el-button v-if="canDrop(row.status)" link type="danger" @click="onDrop(row)">
+                删表
+              </el-button>
+              <span v-if="!canAlter(row.status) && !canDrop(row.status)" class="tombstone">
+                处理中,请刷新查看结果
+              </span>
             </template>
-            <span v-else class="tombstone">删除保护期(同名禁重建)</span>
           </template>
         </el-table-column>
       </el-table>
@@ -52,6 +71,23 @@ import TableEditorDrawer from './TableEditorDrawer.vue'
 import AclConfigDialog from './AclConfigDialog.vue'
 
 const props = defineProps<{ refId: string }>()
+
+// 按后端各操作的状态准入收敛按钮,避免呈现必然 409 的动作。
+// 编辑结构:AlterTableWork.validateBranchStatus 对新 operationId 只放行 ACTIVE。
+// ACL:AclConfigService 放行 ACTIVE,以及 CONFLICT 且本次为取消 owner 的 fail-closed 出口。
+// 删表:TableManagementService 放行 ACTIVE / FAILED / CONFLICT。
+// CREATING / ALTERING 处于流转中,三项均不可用。
+function canAlter(status: TableStatus): boolean {
+  return status === 'ACTIVE'
+}
+
+function canConfigAcl(status: TableStatus): boolean {
+  return status === 'ACTIVE' || status === 'CONFLICT'
+}
+
+function canDrop(status: TableStatus): boolean {
+  return status === 'ACTIVE' || status === 'FAILED' || status === 'CONFLICT'
+}
 
 const editorRef = useTemplateRef<InstanceType<typeof TableEditorDrawer>>('editorRef')
 const aclRef = useTemplateRef<InstanceType<typeof AclConfigDialog>>('aclRef')

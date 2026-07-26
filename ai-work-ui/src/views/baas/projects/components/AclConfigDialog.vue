@@ -24,6 +24,23 @@
       </el-form-item>
     </el-form>
 
+    <!-- spec §7:未配置 owner_column 的表 = anon/authenticated 可访问全表,Studio 须明确提示该语义 -->
+    <el-alert
+      v-if="ownerColumn === ''"
+      :type="hasAnyGrant ? 'warning' : 'info'"
+      :closable="false"
+      show-icon
+      class="scope-alert"
+    >
+      未配置 owner 列:不做行级归属过滤,上方勾选的 anon/authenticated 权限将作用于
+      <strong>该表全部行</strong>。
+      {{ hasAnyGrant ? '当前已有勾选,保存后即对整表生效。' : '' }}
+    </el-alert>
+
+    <el-alert v-if="status === 'CONFLICT'" type="warning" :closable="false" show-icon class="scope-alert">
+      表处于结构冲突状态:后端此时仅接受「取消 owner 列」这一 fail-closed 操作,其余 ACL 变更会被拒绝。
+    </el-alert>
+
     <div class="hint">service_role(secret key)恒绕过 ACL 与 owner 策略,无须配置。</div>
 
     <template #footer>
@@ -38,6 +55,7 @@ import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getAcl, getTable, putAcl } from '@/api/baas/table'
 import type { AclConfig } from '@/api/baas/table'
+import type { TableStatus } from '@/api/baas/types'
 import { newOperationId } from '@/api/baas/base'
 
 const props = defineProps<{ refId: string }>()
@@ -46,6 +64,7 @@ const emit = defineEmits<{ saved: [] }>()
 const open = ref(false)
 const saving = ref(false)
 const tableName = ref('')
+const status = ref<TableStatus>('ACTIVE')
 const ownerColumn = ref<string | ''>('')
 const bigintColumns = ref<string[]>([])
 const acl = ref<AclConfig>({
@@ -58,12 +77,16 @@ const aclRows = computed(() => [
   { role: 'authenticated', acl: acl.value.authenticated },
 ])
 
+const hasAnyGrant = computed(() =>
+  aclRows.value.some((r) => r.acl.select || r.acl.insert || r.acl.update || r.acl.delete),
+)
+
 // 连续对不同表点 ACL 时,先发的请求可能后返回。若不丢弃过期响应,对话框会显示 A 表的
 // ACL/owner 而保存目标已是 B 表,onSave 就把 A 的权限写到 B 上。以序号标记每次打开,
 // 只有最后一次的响应可以落到状态上;tableName 也一并推迟到此刻赋值,与数据保持同批。
 let loadSeq = 0
 
-async function openFor(name: string) {
+async function openFor(name: string, tableStatus: TableStatus) {
   const seq = ++loadSeq
   const [aclRes, tableRes] = await Promise.all([
     getAcl(props.refId, name),
@@ -71,6 +94,7 @@ async function openFor(name: string) {
   ])
   if (seq !== loadSeq) return
   tableName.value = name
+  status.value = tableStatus
   acl.value = aclRes.data.acl
   ownerColumn.value = aclRes.data.ownerColumn ?? ''
   // owner 列候选:bigint 且非主键 id(后端拒绝 ownerColumn=id)
@@ -106,6 +130,9 @@ async function onSave() {
 <style scoped>
 .owner-form {
   margin-top: 16px;
+}
+.scope-alert {
+  margin-bottom: 8px;
 }
 .hint {
   font-size: 12px;
