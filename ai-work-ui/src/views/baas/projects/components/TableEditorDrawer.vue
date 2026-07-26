@@ -188,7 +188,13 @@ function removeNewRow(row: EditorRow) {
   rows.value = rows.value.filter((r) => r.uid !== row.uid)
 }
 
+// 抽屉打开前表格仍可点,openEdit 的 getTable 在途时用户可以再点另一张表或「新建表」。
+// 若不作废在途请求,先发后到的响应会用旧表的 snapshot/行集合覆盖当前选择,用户在 B 表的
+// 界面上提交 A 表的结构。与 ACL 对话框同一处理:按序号丢弃过期响应,openCreate 也递增序号。
+let loadSeq = 0
+
 function openCreate() {
+  loadSeq++
   mode.value = 'create'
   snapshot.value = null
   tableName.value = ''
@@ -199,7 +205,9 @@ function openCreate() {
 }
 
 async function openEdit(name: string) {
+  const seq = ++loadSeq
   const res = await getTable(props.refId, name)
+  if (seq !== loadSeq) return
   mode.value = 'edit'
   snapshot.value = res.data
   tableName.value = res.data.tableName
