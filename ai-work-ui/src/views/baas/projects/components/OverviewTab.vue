@@ -82,7 +82,8 @@
           <div class="op-name">删除项目</div>
           <div class="op-desc">进入删除流程,延迟清理后数据不可恢复</div>
         </div>
-        <el-button type="danger" @click="onDelete">删除项目</el-button>
+        <el-button v-if="projectDeletable" type="danger" @click="onDelete">删除项目</el-button>
+        <span v-else class="op-disabled">当前状态不可删除,请等待流转完成</span>
       </div>
     </div>
 
@@ -115,16 +116,21 @@ import {
   reconcileProject,
   rotateJwtKey,
 } from '@/api/baas/project'
-import type { ProjectVO, ReconcileReport } from '@/api/baas/types'
+import type { ProjectStatus, ProjectVO, ReconcileReport } from '@/api/baas/types'
 import { newOperationId } from '@/api/baas/base'
 import { allowAllFromVO, corsPayload } from '../cors'
 import { PROJECT_STATUS_MAP } from '../statusMaps'
 
 const props = defineProps<{ refId: string; project: ProjectVO }>()
 
-// 仅对账受项目状态约束:JWT 轮换只锁密钥行、无项目状态门禁,删除项目允许 ACTIVE/FAILED,
-// 故这两类按钮不随之停用。
+// 对账:ReconcileService 走 requireProjectActiveInLock,仅 ACTIVE 可用。
 const projectActive = computed(() => props.project.status === 'ACTIVE')
+
+// 删除:ProjectLifecycleService.markDeleting 只 CAS ACTIVE→DELETING 或 FAILED→DELETING,
+// 另接受已是 DELETING 的幂等重试;PROVISIONING/MIGRATING/DELETED 都会抛
+// IllegalStateException。JWT 轮换只锁密钥行、无项目状态门禁,故不在此列。
+const DELETABLE_STATUSES: ProjectStatus[] = ['ACTIVE', 'FAILED', 'DELETING']
+const projectDeletable = computed(() => DELETABLE_STATUSES.includes(props.project.status))
 const emit = defineEmits<{ refresh: [] }>()
 const router = useRouter()
 
