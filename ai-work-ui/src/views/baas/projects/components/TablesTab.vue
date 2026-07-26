@@ -39,7 +39,7 @@
                 编辑结构
               </el-button>
               <el-button
-                v-if="canConfigAcl(row.status)"
+                v-if="canConfigAcl(row)"
                 link
                 type="primary"
                 @click="aclRef?.openFor(row.tableName, row.status)"
@@ -88,8 +88,12 @@ function canAlter(status: TableStatus): boolean {
   return projectActive.value && status === 'ACTIVE'
 }
 
-function canConfigAcl(status: TableStatus): boolean {
-  return projectActive.value && (status === 'ACTIVE' || status === 'CONFLICT')
+// CONFLICT 下后端只放行 conflictCancel 分支,其判定是
+// `dto.ownerColumn() == null && tableRow.getOwnerColumn() != null`——本就没有 owner 列的
+// CONFLICT 表凑不出这个条件,对话框里任何保存都会 409,故该出口只对有 owner 列的表开放。
+function canConfigAcl(row: TableSummary): boolean {
+  if (!projectActive.value) return false
+  return row.status === 'ACTIVE' || (row.status === 'CONFLICT' && row.ownerColumn !== null)
 }
 
 function canDrop(status: TableStatus): boolean {
