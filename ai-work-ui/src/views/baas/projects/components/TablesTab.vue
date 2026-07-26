@@ -4,8 +4,11 @@
       <div class="table-head">
         <div class="table-title">表</div>
         <div class="head-actions">
+          <span v-if="!projectActive" class="tombstone">项目非可用状态,Schema 操作已停用</span>
           <el-button @click="loadTables">刷新</el-button>
-          <el-button type="primary" @click="editorRef?.openCreate()">＋ 新建表</el-button>
+          <el-button v-if="projectActive" type="primary" @click="editorRef?.openCreate()">
+            ＋ 新建表
+          </el-button>
         </div>
       </div>
       <el-table v-loading="loading" :data="tables" style="width: 100%">
@@ -60,33 +63,37 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, useTemplateRef } from 'vue'
+import { computed, onMounted, ref, useTemplateRef } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { dropTable, listTables } from '@/api/baas/table'
 import type { TableSummary } from '@/api/baas/table'
-import type { TableStatus } from '@/api/baas/types'
+import type { ProjectStatus, TableStatus } from '@/api/baas/types'
 import { newOperationId } from '@/api/baas/base'
 import { TABLE_STATUS_MAP } from '../statusMaps'
 import TableEditorDrawer from './TableEditorDrawer.vue'
 import AclConfigDialog from './AclConfigDialog.vue'
 
-const props = defineProps<{ refId: string }>()
+const props = defineProps<{ refId: string; projectStatus: ProjectStatus }>()
 
-// 按后端各操作的状态准入收敛按钮,避免呈现必然 409 的动作。
+// 项目级门禁:TableManagementService.requireProjectActiveInLock 对建表/改表/删表一律要求
+// 项目为 ACTIVE,否则 409「项目非 ACTIVE，禁止 Schema 操作」。项目不可用时整片操作都不呈现。
+const projectActive = computed(() => props.projectStatus === 'ACTIVE')
+
+// 表级门禁:按后端各操作的状态准入收敛按钮,避免呈现必然 409 的动作。
 // 编辑结构:AlterTableWork.validateBranchStatus 对新 operationId 只放行 ACTIVE。
 // ACL:AclConfigService 放行 ACTIVE,以及 CONFLICT 且本次为取消 owner 的 fail-closed 出口。
 // 删表:TableManagementService 放行 ACTIVE / FAILED / CONFLICT。
 // CREATING / ALTERING 处于流转中,三项均不可用。
 function canAlter(status: TableStatus): boolean {
-  return status === 'ACTIVE'
+  return projectActive.value && status === 'ACTIVE'
 }
 
 function canConfigAcl(status: TableStatus): boolean {
-  return status === 'ACTIVE' || status === 'CONFLICT'
+  return projectActive.value && (status === 'ACTIVE' || status === 'CONFLICT')
 }
 
 function canDrop(status: TableStatus): boolean {
-  return status === 'ACTIVE' || status === 'FAILED' || status === 'CONFLICT'
+  return projectActive.value && (status === 'ACTIVE' || status === 'FAILED' || status === 'CONFLICT')
 }
 
 const editorRef = useTemplateRef<InstanceType<typeof TableEditorDrawer>>('editorRef')
@@ -142,6 +149,7 @@ onMounted(loadTables)
 }
 .head-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 .tombstone {

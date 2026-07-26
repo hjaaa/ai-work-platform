@@ -32,8 +32,12 @@
         :project="project"
         @refresh="loadProject"
       />
-      <TablesTab v-else-if="activeTab === 'tables'" :ref-id="projectRef" />
-      <KeysTab v-else-if="activeTab === 'keys'" :ref-id="projectRef" />
+      <TablesTab
+        v-else-if="activeTab === 'tables'"
+        :ref-id="projectRef"
+        :project-status="project.status"
+      />
+      <KeysTab v-else-if="activeTab === 'keys'" :ref-id="projectRef" :project-status="project.status" />
       <UsersTab v-else-if="activeTab === 'users'" :ref-id="projectRef" />
     </template>
   </div>

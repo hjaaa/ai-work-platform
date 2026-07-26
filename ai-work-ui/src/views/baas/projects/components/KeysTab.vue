@@ -4,8 +4,11 @@
       <div class="table-head">
         <div class="table-title">API Keys</div>
         <div class="head-actions">
+          <span v-if="!projectActive" class="tombstone">项目非可用状态,创建 Key 已停用</span>
           <el-button @click="loadKeys">刷新</el-button>
-          <el-button type="primary" @click="createOpen = true">＋ 创建 Key</el-button>
+          <el-button v-if="projectActive" type="primary" @click="createOpen = true">
+            ＋ 创建 Key
+          </el-button>
         </div>
       </div>
       <el-table v-loading="loading" :data="keys" style="width: 100%">
@@ -80,13 +83,17 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createKey, listKeys, revokeKey } from '@/api/baas/apiKey'
-import type { ApiKeyVO, CreatedKeyVO, KeyType } from '@/api/baas/types'
+import type { ApiKeyVO, CreatedKeyVO, KeyType, ProjectStatus } from '@/api/baas/types'
 import { copyText } from '../clipboard'
 
-const props = defineProps<{ refId: string }>()
+const props = defineProps<{ refId: string; projectStatus: ProjectStatus }>()
+
+// ProjectKeyService.lockActiveProject 对非 ACTIVE 项目直接抛 ProjectNotFoundException,
+// 建 Key 会以「项目不存在」这类误导性错误失败,故项目不可用时不呈现创建入口。
+const projectActive = computed(() => props.projectStatus === 'ACTIVE')
 
 const keys = ref<ApiKeyVO[]>([])
 const loading = ref(false)
@@ -156,7 +163,12 @@ onMounted(loadKeys)
 }
 .head-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+.tombstone {
+  font-size: 12px;
+  color: var(--dc-ink-subtle);
 }
 .key-row {
   display: flex;
