@@ -216,7 +216,10 @@ function toColumnDefinition(row: EditorRow): ColumnDefinition {
   if (parsed.value !== undefined) def.defaultValue = parsed.value
   if (row.unique) def.unique = true
   if (row.indexed) def.indexed = true
-  if (row.comment.trim() !== '') def.comment = row.comment.trim()
+  // 注释逐字提交:后端 DdlRenderer 对非 null 注释原样转义写入 COMMENT,前后空白是有效内容。
+  // 改列时 modifyColumns 会整列重定义,若在此 trim,改动列的任一其他属性都会把既有注释
+  // 「 x 」静默改写成「x」、把纯空白注释抹成无注释。
+  if (row.comment !== '') def.comment = row.comment
   return def
 }
 
@@ -254,7 +257,8 @@ export function buildCreateBody(
     tableName: name,
     columns: rows.map(toColumnDefinition),
   }
-  if (comment.trim() !== '') body.comment = comment.trim()
+  // 表注释同样逐字提交(与改表路径口径一致,后者本就直发 comment 原文)
+  if (comment !== '') body.comment = comment
   return { body, errors: [] }
 }
 
@@ -328,6 +332,20 @@ export function buildAlterBody(
   for (const n of finalNames) finalNameCounts.set(n, (finalNameCounts.get(n) ?? 0) + 1)
   for (const [n, count] of finalNameCounts) {
     if (count > 1) errors.push(`列名「${n}」重复`)
+  }
+
+  // 重命名目标不得占用「提交前」已存在的列名——即便该列在同批被删除或被重命名走。
+  // 后端按起始 schema 判定(AlterTableWork.validateRenameTargets 查 byName、staticValidate
+  // 另禁「重命名目标同时参与其他列操作」),故「删 a + b→a」与「a/b 互换」都必然 400;
+  // 最终名去重检测看不到这两种,须单独拦下并提示分两次提交。
+  const snapshotNames = new Set(snapshot.columns.map((c) => c.columnName))
+  for (const rename of renameColumns) {
+    if (snapshotNames.has(rename.to)) {
+      errors.push(
+        `列「${rename.from}」的重命名目标「${rename.to}」在本次提交前已存在,` +
+          `即使同批删除或改名也不允许占用,请分两次提交`,
+      )
+    }
   }
 
   // 仅对加列与改列行做字段级校验(重命名行/未变行/删除行不校验字段)

@@ -401,6 +401,52 @@ describe('buildAlterBody:操作推导', () => {
     expect(result.body!.modifyColumns![0]).not.toHaveProperty('defaultValue')
   })
 
+  it('列注释含前后空白/纯空白时逐字带回,不因改其他属性被静默改写', () => {
+    const snap = snapshot([
+      snapCol({ columnName: 'a', dataType: 'int', comment: ' x ' }),
+      snapCol({ columnName: 'b', dataType: 'int', comment: '   ' }),
+    ])
+    const rows = snap.columns.map((c, i) => rowFromSnapshot(c, i + 1))
+    expect(buildAlterBody(snap, '', '', rows, OP_ID, false).errors).toContain('未做任何修改')
+
+    rows[0]!.nullable = false
+    rows[1]!.nullable = false
+    const result = buildAlterBody(snap, '', '', rows, OP_ID, false)
+    expect(result.errors).toEqual([])
+    expect(result.body!.modifyColumns![0]!.comment).toBe(' x ')
+    expect(result.body!.modifyColumns![1]!.comment).toBe('   ')
+  })
+
+  it('重命名目标占用提交前已存在的列名 → 报错(删列后改名/两列互换)', () => {
+    const snap = snapshot([
+      snapCol({ columnName: 'a', dataType: 'int' }),
+      snapCol({ columnName: 'b', dataType: 'int' }),
+    ])
+
+    // 删 a + b→a:最终名各出现一次,旧的去重检测看不到,但后端起始 schema 里 a 仍在
+    const dropRows = snap.columns.map((c, i) => rowFromSnapshot(c, i + 1))
+    dropRows[0]!.dropped = true
+    dropRows[1]!.columnName = 'a'
+    const dropped = buildAlterBody(snap, '', '', dropRows, OP_ID, false)
+    expect(dropped.body).toBeNull()
+    expect(dropped.errors.some((e) => e.includes('分两次提交'))).toBe(true)
+
+    // a/b 互换
+    const swapRows = snap.columns.map((c, i) => rowFromSnapshot(c, i + 1))
+    swapRows[0]!.columnName = 'b'
+    swapRows[1]!.columnName = 'a'
+    const swapped = buildAlterBody(snap, '', '', swapRows, OP_ID, false)
+    expect(swapped.body).toBeNull()
+    expect(swapped.errors.some((e) => e.includes('分两次提交'))).toBe(true)
+
+    // 改名到全新名字仍然放行
+    const okRows = snap.columns.map((c, i) => rowFromSnapshot(c, i + 1))
+    okRows[1]!.columnName = 'c'
+    const ok = buildAlterBody(snap, '', '', okRows, OP_ID, false)
+    expect(ok.errors).toEqual([])
+    expect(ok.body!.renameColumns).toEqual([{ from: 'b', to: 'c' }])
+  })
+
   it('rename 目标与其他未删除行重名 → 报错,不得静默产出重复列名', () => {
     const snap = snapshot([
       snapCol({ columnName: 'a', dataType: 'int' }),
