@@ -1,5 +1,6 @@
 // 表结构编辑器领域模型:行状态、校验与建表/改表 body 组装(纯函数,无 Vue 依赖)。
 // 改表契约为显式操作意图列表(spec §7.3):重命名 ≠ 删+加,不做全量 diff 推导。
+import { RawNumber } from '@/api/baas/rawNumber'
 import type {
   ColumnDefinition,
   ColumnSnapshot,
@@ -16,6 +17,7 @@ export const COLUMN_TYPES = [
 export const IDENTIFIER_RE = /^[a-z][a-z0-9_]{0,63}$/
 
 const INTEGER_RE = /^-?\d+$/
+const DECIMAL_RE = /^-?\d+(\.\d+)?$/
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const DATETIME_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
 
@@ -102,12 +104,13 @@ function parseDefault(row: EditorRow): ParsedDefault {
       return { error: `列「${row.columnName}」:boolean 默认值只能为 true/false` }
     case 'int':
     case 'bigint':
+      // 以 RawNumber 承载原文:int64 超 2^53 的部分经 Number() 会被静默舍入,后端照单全收
       if (!INTEGER_RE.test(text)) return { error: `列「${row.columnName}」:默认值须为整数` }
-      return { value: Number(text) }
+      return { value: new RawNumber(text) }
     case 'decimal':
-      // 以字符串提交(后端接受数字字符串双 token,保精度)
-      if (!/^-?\d+(\.\d+)?$/.test(text)) return { error: `列「${row.columnName}」:默认值须为数字` }
-      return { value: text }
+      // 同样以 RawNumber 承载原文:后端只认 JSON 数值 token(字符串被 400),而 Number() 丢有效位
+      if (!DECIMAL_RE.test(text)) return { error: `列「${row.columnName}」:默认值须为数字` }
+      return { value: new RawNumber(text) }
     case 'date':
       if (!DATE_RE.test(text)) return { error: `列「${row.columnName}」:date 默认值格式须为 yyyy-MM-dd` }
       return { value: text }

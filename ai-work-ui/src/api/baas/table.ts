@@ -1,5 +1,6 @@
 import request from '@/utils/request'
 import { BAAS_BASE, LONG_OP_CONFIG } from './base'
+import { EXACT_JSON_HEADERS, stringifyExact } from './rawNumber'
 import type { TableStatus } from './types'
 
 // ===== 响应结构(后端 TableSnapshotBuilder / listTables 手工构建的 JSON,length/scale 为 number)=====
@@ -109,21 +110,26 @@ export function listTables(ref: string) {
   return request.get<TableSummary[]>(`${BAAS_BASE}/studio/projects/${ref}/tables`)
 }
 
-// 建表为长操作(走 §9.2 DDL 通道、无端到端时限),取消 client 超时
+// 建表为长操作(走 §9.2 DDL 通道、无端到端时限),取消 client 超时;
+// body 预序列化以保住数值默认值精度(见 rawNumber.ts)
 export function createTable(ref: string, body: TableCreateBody) {
-  return request.post<TableSnapshot>(`${BAAS_BASE}/studio/projects/${ref}/tables`, body, LONG_OP_CONFIG)
+  return request.post<TableSnapshot>(`${BAAS_BASE}/studio/projects/${ref}/tables`, stringifyExact(body), {
+    ...LONG_OP_CONFIG,
+    headers: EXACT_JSON_HEADERS,
+  })
 }
 
 export function getTable(ref: string, table: string) {
   return request.get<TableSnapshot>(`${BAAS_BASE}/studio/projects/${ref}/tables/${table}`)
 }
 
-// 改表为长操作(同步 ALTER 可执行至后端 DDL 超时),取消 client 超时
+// 改表为长操作(同步 ALTER 可执行至后端 DDL 超时),取消 client 超时;
+// body 预序列化以保住数值默认值精度(见 rawNumber.ts)
 export function alterTable(ref: string, table: string, body: TableAlterBody) {
   return request.patch<TableSnapshot>(
     `${BAAS_BASE}/studio/projects/${ref}/tables/${table}`,
-    body,
-    LONG_OP_CONFIG,
+    stringifyExact(body),
+    { ...LONG_OP_CONFIG, headers: EXACT_JSON_HEADERS },
   )
 }
 

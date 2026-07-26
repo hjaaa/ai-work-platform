@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { RawNumber, stringifyExact } from '@/api/baas/rawNumber'
 import type { ColumnSnapshot, TableSnapshot } from '@/api/baas/table'
 import {
   COLUMN_TYPES,
@@ -126,7 +127,7 @@ describe('buildCreateBody', () => {
     expect(buildCreateBody('t1', '', [nonNumeric], OP_ID).errors[0]).toContain('decimal')
   })
 
-  it('decimal 默认值以字符串原样提交(保精度),int 默认值以 number 提交', () => {
+  it('decimal/int 默认值以 RawNumber 承载原文,序列化后为裸 JSON 数值 token', () => {
     const dec = blankRow(1)
     dec.columnName = 'price'
     dec.dataType = 'decimal'
@@ -139,10 +140,71 @@ describe('buildCreateBody', () => {
     num.defaultText = '0'
     const result = buildCreateBody('t1', '', [dec, num], OP_ID)
     expect(result.errors).toEqual([])
-    expect(result.body!.columns[0]!.defaultValue).toBe('9.99')
-    expect(typeof result.body!.columns[0]!.defaultValue).toBe('string')
-    expect(result.body!.columns[1]!.defaultValue).toBe(0)
-    expect(typeof result.body!.columns[1]!.defaultValue).toBe('number')
+    expect(result.body!.columns[0]!.defaultValue).toBeInstanceOf(RawNumber)
+    expect(result.body!.columns[1]!.defaultValue).toBeInstanceOf(RawNumber)
+    // 后端 DefaultValueRenderer 对 decimal/int 断言 isNumber()/isIntegralNumber(),
+    // 字符串 token 会被 400,故必须是不带引号的数值
+    const json = JSON.parse(stringifyExact(result.body))
+    expect(json.columns[0].defaultValue).toBe(9.99)
+    expect(json.columns[1].defaultValue).toBe(0)
+    expect(stringifyExact(result.body)).toContain('"defaultValue":9.99')
+  })
+
+  it('超 2^53 的 bigint 与高精度 decimal 默认值原文不失真', () => {
+    const big = blankRow(1)
+    big.columnName = 'seq'
+    big.dataType = 'bigint'
+    big.defaultText = '9007199254740993'
+    const precise = blankRow(2)
+    precise.columnName = 'rate'
+    precise.dataType = 'decimal'
+    precise.lengthText = '40'
+    precise.scaleText = '20'
+    precise.defaultText = '1.00000000000000000001'
+    const result = buildCreateBody('t1', '', [big, precise], OP_ID)
+    expect(result.errors).toEqual([])
+    const json = stringifyExact(result.body)
+    // 经 Number() 会分别变成 9007199254740992 与 1
+    expect(json).toContain('"defaultValue":9007199254740993')
+    expect(json).toContain('"defaultValue":1.00000000000000000001')
+  })
+
+  it('前导零归一为合法 JSON 数值 token,负数与小数保持原文', () => {
+    const row = (uid: number, type: string, text: string) => {
+      const r = blankRow(uid)
+      r.columnName = `c${uid}`
+      r.dataType = type
+      r.defaultText = text
+      if (type === 'decimal') {
+        r.lengthText = '10'
+        r.scaleText = '3'
+      }
+      return r
+    }
+    const result = buildCreateBody('t1', '', [row(1, 'int', '007'), row(2, 'decimal', '-007.500')], OP_ID)
+    expect(result.errors).toEqual([])
+    const json = stringifyExact(result.body)
+    expect(json).toContain('"defaultValue":7')
+    expect(json).toContain('"defaultValue":-7.500')
+    // 归一后整体仍是合法 JSON(axios stringifySafely 靠 JSON.parse 判定是否原样透传)
+    expect(() => JSON.parse(json)).not.toThrow()
+  })
+
+  it('varchar 默认值含 nonce 形态文本不影响数值 token 替换', () => {
+    const text = blankRow(1)
+    text.columnName = 'note'
+    text.dataType = 'varchar'
+    text.lengthText = '255'
+    text.defaultText = '__rawnum_0011223344556677__42__rawnum_0011223344556677__'
+    const num = blankRow(2)
+    num.columnName = 'views'
+    num.dataType = 'int'
+    num.defaultText = '5'
+    const result = buildCreateBody('t1', '', [text, num], OP_ID)
+    expect(result.errors).toEqual([])
+    const json = JSON.parse(stringifyExact(result.body))
+    expect(json.columns[0].defaultValue).toBe(text.defaultText)
+    expect(json.columns[1].defaultValue).toBe(5)
   })
 
   it('默认值类型化:int 整数、text/json 禁默认值、datetime CURRENT_TIMESTAMP 归一大写', () => {
@@ -156,7 +218,7 @@ describe('buildCreateBody', () => {
     t.defaultText = 'current_timestamp'
     const result = buildCreateBody('t1', '', [n, t], OP_ID)
     expect(result.errors).toEqual([])
-    expect(result.body!.columns[0]!.defaultValue).toBe(0)
+    expect(result.body!.columns[0]!.defaultValue).toEqual(new RawNumber('0'))
     expect(result.body!.columns[1]!.defaultValue).toBe('CURRENT_TIMESTAMP')
 
     const j = blankRow(1)
