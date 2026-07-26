@@ -243,9 +243,18 @@ async function onSubmit() {
   }
   let body: TableAlterBody = first.body
   if (body.dropColumns && body.dropColumns.length > 0) {
+    // allowLossy 是请求级开关:置 true 后,同批 modifyColumns 里的有损类型变更也会直接执行,
+    // 后端不再回「有损类型变更须显式 allowLossy=true 确认」,下面那段列级确认因此不会触发。
+    // 确认文案必须交代这个作用域,不能只列被删除的列。
+    const modified = (body.modifyColumns ?? []).map((c) => c.columnName)
+    const modifyNote =
+      modified.length > 0
+        ? `同批还将修改列:${modified.join('、')};allowLossy 为请求级开关,这些列上若存在有损类型变更` +
+          '(如缩短 varchar、改窄数值类型),将一并直接执行且不再单独提示。'
+        : ''
     try {
       await ElMessageBox.confirm(
-        `将删除列:${body.dropColumns.join('、')}。删列不可恢复,确认后本次提交将允许有损变更(allowLossy=true)。`,
+        `将删除列:${body.dropColumns.join('、')}。删列不可恢复,确认后本次提交将允许有损变更(allowLossy=true)。${modifyNote}`,
         '有损操作确认',
         { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' },
       )
