@@ -45,6 +45,8 @@ export interface TableSnapshot {
   ownerColumn: string | null
   columns: ColumnSnapshot[]
   acl: AclConfig
+  // 仅改表删掉 owner 列、后端 fail-closed 关闭全部 ACL 时出现(AlterTableWork.buildSnapshot)
+  aclClosedByOwnerDrop?: boolean
 }
 
 export interface DropTableResult {

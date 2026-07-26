@@ -211,6 +211,17 @@ async function openEdit(name: string) {
 
 defineExpose({ openCreate, openEdit })
 
+// 删掉 owner 列时,后端在快照里回 aclClosedByOwnerDrop=true——该表全部 anon/authenticated
+// ACL 已被 fail-closed 关闭(与 ACL PUT 取消 owner 同一语义)。只报「改表成功」会让操作者
+// 不知道表已对终端用户关闭访问,须显式提示。
+function reportAlterResult(snapshot: TableSnapshot) {
+  if (snapshot.aclClosedByOwnerDrop) {
+    ElMessage.warning('改表成功;因删除了 owner 列,该表全部 anon/authenticated ACL 已被安全关闭,如需继续开放访问请重新配置 ACL')
+    return
+  }
+  ElMessage.success('改表成功')
+}
+
 async function onSubmit() {
   errors.value = []
   const operationId = newOperationId() // 每次提交意图一个 ID,allowLossy 重发复用
@@ -266,8 +277,7 @@ async function onSubmit() {
 
   submitting.value = true
   try {
-    await alterTable(props.refId, snap.tableName, body)
-    ElMessage.success('改表成功')
+    reportAlterResult((await alterTable(props.refId, snap.tableName, body)).data)
     open.value = false
     emit('saved')
   } catch (e) {
@@ -287,8 +297,7 @@ async function onSubmit() {
     } catch {
       return
     }
-    await alterTable(props.refId, snap.tableName, withAllowLossy(body))
-    ElMessage.success('改表成功')
+    reportAlterResult((await alterTable(props.refId, snap.tableName, withAllowLossy(body))).data)
     open.value = false
     emit('saved')
   } finally {
