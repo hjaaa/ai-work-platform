@@ -216,6 +216,37 @@ describe('buildCreateBody', () => {
     expect(json.columns[1].defaultValue).toBe(5)
   })
 
+  it('索引准入前置:text/json 禁索引、varchar 键长 >768 禁索引', () => {
+    const mk = (uid: number, type: string, len: string, flag: 'unique' | 'indexed') => {
+      const r = blankRow(uid)
+      r.columnName = `c${uid}`
+      r.dataType = type
+      r.lengthText = len
+      r[flag] = true
+      return r
+    }
+    expect(buildCreateBody('t1', '', [mk(1, 'text', '', 'indexed')], OP_ID).errors[0]).toContain(
+      '不支持索引',
+    )
+    expect(buildCreateBody('t1', '', [mk(2, 'json', '', 'unique')], OP_ID).errors[0]).toContain(
+      '不支持索引',
+    )
+    expect(buildCreateBody('t1', '', [mk(3, 'varchar', '769', 'indexed')], OP_ID).errors[0]).toContain(
+      'length <= 768',
+    )
+    // 边界 768 与不建索引的长 varchar 均放行
+    expect(buildCreateBody('t1', '', [mk(4, 'varchar', '768', 'unique')], OP_ID).errors).toEqual([])
+    const plain = blankRow(5)
+    plain.columnName = 'c5'
+    plain.dataType = 'varchar'
+    plain.lengthText = '4096'
+    expect(buildCreateBody('t1', '', [plain], OP_ID).errors).toEqual([])
+    const longText = blankRow(6)
+    longText.columnName = 'c6'
+    longText.dataType = 'text'
+    expect(buildCreateBody('t1', '', [longText], OP_ID).errors).toEqual([])
+  })
+
   it('默认值类型化:int 整数、text/json 禁默认值、datetime CURRENT_TIMESTAMP 归一大写', () => {
     const n = blankRow(1)
     n.columnName = 'views'

@@ -18,6 +18,8 @@ export const IDENTIFIER_RE = /^[a-z][a-z0-9_]{0,63}$/
 
 const INTEGER_RE = /^-?\d+$/
 const DECIMAL_RE = /^-?\d+(\.\d+)?$/
+// 与后端 IndexAdmission.MAX_VARCHAR_INDEX_LENGTH 一致
+const INDEXABLE_VARCHAR_MAX = 768
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const DATETIME_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
 
@@ -195,6 +197,18 @@ function validateRow(row: EditorRow): string[] {
     }
   } else if (row.lengthText.trim() !== '' || row.scaleText.trim() !== '') {
     errors.push(`列「${name}」:${row.dataType} 不接受 length/scale 参数`)
+  }
+  // 索引准入(后端 IndexAdmission.validateColumnIndexRequest,spec §13):text/json 禁索引、
+  // varchar 键长 length×4 ≤ 3072(即 length ≤ 768)。编辑器把 unique/indexed 呈现为可选项,
+  // 不前置拦下的话这两种组合提交必 400。索引总数上限依赖最终结构,仍由后端裁决,此处不复刻。
+  if (row.unique || row.indexed) {
+    if (row.dataType === 'text' || row.dataType === 'json') {
+      errors.push(`列「${name}」:${row.dataType} 不支持索引与唯一约束`)
+    } else if (row.dataType === 'varchar' && length !== null && length > INDEXABLE_VARCHAR_MAX) {
+      errors.push(
+        `列「${name}」:varchar 建索引/唯一约束要求 length <= ${INDEXABLE_VARCHAR_MAX}(键长 length×4 <= 3072)`,
+      )
+    }
   }
   const parsed = parseDefault(row)
   if (parsed.error) errors.push(parsed.error)
