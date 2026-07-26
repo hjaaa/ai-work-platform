@@ -64,17 +64,25 @@ const gateBlocked = ref(false)
 
 const GATE_MSG = '系统表升级未完成,项目当前不允许终端用户管理操作'
 
+// 分页器连点会并发多次 loadUsers,响应可能乱序返回。若不作废过期响应,分页器停在第 3 页
+// 而表格显示第 2 页的数据,软删/恢复这类破坏性操作就会呈现在与页码不符的行上。
+let loadSeq = 0
+
 async function loadUsers() {
+  const seq = ++loadSeq
   loading.value = true
   try {
     const res = await listUsers(props.refId, page.value, size)
+    if (seq !== loadSeq) return
     users.value = res.data.records
     total.value = Number(res.data.total) // 后端 long → JSON string
     gateBlocked.value = false
   } catch (e) {
+    if (seq !== loadSeq) return
     if (extractBackendMsg(e) === GATE_MSG) gateBlocked.value = true
   } finally {
-    loading.value = false
+    // 过期请求不得替在途的最新请求清掉 loading
+    if (seq === loadSeq) loading.value = false
   }
 }
 
