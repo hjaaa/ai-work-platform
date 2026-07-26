@@ -58,12 +58,19 @@ const aclRows = computed(() => [
   { role: 'authenticated', acl: acl.value.authenticated },
 ])
 
+// 连续对不同表点 ACL 时,先发的请求可能后返回。若不丢弃过期响应,对话框会显示 A 表的
+// ACL/owner 而保存目标已是 B 表,onSave 就把 A 的权限写到 B 上。以序号标记每次打开,
+// 只有最后一次的响应可以落到状态上;tableName 也一并推迟到此刻赋值,与数据保持同批。
+let loadSeq = 0
+
 async function openFor(name: string) {
-  tableName.value = name
+  const seq = ++loadSeq
   const [aclRes, tableRes] = await Promise.all([
     getAcl(props.refId, name),
     getTable(props.refId, name),
   ])
+  if (seq !== loadSeq) return
+  tableName.value = name
   acl.value = aclRes.data.acl
   ownerColumn.value = aclRes.data.ownerColumn ?? ''
   // owner 列候选:bigint 且非主键 id(后端拒绝 ownerColumn=id)
