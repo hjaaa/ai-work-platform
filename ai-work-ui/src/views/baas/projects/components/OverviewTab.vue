@@ -236,7 +236,13 @@ async function onRotate() {
 }
 
 async function onEmergencyRotate() {
-  if (!(await confirmByRef('紧急 JWT 轮换', '全部终端用户 access JWT 将立即失效,不可撤销'))) return
+  // 文案须如实说明边界:emergencyRotate 只把签发密钥置 REVOKED,会话与 refresh token 不撤销,
+  // 持有者可立即换取新 access JWT。否则运维会把轮换误当成对已泄露账号的持久切断。
+  const warning =
+    '已签发的 access JWT 将立即失效,不可撤销。但会话与 refresh token 不会被撤销——' +
+    '持有 refresh token 的一方可立刻换取新 access JWT。如需切断特定终端用户,' +
+    '请另在「终端用户」tab 软删该用户'
+  if (!(await confirmByRef('紧急 JWT 轮换', warning))) return
   const res = await emergencyRotateJwtKey(props.refId)
   ElMessage.success(`紧急轮换完成,新 kid:${res.data.kid}`)
 }
