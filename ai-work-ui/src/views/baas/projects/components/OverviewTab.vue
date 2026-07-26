@@ -55,7 +55,9 @@
           <div class="op-name">表结构对账</div>
           <div class="op-desc">比对平台元数据与项目库 information_schema,导入/修正/标记冲突</div>
         </div>
-        <el-button :loading="reconciling" @click="onReconcile">触发对账</el-button>
+        <!-- ReconcileService 走 requireProjectActiveInLock,项目非 ACTIVE 必然 409 -->
+        <el-button v-if="projectActive" :loading="reconciling" @click="onReconcile">触发对账</el-button>
+        <span v-else class="op-disabled">项目非可用状态,对账已停用</span>
       </div>
       <div class="op-row">
         <div>
@@ -119,6 +121,10 @@ import { allowAllFromVO, corsPayload } from '../cors'
 import { PROJECT_STATUS_MAP } from '../statusMaps'
 
 const props = defineProps<{ refId: string; project: ProjectVO }>()
+
+// 仅对账受项目状态约束:JWT 轮换只锁密钥行、无项目状态门禁,删除项目允许 ACTIVE/FAILED,
+// 故这两类按钮不随之停用。
+const projectActive = computed(() => props.project.status === 'ACTIVE')
 const emit = defineEmits<{ refresh: [] }>()
 const router = useRouter()
 
@@ -302,6 +308,10 @@ async function onDelete() {
   font-size: 12px;
   color: var(--dc-ink-subtle);
   margin-top: 2px;
+}
+.op-disabled {
+  font-size: 12px;
+  color: var(--dc-ink-subtle);
 }
 .report-section {
   margin-bottom: 12px;
