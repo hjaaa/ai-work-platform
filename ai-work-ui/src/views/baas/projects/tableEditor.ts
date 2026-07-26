@@ -30,7 +30,10 @@ export interface EditorRow {
   lengthText: string
   scaleText: string
   nullable: boolean
-  defaultText: string // 空串 = 无默认值
+  // 默认值「是否存在」与「值文本」分离:varchar 的合法默认值可以是空串或含前后空白的字符串,
+  // 用「文本为空」表示无默认值会让 DEFAULT '' 无法表达,并在改列时静默抹掉既有默认值。
+  hasDefault: boolean
+  defaultText: string
   unique: boolean
   indexed: boolean
   comment: string
@@ -52,6 +55,10 @@ function intToText(value: number | undefined): string {
   return value === undefined || value === null ? '' : String(value)
 }
 
+function snapshotHasDefault(value: unknown): boolean {
+  return value !== null && value !== undefined
+}
+
 export function rowFromSnapshot(col: ColumnSnapshot, uid: number): EditorRow {
   return {
     uid,
@@ -62,6 +69,7 @@ export function rowFromSnapshot(col: ColumnSnapshot, uid: number): EditorRow {
     lengthText: intToText(col.length),
     scaleText: intToText(col.scale),
     nullable: col.nullable,
+    hasDefault: snapshotHasDefault(col.defaultValue),
     defaultText: defaultToText(col.defaultValue),
     unique: col.unique,
     indexed: col.indexed,
@@ -79,10 +87,27 @@ export function blankRow(uid: number): EditorRow {
     lengthText: '',
     scaleText: '',
     nullable: true,
+    hasDefault: false,
     defaultText: '',
     unique: false,
     indexed: false,
     comment: '',
+  }
+}
+
+// 切换列类型后清空新类型不接受、且在编辑器里已被隐藏的字段。
+// 否则残留值只会在提交时以「int 不接受 length/scale 参数」之类的报错出现,
+// 而对应输入框已随类型隐藏,用户无从修改。
+export function resetFieldsForType(row: EditorRow): void {
+  if (row.dataType !== 'varchar' && row.dataType !== 'decimal') {
+    row.lengthText = ''
+  }
+  if (row.dataType !== 'decimal') {
+    row.scaleText = ''
+  }
+  if (row.dataType === 'text' || row.dataType === 'json') {
+    row.hasDefault = false
+    row.defaultText = ''
   }
 }
 
@@ -92,8 +117,10 @@ interface ParsedDefault {
 }
 
 function parseDefault(row: EditorRow): ParsedDefault {
-  const text = row.defaultText.trim()
-  if (text === '') return {}
+  if (!row.hasDefault) return {}
+  // varchar 默认值原样保留(后端 varchar 分支只做长度校验,空串与前后空白都是合法值);
+  // 其余类型是数值/字面量,前后空白无意义,先 trim 再匹配
+  const text = row.dataType === 'varchar' ? row.defaultText : row.defaultText.trim()
   switch (row.dataType) {
     case 'text':
     case 'json':
@@ -240,7 +267,9 @@ function isModified(row: EditorRow): boolean {
     row.lengthText !== intToText(o.length) ||
     row.scaleText !== intToText(o.scale) ||
     row.nullable !== o.nullable ||
-    row.defaultText !== defaultToText(o.defaultValue) ||
+    row.hasDefault !== snapshotHasDefault(o.defaultValue) ||
+    // 无默认值时 defaultText 可能残留旧文本,不参与比较
+    (row.hasDefault && row.defaultText !== defaultToText(o.defaultValue)) ||
     row.unique !== o.unique ||
     row.indexed !== o.indexed ||
     row.comment !== (o.comment ?? '')

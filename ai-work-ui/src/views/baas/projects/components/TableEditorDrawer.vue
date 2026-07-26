@@ -22,7 +22,12 @@
         <el-table-column label="类型" width="130">
           <template #default="{ row }">
             <span v-if="isIdRow(row)" class="id-cell">bigint</span>
-            <el-select v-else v-model="row.dataType" :disabled="row.dropped">
+            <el-select
+              v-else
+              v-model="row.dataType"
+              :disabled="row.dropped"
+              @change="resetFieldsForType(row)"
+            >
               <el-option v-for="t in COLUMN_TYPES" :key="t" :label="t" :value="t" />
             </el-select>
           </template>
@@ -55,14 +60,20 @@
             <span v-else class="na">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="默认值" min-width="140">
+        <el-table-column label="默认值" min-width="200">
           <template #default="{ row }">
-            <el-input
+            <!-- 勾选框表达「有无默认值」,与文本分离:varchar 的空串/前后空白是合法默认值 -->
+            <div
               v-if="!isIdRow(row) && row.dataType !== 'text' && row.dataType !== 'json'"
-              v-model="row.defaultText"
-              :disabled="row.dropped"
-              placeholder="留空 = 无默认值"
-            />
+              class="default-cell"
+            >
+              <el-checkbox v-model="row.hasDefault" :disabled="row.dropped" />
+              <el-input
+                v-model="row.defaultText"
+                :disabled="row.dropped || !row.hasDefault"
+                :placeholder="row.hasDefault ? '默认值' : '不勾选 = 无默认值'"
+              />
+            </div>
             <span v-else class="na">—</span>
           </template>
         </el-table-column>
@@ -137,6 +148,7 @@ import {
   buildAlterBody,
   buildCreateBody,
   isAllowLossyRequired,
+  resetFieldsForType,
   rowFromSnapshot,
   withAllowLossy,
 } from '../tableEditor'
@@ -291,6 +303,11 @@ async function onSubmit() {
 }
 .na {
   color: var(--dc-ink-disabled);
+}
+.default-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .add-row {
   padding: 4px 0;

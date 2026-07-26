@@ -7,6 +7,7 @@ import {
   buildAlterBody,
   buildCreateBody,
   isAllowLossyRequired,
+  resetFieldsForType,
   rowFromSnapshot,
   withAllowLossy,
 } from '../tableEditor'
@@ -52,6 +53,7 @@ describe('buildCreateBody', () => {
     const published = blankRow(2)
     published.columnName = 'published'
     published.dataType = 'boolean'
+    published.hasDefault = true
     published.defaultText = 'false'
     const result = buildCreateBody('articles', '文章表', [title, published], OP_ID)
     expect(result.errors).toEqual([])
@@ -133,10 +135,12 @@ describe('buildCreateBody', () => {
     dec.dataType = 'decimal'
     dec.lengthText = '10'
     dec.scaleText = '2'
+    dec.hasDefault = true
     dec.defaultText = '9.99'
     const num = blankRow(2)
     num.columnName = 'views'
     num.dataType = 'int'
+    num.hasDefault = true
     num.defaultText = '0'
     const result = buildCreateBody('t1', '', [dec, num], OP_ID)
     expect(result.errors).toEqual([])
@@ -154,12 +158,14 @@ describe('buildCreateBody', () => {
     const big = blankRow(1)
     big.columnName = 'seq'
     big.dataType = 'bigint'
+    big.hasDefault = true
     big.defaultText = '9007199254740993'
     const precise = blankRow(2)
     precise.columnName = 'rate'
     precise.dataType = 'decimal'
     precise.lengthText = '40'
     precise.scaleText = '20'
+    precise.hasDefault = true
     precise.defaultText = '1.00000000000000000001'
     const result = buildCreateBody('t1', '', [big, precise], OP_ID)
     expect(result.errors).toEqual([])
@@ -174,6 +180,7 @@ describe('buildCreateBody', () => {
       const r = blankRow(uid)
       r.columnName = `c${uid}`
       r.dataType = type
+      r.hasDefault = true
       r.defaultText = text
       if (type === 'decimal') {
         r.lengthText = '10'
@@ -195,10 +202,12 @@ describe('buildCreateBody', () => {
     text.columnName = 'note'
     text.dataType = 'varchar'
     text.lengthText = '255'
+    text.hasDefault = true
     text.defaultText = '__rawnum_0011223344556677__42__rawnum_0011223344556677__'
     const num = blankRow(2)
     num.columnName = 'views'
     num.dataType = 'int'
+    num.hasDefault = true
     num.defaultText = '5'
     const result = buildCreateBody('t1', '', [text, num], OP_ID)
     expect(result.errors).toEqual([])
@@ -211,10 +220,12 @@ describe('buildCreateBody', () => {
     const n = blankRow(1)
     n.columnName = 'views'
     n.dataType = 'int'
+    n.hasDefault = true
     n.defaultText = '0'
     const t = blankRow(2)
     t.columnName = 'created_at'
     t.dataType = 'datetime'
+    t.hasDefault = true
     t.defaultText = 'current_timestamp'
     const result = buildCreateBody('t1', '', [n, t], OP_ID)
     expect(result.errors).toEqual([])
@@ -224,14 +235,54 @@ describe('buildCreateBody', () => {
     const j = blankRow(1)
     j.columnName = 'meta'
     j.dataType = 'json'
+    j.hasDefault = true
     j.defaultText = '{}'
     expect(buildCreateBody('t1', '', [j], OP_ID).errors[0]).toContain('默认值')
 
     const badInt = blankRow(1)
     badInt.columnName = 'views'
     badInt.dataType = 'int'
+    badInt.hasDefault = true
     badInt.defaultText = 'abc'
     expect(buildCreateBody('t1', '', [badInt], OP_ID).errors[0]).toContain('默认值')
+  })
+})
+
+describe('resetFieldsForType', () => {
+  it('切到不支持 length/scale 的类型时清空残留,避免撞不可见字段的校验', () => {
+    const row = blankRow(1)
+    row.columnName = 'price'
+    row.dataType = 'decimal'
+    row.lengthText = '10'
+    row.scaleText = '2'
+    row.dataType = 'int'
+    resetFieldsForType(row)
+    expect(row.lengthText).toBe('')
+    expect(row.scaleText).toBe('')
+    expect(buildCreateBody('t1', '', [row], OP_ID).errors).toEqual([])
+  })
+
+  it('varchar 保留 length 但清 scale;切到 text/json 清默认值', () => {
+    const v = blankRow(1)
+    v.columnName = 'title'
+    v.dataType = 'varchar'
+    v.lengthText = '255'
+    v.scaleText = '2'
+    resetFieldsForType(v)
+    expect(v.lengthText).toBe('255')
+    expect(v.scaleText).toBe('')
+
+    const t = blankRow(2)
+    t.columnName = 'body'
+    t.dataType = 'varchar'
+    t.lengthText = '255'
+    t.hasDefault = true
+    t.defaultText = 'abc'
+    t.dataType = 'text'
+    resetFieldsForType(t)
+    expect(t.hasDefault).toBe(false)
+    expect(t.defaultText).toBe('')
+    expect(buildCreateBody('t1', '', [t], OP_ID).errors).toEqual([])
   })
 })
 
@@ -319,6 +370,35 @@ describe('buildAlterBody:操作推导', () => {
     const row = rowFromSnapshot(snap.columns[0]!, 1)
     const result = buildAlterBody(snap, '', '', [row], OP_ID, false)
     expect(result.errors).toContain('未做任何修改')
+  })
+
+  it('varchar 空串/前后空白默认值往返保真,改其他属性不抹掉也不重写默认值', () => {
+    const snap = snapshot([
+      snapCol({ columnName: 'a', dataType: 'varchar', length: 100, defaultValue: '' }),
+      snapCol({ columnName: 'b', dataType: 'varchar', length: 100, defaultValue: ' x ' }),
+    ])
+    const rows = snap.columns.map((c, i) => rowFromSnapshot(c, i + 1))
+    // 往返本身不产生虚假 modify
+    expect(buildAlterBody(snap, '', '', rows, OP_ID, false).errors).toContain('未做任何修改')
+
+    // 只改注释时,两列的默认值必须逐字带回,既不能丢 '' 也不能把 ' x ' 改写成 'x'
+    rows[0]!.comment = '改注释'
+    rows[1]!.comment = '改注释'
+    const result = buildAlterBody(snap, '', '', rows, OP_ID, false)
+    expect(result.errors).toEqual([])
+    expect(result.body!.modifyColumns![0]!.defaultValue).toBe('')
+    expect(result.body!.modifyColumns![1]!.defaultValue).toBe(' x ')
+  })
+
+  it('取消勾选默认值 → 视为改列并省略 defaultValue 字段', () => {
+    const snap = snapshot([
+      snapCol({ columnName: 'note', dataType: 'varchar', length: 100, defaultValue: 'hi' }),
+    ])
+    const row = rowFromSnapshot(snap.columns[0]!, 1)
+    row.hasDefault = false
+    const result = buildAlterBody(snap, '', '', [row], OP_ID, false)
+    expect(result.errors).toEqual([])
+    expect(result.body!.modifyColumns![0]).not.toHaveProperty('defaultValue')
   })
 
   it('rename 目标与其他未删除行重名 → 报错,不得静默产出重复列名', () => {
