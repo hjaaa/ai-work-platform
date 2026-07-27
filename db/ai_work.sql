@@ -1938,6 +1938,28 @@ INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) VALUES
 
 COMMIT;
 
+-- ============================================================
+-- BaaS Studio 前端侧边栏菜单种子(menu_id 3300 段,排在「系统」组之前)
+-- ============================================================
+-- 2026-07-23 新增「BaaS」业务分组与「项目管理」入口
+-- path=/baas、/baas/projects 为动态菜单机制约定映射键
+-- 幂等:可重复执行
+
+START TRANSACTION;
+
+DELETE FROM `sys_menu` WHERE `menu_id` IN (3300,3301);
+INSERT INTO `sys_menu`
+  (`menu_id`,`name`,`permission`,`path`,`component`,`parent_id`,`icon`,`visible`,`sort_order`,`keep_alive`,`embedded`,`menu_type`,`create_by`,`create_time`,`update_by`,`update_time`,`del_flag`)
+VALUES
+  (3300,'BaaS',NULL,'/baas',NULL,-1,'datasets','1',35,'0','0','0','admin','2026-07-23 00:00:00','admin','2026-07-23 00:00:00','0'),
+  (3301,'项目管理',NULL,'/baas/projects',NULL,3300,'apps','1',10,'0','0','0','admin','2026-07-23 00:00:00','admin','2026-07-23 00:00:00','0');
+
+DELETE FROM `sys_role_menu` WHERE `role_id`=1 AND `menu_id` IN (3300,3301);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) VALUES
+  (1,3300),(1,3301);
+
+COMMIT;
+
 -- BaaS 平台元数据表(boot 单体并库,单一事实源为 ai_work_baas.sql,修改须双写并过一致性单测)
 CREATE TABLE `baas_project` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,

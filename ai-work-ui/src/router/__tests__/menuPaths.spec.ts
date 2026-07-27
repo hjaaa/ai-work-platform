@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MenuTree } from '@/api/menu'
-import { collectMenuPaths } from '../menuPaths'
+import { collectMenuPaths, isMenuPathActive } from '../menuPaths'
 
 const MENUS: MenuTree[] = [
   {
@@ -36,5 +36,23 @@ describe('collectMenuPaths', () => {
 
   it('空菜单树返回空集合', () => {
     expect(collectMenuPaths([]).size).toBe(0)
+  })
+})
+
+describe('isMenuPathActive', () => {
+  it('精确匹配命中', () => {
+    expect(isMenuPathActive('/baas/projects', '/baas/projects')).toBe(true)
+  })
+
+  it('详情子路由命中父菜单(以 / 为边界的前缀匹配)', () => {
+    expect(isMenuPathActive('/baas/projects', '/baas/projects/proj_abc123')).toBe(true)
+  })
+
+  it('同前缀平级路径不误亮', () => {
+    expect(isMenuPathActive('/baas/projects', '/baas/projects-x')).toBe(false)
+  })
+
+  it('空 path 不高亮', () => {
+    expect(isMenuPathActive('', '/baas/projects')).toBe(false)
   })
 })

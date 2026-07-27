@@ -30,6 +30,12 @@ const router = createRouter({
           component: () => import('@/views/members/index.vue'),
           meta: { title: '成员管理' },
         },
+        {
+          path: 'baas/projects/:ref',
+          name: 'baas-project-detail',
+          component: () => import('@/views/baas/projects/detail.vue'),
+          meta: { title: '项目详情' },
+        },
       ],
     },
   ],

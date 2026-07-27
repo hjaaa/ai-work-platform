@@ -24,6 +24,50 @@ service.interceptors.request.use((config) => {
   return config
 })
 
+// 建项目/建 Key 返回的明文密钥后端只回一次、不可再查。它在屏时若有任何请求（包括此前已发出、
+// 尚未落地的列表请求）返回 401/424，硬跳转会把明文连同页面一起销毁，操作者无从找回——仅推迟
+// 自己主动发起的刷新挡不住在途请求的迟到 401。故以引用计数挂起跳转：明文在屏期间只清 token、
+// 记下待跳转，等弹窗关闭再执行。token 已清理，挂起期间任何请求照样失败，推迟的只是「离开页面」。
+let navigationHolds = 0
+let navigationPending = false
+
+function goToLogin() {
+  // 用 location 跳转避免依赖 router
+  if (window.location.pathname !== '/login') {
+    const redirect = encodeURIComponent(window.location.pathname + window.location.search)
+    window.location.href = `/login?redirect=${redirect}`
+  }
+}
+
+function navigateToLogin() {
+  if (navigationHolds > 0) {
+    navigationPending = true
+    ElMessage.error('登录态已失效，请先保存屏幕上的密钥，关闭后将返回登录页')
+    return
+  }
+  goToLogin()
+}
+
+/** 挂起登录跳转，返回释放函数（重复调用只生效一次）。仅用于一次性明文在屏的场景。 */
+export function holdLoginNavigation(): () => void {
+  navigationHolds++
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    navigationHolds--
+    if (navigationHolds === 0 && navigationPending) {
+      navigationPending = false
+      goToLogin()
+    }
+  }
+}
+
+/** 仅供测试断言挂起状态 */
+export function loginNavigationHeld(): { holds: number; pending: boolean } {
+  return { holds: navigationHolds, pending: navigationPending }
+}
+
 service.interceptors.response.use(
   (response) => {
     const res = response.data as R
@@ -34,15 +78,11 @@ service.interceptors.response.use(
     return response.data
   },
   (error) => {
-    // 401/424：登录态失效（424 为后端 token 失效约定状态码），清 token 回登录页（带回跳地址）；
-    // 用 location 跳转避免依赖 router
+    // 401/424：登录态失效（424 为后端 token 失效约定状态码），清 token 回登录页（带回跳地址）
     const status = error.response?.status
     if (status === 401 || status === 424) {
       clearTokens()
-      if (window.location.pathname !== '/login') {
-        const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-        window.location.href = `/login?redirect=${redirect}`
-      }
+      navigateToLogin()
       return Promise.reject(error)
     }
     // 其他错误：后端会返回含本地化 msg 的 R 结构，优先展示后端消息
@@ -63,6 +103,9 @@ const request = {
   },
   put<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) {
     return service.put<T, R<T>>(url, data, config)
+  },
+  patch<T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) {
+    return service.patch<T, R<T>>(url, data, config)
   },
   delete<T = unknown>(url: string, config?: AxiosRequestConfig) {
     return service.delete<T, R<T>>(url, config)

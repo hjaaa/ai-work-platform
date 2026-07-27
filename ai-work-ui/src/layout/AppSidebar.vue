@@ -91,6 +91,7 @@ import { useRoute, useRouter } from 'vue-router'
 import BrandLogo from '@/components/BrandLogo.vue'
 import DcIcon from '@/components/DcIcon.vue'
 import { useUserStore } from '@/stores/user'
+import { isMenuPathActive } from '@/router/menuPaths'
 import { buildSidebarModel, flattenItems, type SidebarItem } from './menuNav'
 
 defineProps<{ collapsed: boolean }>()
@@ -109,7 +110,7 @@ function toggle(id: string) {
 }
 
 function isActive(path: string): boolean {
-  return path !== '' && route.path === path
+  return isMenuPathActive(path, route.path)
 }
 
 function go(path: string) {
