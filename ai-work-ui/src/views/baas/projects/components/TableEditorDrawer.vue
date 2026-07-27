@@ -141,12 +141,7 @@ import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { alterTable, createTable, getTable } from '@/api/baas/table'
 import type { TableAlterBody, TableCreateBody, TableSnapshot } from '@/api/baas/table'
-import {
-  extractBackendMsg,
-  isDdlLockBusy,
-  matchPriorSubmission,
-  newOperationId,
-} from '@/api/baas/base'
+import { createSubmissionTracker, extractBackendMsg, isDdlLockBusy } from '@/api/baas/base'
 import {
   COLUMN_TYPES,
   blankRow,
@@ -200,7 +195,7 @@ let loadSeq = 0
 
 function openCreate() {
   loadSeq++
-  lastSent = null
+  submissions.scopeTo('')
   mode.value = 'create'
   snapshot.value = null
   tableName.value = ''
@@ -214,7 +209,7 @@ async function openEdit(name: string) {
   const seq = ++loadSeq
   const res = await getTable(props.refId, name)
   if (seq !== loadSeq) return
-  lastSent = null
+  submissions.scopeTo(name)
   mode.value = 'edit'
   snapshot.value = res.data
   tableName.value = res.data.tableName
@@ -244,13 +239,10 @@ function reportAlterResult(snapshot: TableSnapshot) {
 // 因此记住上一次【实际发出】的提交体——内容未变的重试原样重发它(含同 operationId 与当时
 // 已确认的 allowLossy),内容一改就换新 ID:后端 requireMatchingFingerprint 要求同 ID 同内容,
 // 把旧 ID 复用到改动过的 body 上只会换来「同 operationId 的请求内容不一致」。
-// 组装期 operationId 留空,由 matchPriorSubmission 判定复用旧 ID 还是取新 ID。
+// 组装期 operationId 留空,由 tracker 判定复用上一发的 ID 还是取新 ID(生命周期三条规则见
+// createSubmissionTracker 的注释)。scope 上建表记为 '',改表记目标表名。
 const OPERATION_ID_PENDING = ''
-let lastSent: TableCreateBody | TableAlterBody | null = null
-
-function withNewOperationId<T extends TableCreateBody | TableAlterBody>(body: T): T {
-  return { ...body, operationId: newOperationId() }
-}
+const submissions = createSubmissionTracker<TableCreateBody | TableAlterBody>()
 
 async function onSubmit() {
   errors.value = []
@@ -261,12 +253,12 @@ async function onSubmit() {
       errors.value = result.errors
       return
     }
-    const prior = matchPriorSubmission(lastSent as TableCreateBody | null, [result.body])
-    const body = prior ?? withNewOperationId(result.body)
+    const { body } = submissions.resolve([result.body])
     submitting.value = true
     try {
-      lastSent = body
-      await createTable(props.refId, body)
+      submissions.markSent(body)
+      await createTable(props.refId, body as TableCreateBody)
+      submissions.markSucceeded()
       ElMessage.success('建表成功')
       open.value = false
       emit('saved')
@@ -292,20 +284,17 @@ async function onSubmit() {
     return
   }
   // allowLossy 的差异属于上一发当时已经确认过的放行,不算内容改动:重试沿用该确认不再二次弹窗
-  const resend = matchPriorSubmission(lastSent as TableAlterBody | null, [
-    first.body,
-    withAllowLossy(first.body),
-  ])
-  if (resend !== null) {
+  const resolved = submissions.resolve([first.body, withAllowLossy(first.body)])
+  if (resolved.reused) {
     submitting.value = true
     try {
-      await sendAlter(snap, resend)
+      await sendAlter(snap, resolved.body as TableAlterBody)
     } finally {
       submitting.value = false
     }
     return
   }
-  let body: TableAlterBody = first.body
+  let body = resolved.body as TableAlterBody
   if (body.dropColumns && body.dropColumns.length > 0) {
     // allowLossy 是请求级开关:置 true 后,同批 modifyColumns 里的有损类型变更也会直接执行,
     // 后端不再回「有损类型变更须显式 allowLossy=true 确认」,下面那段列级确认因此不会触发。
@@ -330,7 +319,7 @@ async function onSubmit() {
 
   submitting.value = true
   try {
-    await sendAlter(snap, withNewOperationId(body))
+    await sendAlter(snap, body)
   } finally {
     submitting.value = false
   }
@@ -338,8 +327,10 @@ async function onSubmit() {
 
 async function sendAlter(snap: TableSnapshot, body: TableAlterBody) {
   try {
-    lastSent = body
-    reportAlterResult((await alterTable(props.refId, snap.tableName, body)).data)
+    submissions.markSent(body)
+    const result = (await alterTable(props.refId, snap.tableName, body)).data
+    submissions.markSucceeded()
+    reportAlterResult(result)
     open.value = false
     emit('saved')
   } catch (e) {
@@ -361,8 +352,10 @@ async function sendAlter(snap: TableSnapshot, body: TableAlterBody) {
       return
     }
     const lossy = withAllowLossy(body)
-    lastSent = lossy
-    reportAlterResult((await alterTable(props.refId, snap.tableName, lossy)).data)
+    submissions.markSent(lossy)
+    const result = (await alterTable(props.refId, snap.tableName, lossy)).data
+    submissions.markSucceeded()
+    reportAlterResult(result)
     open.value = false
     emit('saved')
   }

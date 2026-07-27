@@ -56,7 +56,7 @@ import { ElMessage } from 'element-plus'
 import { getAcl, getTable, putAcl } from '@/api/baas/table'
 import type { AclConfig, AclPutBody } from '@/api/baas/table'
 import type { TableStatus } from '@/api/baas/types'
-import { matchPriorSubmission, newOperationId } from '@/api/baas/base'
+import { createSubmissionTracker } from '@/api/baas/base'
 
 const props = defineProps<{ refId: string }>()
 const emit = defineEmits<{ saved: [] }>()
@@ -93,7 +93,7 @@ async function openFor(name: string, tableStatus: TableStatus) {
     getTable(props.refId, name),
   ])
   if (seq !== loadSeq) return
-  lastSent = null
+  submissions.scopeTo(name)
   tableName.value = name
   status.value = tableStatus
   acl.value = aclRes.data.acl
@@ -111,25 +111,24 @@ defineExpose({ openFor })
 // AclConfigService.onFailureTx 把表置 CONFLICT。此后 validateInLock 只认 retryableDdlState
 // ——它要求 branch != NEW_OPERATION 才有 persistedDdlIntent,而换新 operationId 必然是
 // NEW_OPERATION,于是撞上「表当前状态不允许 ACL 配置: CONFLICT」,本可续跑的补建索引搁浅。
-// 与表结构编辑器同一处理:记住上一次实际发出的 body,内容未变的重试原样重发以复用其 ID。
-let lastSent: AclPutBody | null = null
+// 与表结构编辑器同一处理:记住上一次实际发出的 body,内容未变的重试原样重发以复用其 ID
+// (生命周期三条规则见 createSubmissionTracker 的注释)。
+const submissions = createSubmissionTracker<AclPutBody>()
 
 async function onSave() {
   const draft: AclPutBody = {
     operationId: '',
-    // acl.value 是响应式对象:直接引用会让 lastSent 随后续勾选一起变,指纹恒等于当前值,
+    // acl.value 是响应式对象:直接引用会让上一发随后续勾选一起变,指纹恒等于当前值,
     // 内容改了也判成「未变」而复用旧 ID,反被后端指纹校验拒。取值快照切断引用。
     acl: JSON.parse(JSON.stringify(acl.value)) as AclConfig,
     ownerColumn: ownerColumn.value === '' ? null : ownerColumn.value,
   }
-  const body = matchPriorSubmission(lastSent, [draft]) ?? {
-    ...draft,
-    operationId: newOperationId(),
-  }
+  const { body } = submissions.resolve([draft])
   saving.value = true
   try {
-    lastSent = body
+    submissions.markSent(body)
     const res = await putAcl(props.refId, tableName.value, body)
+    submissions.markSucceeded()
     if (res.data.aclClosedByOwnerCancel) {
       ElMessage.warning('已取消 owner 配置,全部 anon/authenticated ACL 已被安全关闭')
     } else {

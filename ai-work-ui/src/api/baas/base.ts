@@ -49,6 +49,57 @@ export function matchPriorSubmission<T extends { operationId: string }>(
   return candidates.some((c) => submissionKey(c) === priorKey) ? prior : null
 }
 
+/**
+ * 管理一个 DDL 表单的 operationId 生命周期。三条规则一处定义，避免各调用点各自漂移：
+ *
+ * 1. 上一发【跨表单开关保留】——建表失败后表留在 FAILED、改表/ACL 失败后留在 CONFLICT，
+ *    关掉重开、重新录入同样内容若拿新 ID，只会走 NEW_OPERATION 撞上「表名已存在」/
+ *    「表当前状态不允许…」，再也进不去 RETRY_FAILED。
+ * 2. 【成功即作废】——否则下次凑出同样 body 会复用已 SUCCESS 的 ID，后端快速路径直接重放
+ *    旧快照，一条 DDL 都不执行却报「成功」。
+ * 3. 【换目标即丢弃】——alter/ACL 的 body 不含表名（表名在 URL 上），沿用同 ID 会把上一张表
+ *    的失败操作作用到新表上。
+ *
+ * 注意边界：这是页面会话内的缓存，组件卸载或刷新页面后失效。彻底卡死的失败操作由对账处理。
+ */
+export interface SubmissionTracker<T extends { operationId: string }> {
+  /** 切换目标（表名等）；目标变了就丢弃上一发 */
+  scopeTo(scope: string): void
+  /** 取本次要发的 body：与上一发内容等价则复用它（含其 operationId），否则按 candidates[0] 取新 ID。
+   *  candidates 首项为基线，其余为等价变体（如已确认 allowLossy 的形态）。 */
+  resolve(candidates: T[]): { body: T; reused: boolean }
+  /** 记下实际发出的 body：失败后据此复用 operationId 进 RETRY_FAILED */
+  markSent(body: T): void
+  markSucceeded(): void
+}
+
+export function createSubmissionTracker<T extends { operationId: string }>(): SubmissionTracker<T> {
+  let sent: T | null = null
+  let scope: string | null = null
+
+  return {
+    scopeTo(next: string) {
+      if (scope !== next) {
+        sent = null
+        scope = next
+      }
+    },
+    resolve(candidates: T[]): { body: T; reused: boolean } {
+      const prior = matchPriorSubmission(sent, candidates)
+      if (prior !== null) return { body: prior, reused: true }
+      // 展开泛型再覆盖属性后 TS 无法回推为 T;此处只改 operationId,其余字段逐字保留
+      const fresh = { ...candidates[0], operationId: newOperationId() } as T
+      return { body: fresh, reused: false }
+    },
+    markSent(body: T) {
+      sent = body
+    },
+    markSucceeded() {
+      sent = null
+    },
+  }
+}
+
 // 长操作(建/改/删表、ACL 配置、手动对账、建项目)取消 client 端 deadline。
 // 后端此类操作无端到端时限(§7.7:ProjectProvisioner 顺序执行建库/建账号/授权/初始化系统表多条 DDL、
 // 其 JdbcTemplate 无 queryTimeout;reconcile 可执行不定长 DB 序列),沿用 request.ts 默认 30s 超时会在

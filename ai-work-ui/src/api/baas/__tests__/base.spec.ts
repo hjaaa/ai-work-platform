@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   resolveBaasBase,
   newOperationId,
+  createSubmissionTracker,
   extractBackendMsg,
   isDdlLockBusy,
   matchPriorSubmission,
@@ -97,6 +98,85 @@ describe('submissionKey / matchPriorSubmission', () => {
     const sent = acl(true)
     expect(matchPriorSubmission(sent, [acl(true, OTHER_ID)])).toBe(sent)
     expect(matchPriorSubmission(sent, [acl(false, OTHER_ID)])).toBeNull()
+  })
+})
+
+describe('createSubmissionTracker', () => {
+  type Body = { operationId: string; tableName: string; allowLossy?: boolean }
+  const draft = (tableName = 't1'): Body => ({ operationId: '', tableName })
+
+  function sendOnce(tracker: ReturnType<typeof createSubmissionTracker<Body>>, body = draft()) {
+    const resolved = tracker.resolve([body])
+    tracker.markSent(resolved.body)
+    return resolved
+  }
+
+  it('首次提交取新 operationId', () => {
+    const tracker = createSubmissionTracker<Body>()
+    const { body, reused } = tracker.resolve([draft()])
+    expect(reused).toBe(false)
+    expect(body.operationId).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  // 建表失败后表留在 FAILED、改表/ACL 失败后留在 CONFLICT,只有原 operationId 能进 RETRY_FAILED。
+  // 关掉表单重开(不换目标表)不得丢弃上一发,否则重新录入同样内容也无从恢复。
+  it('失败后跨表单开关保留:同内容重试复用上一发的 ID', () => {
+    const tracker = createSubmissionTracker<Body>()
+    tracker.scopeTo('t1')
+    const first = sendOnce(tracker)
+    tracker.scopeTo('t1') // 关掉重开同一张表
+
+    const retry = tracker.resolve([draft()])
+    expect(retry.reused).toBe(true)
+    expect(retry.body.operationId).toBe(first.body.operationId)
+  })
+
+  // 复用已 SUCCESS 的 ID 会让后端快速路径重放旧快照:一条 DDL 都不执行却报「成功」
+  it('成功后作废:再提交同样内容取新 ID', () => {
+    const tracker = createSubmissionTracker<Body>()
+    tracker.scopeTo('t1')
+    const first = sendOnce(tracker)
+    tracker.markSucceeded()
+
+    const again = tracker.resolve([draft()])
+    expect(again.reused).toBe(false)
+    expect(again.body.operationId).not.toBe(first.body.operationId)
+  })
+
+  // alter/ACL 的 body 不含表名(表名在 URL 上),沿用同 ID 会把上一张表的失败操作作用到新表
+  it('换目标表即丢弃:即便内容字节相同也不复用', () => {
+    const tracker = createSubmissionTracker<Body>()
+    tracker.scopeTo('t1')
+    const first = sendOnce(tracker)
+
+    tracker.scopeTo('t2')
+    const other = tracker.resolve([draft()]) // 内容与上一发完全相同
+    expect(other.reused).toBe(false)
+    expect(other.body.operationId).not.toBe(first.body.operationId)
+  })
+
+  it('内容改动后取新 ID', () => {
+    const tracker = createSubmissionTracker<Body>()
+    tracker.scopeTo('t1')
+    const first = sendOnce(tracker)
+
+    const changed = tracker.resolve([draft('renamed')])
+    expect(changed.reused).toBe(false)
+    expect(changed.body.operationId).not.toBe(first.body.operationId)
+  })
+
+  it('等价变体命中时原样返回上一发(保住已确认的 allowLossy)', () => {
+    const tracker = createSubmissionTracker<Body>()
+    tracker.scopeTo('t1')
+    const baseline = { ...draft(), allowLossy: false }
+    const sent = { ...tracker.resolve([baseline]).body, allowLossy: true }
+    tracker.markSent(sent)
+
+    // 重试从 allowLossy=false 的基线重新组装,按 [基线, 已确认变体] 匹配
+    const retry = tracker.resolve([baseline, { ...baseline, allowLossy: true }])
+    expect(retry.reused).toBe(true)
+    expect(retry.body.allowLossy).toBe(true)
+    expect(retry.body.operationId).toBe(sent.operationId)
   })
 })
 
