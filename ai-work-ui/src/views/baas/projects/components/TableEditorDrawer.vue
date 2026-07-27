@@ -141,14 +141,18 @@ import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { alterTable, createTable, getTable } from '@/api/baas/table'
 import type { TableAlterBody, TableCreateBody, TableSnapshot } from '@/api/baas/table'
-import { extractBackendMsg, isDdlLockBusy, newOperationId } from '@/api/baas/base'
+import {
+  extractBackendMsg,
+  isDdlLockBusy,
+  matchPriorSubmission,
+  newOperationId,
+} from '@/api/baas/base'
 import {
   COLUMN_TYPES,
   blankRow,
   buildAlterBody,
   buildCreateBody,
   isAllowLossyRequired,
-  matchPriorSubmission,
   resetFieldsForType,
   rowFromSnapshot,
   withAllowLossy,

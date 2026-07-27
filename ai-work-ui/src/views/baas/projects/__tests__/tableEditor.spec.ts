@@ -7,10 +7,8 @@ import {
   buildAlterBody,
   buildCreateBody,
   isAllowLossyRequired,
-  matchPriorSubmission,
   resetFieldsForType,
   rowFromSnapshot,
-  submissionKey,
   withAllowLossy,
 } from '../tableEditor'
 
@@ -543,44 +541,6 @@ describe('isAllowLossyRequired / withAllowLossy', () => {
     const resent = withAllowLossy(body)
     expect(resent).toEqual({ ...body, allowLossy: true })
     expect(resent.operationId).toBe(OP_ID)
-  })
-})
-
-describe('submissionKey / matchPriorSubmission', () => {
-  const OTHER_ID = '018f6b2a-0000-4000-8000-000000000002'
-  const alter = (over: Partial<{ operationId: string; allowLossy: boolean; dropColumns: string[] }> = {}) => ({
-    operationId: OP_ID,
-    allowLossy: false,
-    dropColumns: ['a'],
-    ...over,
-  })
-
-  it('指纹忽略 operationId,只认内容', () => {
-    expect(submissionKey(alter())).toBe(submissionKey(alter({ operationId: OTHER_ID })))
-    expect(submissionKey(alter())).not.toBe(submissionKey(alter({ dropColumns: ['b'] })))
-  })
-
-  it('内容未变的重试复用上一发(含其 operationId)', () => {
-    const sent = alter()
-    const retry = alter({ operationId: OTHER_ID })
-    expect(matchPriorSubmission(sent, [retry])).toBe(sent)
-  })
-
-  it('上一发已确认 allowLossy 时,重试沿用那一发而非降级为 false', () => {
-    const sent = alter({ allowLossy: true })
-    const baseline = alter({ operationId: OTHER_ID, allowLossy: false })
-    // 组件按 [基线, withAllowLossy(基线)] 两个候选匹配
-    expect(matchPriorSubmission(sent, [baseline, withAllowLossy(baseline)])).toBe(sent)
-    expect(matchPriorSubmission(sent, [baseline, withAllowLossy(baseline)])!.allowLossy).toBe(true)
-  })
-
-  it('内容改动后不复用,交由调用方取新 operationId', () => {
-    const sent = alter()
-    expect(matchPriorSubmission(sent, [alter({ dropColumns: ['a', 'b'] })])).toBeNull()
-  })
-
-  it('无上一发时返回 null', () => {
-    expect(matchPriorSubmission(null, [alter()])).toBeNull()
   })
 })
 

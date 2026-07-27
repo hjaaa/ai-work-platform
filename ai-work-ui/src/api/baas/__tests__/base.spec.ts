@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { resolveBaasBase, newOperationId, extractBackendMsg, isDdlLockBusy } from '../base'
+import {
+  resolveBaasBase,
+  newOperationId,
+  extractBackendMsg,
+  isDdlLockBusy,
+  matchPriorSubmission,
+  submissionKey,
+} from '../base'
 import { AxiosError } from 'axios'
 import type { InternalAxiosRequestConfig, AxiosResponse } from 'axios'
 
@@ -41,6 +48,55 @@ describe('newOperationId', () => {
     } finally {
       Object.defineProperty(crypto, 'randomUUID', { value: original, configurable: true })
     }
+  })
+})
+
+describe('submissionKey / matchPriorSubmission', () => {
+  const OP_ID = '018f6b2a-0000-4000-8000-000000000001'
+  const OTHER_ID = '018f6b2a-0000-4000-8000-000000000002'
+  const alter = (over: Partial<{ operationId: string; allowLossy: boolean; dropColumns: string[] }> = {}) => ({
+    operationId: OP_ID,
+    allowLossy: false,
+    dropColumns: ['a'],
+    ...over,
+  })
+
+  it('指纹忽略 operationId,只认内容', () => {
+    expect(submissionKey(alter())).toBe(submissionKey(alter({ operationId: OTHER_ID })))
+    expect(submissionKey(alter())).not.toBe(submissionKey(alter({ dropColumns: ['b'] })))
+  })
+
+  it('内容未变的重试复用上一发(含其 operationId)', () => {
+    const sent = alter()
+    expect(matchPriorSubmission(sent, [alter({ operationId: OTHER_ID })])).toBe(sent)
+  })
+
+  it('上一发已确认 allowLossy 时,重试沿用那一发而非降级为 false', () => {
+    const sent = alter({ allowLossy: true })
+    const baseline = alter({ operationId: OTHER_ID, allowLossy: false })
+    // 表编辑器按 [基线, withAllowLossy(基线)] 两个候选匹配
+    const matched = matchPriorSubmission(sent, [baseline, { ...baseline, allowLossy: true }])
+    expect(matched).toBe(sent)
+    expect(matched!.allowLossy).toBe(true)
+  })
+
+  it('内容改动后不复用,交由调用方取新 operationId', () => {
+    expect(matchPriorSubmission(alter(), [alter({ dropColumns: ['a', 'b'] })])).toBeNull()
+  })
+
+  it('无上一发时返回 null', () => {
+    expect(matchPriorSubmission(null, [alter()])).toBeNull()
+  })
+
+  it('ACL body 同样适用(泛型只约束 operationId)', () => {
+    const acl = (select: boolean, operationId = OP_ID) => ({
+      operationId,
+      acl: { anon: { select, insert: false, update: false, delete: false } },
+      ownerColumn: 'owner_id',
+    })
+    const sent = acl(true)
+    expect(matchPriorSubmission(sent, [acl(true, OTHER_ID)])).toBe(sent)
+    expect(matchPriorSubmission(sent, [acl(false, OTHER_ID)])).toBeNull()
   })
 })
 

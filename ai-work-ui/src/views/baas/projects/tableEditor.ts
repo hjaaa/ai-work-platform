@@ -399,21 +399,3 @@ export function isAllowLossyRequired(msg: string): boolean {
 export function withAllowLossy(body: TableAlterBody): TableAlterBody {
   return { ...body, allowLossy: true }
 }
-
-// 提交体除 operationId 外的内容指纹,用于判定两次提交是否为「同一编辑意图」。
-// 后端 requestHash 覆盖整个 body,所以内容一旦不同就必须换新 operationId。
-export function submissionKey(body: TableCreateBody | TableAlterBody): string {
-  return JSON.stringify({ ...body, operationId: '' })
-}
-
-// 内容未变的重试:上一次实际发出的提交体与本次候选之一等价时,原样返回它以复用 operationId。
-// ALTER 失败会把表置 CONFLICT,后端仅在同 operationId + 同 requestHash 时进 RETRY_FAILED
-// 分支续跑;换新 ID 只会走 NEW_OPERATION 并被表状态挡死。响应丢失时同 ID 才能重放 SUCCESS 快照。
-export function matchPriorSubmission<T extends TableCreateBody | TableAlterBody>(
-  prior: T | null,
-  candidates: T[],
-): T | null {
-  if (prior === null) return null
-  const priorKey = submissionKey(prior)
-  return candidates.some((c) => submissionKey(c) === priorKey) ? prior : null
-}
