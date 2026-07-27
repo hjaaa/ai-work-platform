@@ -27,7 +27,9 @@
 
 ### 公共基础设施栈（前置）
 
-MySQL、Redis、Nacos 由跨项目共享的公共基础设施栈提供（`~/docker-data/infra/docker-compose.yml`），不随本仓库编排。首次使用需一次性创建公共网络：
+MySQL、Redis、Nacos 由跨项目共享的公共基础设施栈提供（`~/docker-data/infra/docker-compose.yml`）。该栈供多个项目复用，因此不随本仓库编排、也不纳入本仓库版本控制；新环境按下面三步一次性搭建，本节即其完整定义。
+
+**第 1 步：创建公共网络（一次性）**
 
 ```bash
 docker network create --driver bridge --subnet 172.28.0.0/16 dev-infra-net
@@ -35,11 +37,104 @@ docker network create --driver bridge --subnet 172.28.0.0/16 dev-infra-net
 
 > 网段必须是 `172.28.0.0/16`：网关钉死在 `172.28.0.10`，BaaS 的信任代理白名单依赖该地址。
 
-之后每次启动业务栈前先起公共栈（提供 `dev-mysql` / `dev-redis` / `dev-nacos`）：
+**第 2 步：准备目录与 Nacos 配置**
+
+在本仓库根目录执行：
+
+```bash
+mkdir -p ~/docker-data/infra/nacos/conf
+cp ai-work-register/src/main/resources/application.properties ~/docker-data/infra/nacos/conf/
+```
+
+> 该文件会整份挂载进 `dev-nacos` 覆盖镜像默认配置，直接复制即可、无需改动：其 `db.url.0` 默认已指向 `dev-mysql` 的 `ai_work_config` 库。
+
+**第 3 步：写入 `~/docker-data/infra/docker-compose.yml`**
+
+<details>
+<summary>展开完整内容</summary>
+
+```yaml
+# 公共基础设施栈 - 跨项目共享
+# 前置：已创建 dev-infra-net 网络；宿主 3306 端口空闲（注意与其他项目的 mysql 容器冲突）
+services:
+  dev-mysql:
+    # 官方 Oracle mysql-server 镜像（经阿里云 mirror，国内拉取快）
+    image: registry.cn-hangzhou.aliyuncs.com/dockerhub_mirror/mysql-server:8.0.32
+    container_name: dev-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_ROOT_PASSWORD: root
+      TZ: Asia/Shanghai
+    # lower_case_table_names 在数据目录初始化后不可变更，删除此行会导致启动失败
+    command: --lower_case_table_names=1
+    ports:
+      - 3306:3306
+    volumes:
+      - ./mysql/data:/var/lib/mysql
+    networks:
+      - dev-infra-net
+
+  dev-redis:
+    image: registry.cn-hangzhou.aliyuncs.com/dockerhub_mirror/redis
+    container_name: dev-redis
+    restart: always
+    ports:
+      # 该 Redis 无密码认证，仅绑回环地址，避免暴露到局域网；
+      # 如需局域网访问请改为 6379:6379 并自行加 requirepass
+      - 127.0.0.1:6379:6379
+    networks:
+      - dev-infra-net
+
+  dev-nacos:
+    image: nacos/nacos-server:v3.2.2
+    container_name: dev-nacos
+    restart: always
+    depends_on:
+      - dev-mysql
+    environment:
+      MODE: standalone
+      TZ: Asia/Shanghai
+      # 官方镜像启动脚本强制校验以下三项（缺失直接 exit 255），
+      # 即使挂载的 application.properties 里已有 nacos.core.auth.* 也不行。
+      # 取值须与 application.properties 保持一致，否则读不了既有 Nacos 数据。
+      NACOS_AUTH_TOKEN: VGhpc0lzTXlDdXN0b21TZWNyZXRLZXkwMTIzNDU2Nzg=
+      NACOS_AUTH_IDENTITY_KEY: VGhpc0lzTXlDdXN0b21TZWNyZXRLZXkwMTIzNDU2Nzg=
+      NACOS_AUTH_IDENTITY_VALUE: VGhpc0lzTXlDdXN0b21TZWNyZXRLZXkwMTIzNDU2Nzg=
+    ports:
+      - 8848:8848
+      - 9848:9848
+      - 18080:18080
+    volumes:
+      # 整份挂载覆盖默认配置，保留 auth 密钥 / 控制台端口 / merged 部署模式等定制
+      - ./nacos/conf/application.properties:/home/nacos/conf/application.properties
+      - ./nacos/data:/home/nacos/data
+      - ./nacos/logs:/home/nacos/logs
+    networks:
+      - dev-infra-net
+
+networks:
+  dev-infra-net:
+    external: true
+```
+
+</details>
+
+**日常启动**：之后每次启动业务栈前先起公共栈（提供 `dev-mysql` / `dev-redis` / `dev-nacos`）：
 
 ```bash
 docker compose -f ~/docker-data/infra/docker-compose.yml up -d
 ```
+
+**首次启动后导入建库脚本**（数据目录为空时 MySQL 才执行初始化，本仓库的脚本需手工导入）：
+
+```bash
+docker exec -i dev-mysql mysql -uroot -proot < db/ai_work.sql
+docker exec -i dev-mysql mysql -uroot -proot < db/ai_work_config.sql
+docker exec -i dev-mysql mysql -uroot -proot < db/ai_work_baas.sql
+```
+
+> Nacos 控制台 `http://localhost:18080`，默认账号 `nacos / nacos`；其配置数据存在 MySQL 的 `ai_work_config` 库，不在容器内。
 
 ### 微服务模式
 

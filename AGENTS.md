@@ -7,7 +7,7 @@
 ## 环境要求
 
 - 后端：JDK 17 + Maven；前端：Node `^22.22.2 || ^24.15.0 || >=26.0.0`（见 `ai-work-ui/package.json` engines）。
-- 本地运行依赖 MySQL、Redis 与 Nacos，三者由**跨项目共享的公共基础设施栈**提供（`~/docker-data/infra/docker-compose.yml`，容器名 `dev-mysql` / `dev-redis` / `dev-nacos`），不再随本仓库编排。首次使用需一次性创建公共网络：`docker network create --driver bridge --subnet 172.28.0.0/16 dev-infra-net`（网段固定，网关固定 IP 与 BaaS 信任代理白名单依赖该网段）。数据库初始化脚本：`db/ai_work.sql`（业务库）、`db/ai_work_config.sql`（Nacos 配置中心库）。
+- 本地运行依赖 MySQL、Redis 与 Nacos，三者由**跨项目共享的公共基础设施栈**提供（`~/docker-data/infra/docker-compose.yml`，容器名 `dev-mysql` / `dev-redis` / `dev-nacos`），不再随本仓库编排、也不纳入本仓库版本控制。首次使用需一次性创建公共网络：`docker network create --driver bridge --subnet 172.28.0.0/16 dev-infra-net`（网段固定，网关固定 IP 与 BaaS 信任代理白名单依赖该网段）；公共栈的完整搭建步骤（compose 定义、Nacos 配置准备）见 [README.md](README.md) 的「公共基础设施栈（前置）」一节。数据库初始化脚本：`db/ai_work.sql`（业务库）、`db/ai_work_config.sql`（Nacos 配置中心库）。
 
 ## 构建、测试与开发命令
 
