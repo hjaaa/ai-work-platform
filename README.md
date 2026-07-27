@@ -25,6 +25,22 @@
 - Docker 和 Docker Compose
 - Node.js 16+（运行 `ai-work-ui` 前端时需要）
 
+### 公共基础设施栈（前置）
+
+MySQL、Redis、Nacos 由跨项目共享的公共基础设施栈提供（`~/docker-data/infra/docker-compose.yml`），不随本仓库编排。首次使用需一次性创建公共网络：
+
+```bash
+docker network create --driver bridge --subnet 172.28.0.0/16 dev-infra-net
+```
+
+> 网段必须是 `172.28.0.0/16`：网关钉死在 `172.28.0.10`，BaaS 的信任代理白名单依赖该地址。
+
+之后每次启动业务栈前先起公共栈（提供 `dev-mysql` / `dev-redis` / `dev-nacos`）：
+
+```bash
+docker compose -f ~/docker-data/infra/docker-compose.yml up -d
+```
+
 ### 微服务模式
 
 在项目根目录执行完整编译，再构建并启动本地服务栈：
@@ -34,7 +50,7 @@ mvn clean install -T 4 -Pcloud
 docker compose build && docker compose up
 ```
 
-服务启动后，默认通过网关端口 `9999` 访问后端接口，Nacos 控制台端口为 `8848`。
+服务启动后，默认通过网关端口 `9999` 访问后端接口，Nacos 服务端端口为 `8848`、控制台为 `18080`。
 
 ### 单体模式
 
@@ -70,7 +86,7 @@ docker compose -f docker-compose-boot.yml build && docker compose -f docker-comp
 ai-work-ui -- 前端项目（独立仓库）
 
 ai-work-platform
-├── ai-work-register -- Nacos Server [8848/9848/18080]
+├── ai-work-register -- Nacos Server [8848/9848/18080]（已由公共基础设施栈的 dev-nacos 提供，本模块保留作回退用）
 ├── ai-work-gateway -- Spring Cloud Gateway 网关 [9999]
 ├── ai-work-auth -- 授权服务 [3000]
 ├── ai-work-upms -- 通用用户权限管理模块
