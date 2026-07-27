@@ -2,12 +2,12 @@
 
 ## 项目结构与模块组织
 
-`ai-work-platform` 通过根 `pom.xml` 聚合各 Spring Cloud 服务。运行时服务位于独立目录：`ai-work-register`（Nacos 注册中心）、`ai-work-gateway`（边缘路由）、`ai-work-auth`（授权）、`ai-work-upms`（用户与权限）、`ai-work-boot`（单体启动器）、`ai-work-visual`（监控、代码生成、quartz）。共享库与 DTO 位于 `ai-work-common`。前端应用位于 `ai-work-ui`（Vue 3 + TypeScript + Vite）。示例 SQL 与 Docker 构建上下文在 `db/`，基础设施编排见 `docker-compose.yml`（微服务形态）与 `docker-compose-boot.yml`（单体形态）。团队规范文档位于 `context/team/`，构建辅助脚本位于 `scripts/`。所有模块均采用标准的 `src/main/java` 与 `src/test/java` 布局。
+`ai-work-platform` 通过根 `pom.xml` 聚合各 Spring Cloud 服务。运行时服务位于独立目录：`ai-work-register`（Nacos 注册中心）、`ai-work-gateway`（边缘路由）、`ai-work-auth`（授权）、`ai-work-upms`（用户与权限）、`ai-work-boot`（单体启动器）、`ai-work-visual`（监控、代码生成、quartz）。共享库与 DTO 位于 `ai-work-common`。前端应用位于 `ai-work-ui`（Vue 3 + TypeScript + Vite）。示例 SQL 与 Docker 构建上下文在 `db/`，业务服务编排见 `docker-compose.yml`（微服务形态）与 `docker-compose-boot.yml`（单体形态）；MySQL / Redis / Nacos 由公共基础设施栈提供，不在本仓库编排内（`ai-work-register` 模块保留作回退用，已不参与运行）。团队规范文档位于 `context/team/`，构建辅助脚本位于 `scripts/`。所有模块均采用标准的 `src/main/java` 与 `src/test/java` 布局。
 
 ## 环境要求
 
 - 后端：JDK 17 + Maven；前端：Node `^22.22.2 || ^24.15.0 || >=26.0.0`（见 `ai-work-ui/package.json` engines）。
-- 本地运行依赖 MySQL 与 Redis（docker compose 栈已内置）。数据库初始化脚本：`db/ai_work.sql`（业务库）、`db/ai_work_config.sql`（Nacos 配置中心库）。
+- 本地运行依赖 MySQL、Redis 与 Nacos，三者由**跨项目共享的公共基础设施栈**提供（`~/docker-data/infra/docker-compose.yml`，容器名 `dev-mysql` / `dev-redis` / `dev-nacos`），不再随本仓库编排、也不纳入本仓库版本控制。首次使用需一次性创建公共网络：`docker network create --driver bridge --subnet 172.28.0.0/16 --ip-range 172.28.1.0/24 dev-infra-net`（网段固定，网关固定 IP 与 BaaS 信任代理白名单依赖该网段；`--ip-range` 把动态分配池与网关的 `172.28.0.10` 隔开）；公共栈的完整搭建步骤（compose 定义、Nacos 配置准备）见 [README.md](README.md) 的「公共基础设施栈（前置）」一节。数据库初始化脚本：`db/ai_work.sql`（业务库）、`db/ai_work_config.sql`（Nacos 配置中心库）。
 
 ## 构建、测试与开发命令
 
@@ -15,7 +15,8 @@
 
 - `mvn clean install -T 4 -Pcloud` 编译微服务版（`cloud` 为默认激活 profile）。
 - `mvn clean install -T 4 -Pboot` 编译单体版（`ai-work-boot` 仅在 `boot` profile 下参与构建）。
-- `docker compose build && docker compose up` 构建镜像并启动微服务栈（含 MySQL、Redis；`ai-work-register` 端口 8848/9848，`ai-work-gateway` 统一入口 9999，`ai-work-monitor` 5001）。单体形态使用 `docker compose -f docker-compose-boot.yml up`。
+- 启动前先起公共基础设施栈：`docker compose -f ~/docker-data/infra/docker-compose.yml up -d`（提供 MySQL 3306、Redis、Nacos 8848/9848 与控制台 18080）。
+- `docker compose build && docker compose up` 构建镜像并启动微服务栈（仅 7 个业务服务；`ai-work-gateway` 统一入口 9999，`ai-work-monitor` 5001）。单体形态使用 `docker compose -f docker-compose-boot.yml up`。
 
 前端（`ai-work-ui` 目录内）：
 

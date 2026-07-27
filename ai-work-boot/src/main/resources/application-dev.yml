@@ -1,7 +1,7 @@
 spring:
   data:
     redis:
-      host: ai-work-redis
+      host: ${REDIS_HOST:dev-redis}
       database: 5
       timeout: ${BAAS_REDIS_COMMAND_TIMEOUT:2s}
   # 数据库相关配置
@@ -11,7 +11,7 @@ spring:
       driver-class-name: com.mysql.cj.jdbc.Driver
       username: root
       password: root
-      url: jdbc:mysql://ai-work-mysql:3306/ai_work?characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&useJDBCCompliantTimezoneShift=true&useLegacyDatetimeCode=false&serverTimezone=GMT%2B8&allowMultiQueries=true&nullCatalogMeansCurrent=true&allowPublicKeyRetrieval=true
+      url: jdbc:mysql://${MYSQL_HOST:dev-mysql}:${MYSQL_PORT:3306}/ai_work?characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&useJDBCCompliantTimezoneShift=true&useLegacyDatetimeCode=false&serverTimezone=GMT%2B8&allowMultiQueries=true&nullCatalogMeansCurrent=true&allowPublicKeyRetrieval=true
 
 # 文件上传配置
 file:
@@ -40,9 +40,9 @@ swagger:
 # BaaS 项目库入口与开通账号(单体形态;主密钥经环境变量 BAAS_MASTER_KEYS 注入)
 baas:
   provisioner:
-    url: jdbc:mysql://ai-work-mysql:3306/mysql?characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${MYSQL_HOST:dev-mysql}:${MYSQL_PORT:3306}/mysql?characterEncoding=utf8&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true
     username: root
     password: root
   project-db:
-    host: ai-work-mysql
-    port: 3306
+    host: ${MYSQL_HOST:dev-mysql}
+    port: ${MYSQL_PORT:3306}

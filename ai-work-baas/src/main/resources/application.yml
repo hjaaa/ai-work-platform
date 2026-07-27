@@ -22,7 +22,7 @@ spring:
       username: @nacos.username@
       password: @nacos.password@
       discovery:
-        server-addr: ${NACOS_HOST:ai-work-register}:${NACOS_PORT:8848}
+        server-addr: ${NACOS_HOST:dev-nacos}:${NACOS_PORT:8848}
       config:
         server-addr: ${spring.cloud.nacos.discovery.server-addr}
     gateway.server.webflux:
