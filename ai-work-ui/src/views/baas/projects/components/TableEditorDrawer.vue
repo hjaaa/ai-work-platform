@@ -140,7 +140,7 @@
 import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { alterTable, createTable, getTable } from '@/api/baas/table'
-import type { TableAlterBody, TableSnapshot } from '@/api/baas/table'
+import type { TableAlterBody, TableCreateBody, TableSnapshot } from '@/api/baas/table'
 import { extractBackendMsg, isDdlLockBusy, newOperationId } from '@/api/baas/base'
 import {
   COLUMN_TYPES,
@@ -148,6 +148,7 @@ import {
   buildAlterBody,
   buildCreateBody,
   isAllowLossyRequired,
+  matchPriorSubmission,
   resetFieldsForType,
   rowFromSnapshot,
   withAllowLossy,
@@ -195,6 +196,7 @@ let loadSeq = 0
 
 function openCreate() {
   loadSeq++
+  lastSent = null
   mode.value = 'create'
   snapshot.value = null
   tableName.value = ''
@@ -208,6 +210,7 @@ async function openEdit(name: string) {
   const seq = ++loadSeq
   const res = await getTable(props.refId, name)
   if (seq !== loadSeq) return
+  lastSent = null
   mode.value = 'edit'
   snapshot.value = res.data
   tableName.value = res.data.tableName
@@ -230,19 +233,36 @@ function reportAlterResult(snapshot: TableSnapshot) {
   ElMessage.success('改表成功')
 }
 
+// ALTER 走到 DDL 引擎后失败会留下 FAILED 日志并把表置 CONFLICT。后端只在「同 operationId +
+// 同 requestHash」时进 RETRY_FAILED 分支续跑(validateBranchStatus 仅该分支放行
+// ALTERING/CONFLICT);每次提交换新 UUID 一律走 NEW_OPERATION,被「表当前状态不允许改表:
+// CONFLICT」挡死,本可恢复的操作就此搁浅。响应丢失的情形同理:同 ID 才能重放 SUCCESS 快照。
+// 因此记住上一次【实际发出】的提交体——内容未变的重试原样重发它(含同 operationId 与当时
+// 已确认的 allowLossy),内容一改就换新 ID:后端 requireMatchingFingerprint 要求同 ID 同内容,
+// 把旧 ID 复用到改动过的 body 上只会换来「同 operationId 的请求内容不一致」。
+// 组装期 operationId 留空,由 matchPriorSubmission 判定复用旧 ID 还是取新 ID。
+const OPERATION_ID_PENDING = ''
+let lastSent: TableCreateBody | TableAlterBody | null = null
+
+function withNewOperationId<T extends TableCreateBody | TableAlterBody>(body: T): T {
+  return { ...body, operationId: newOperationId() }
+}
+
 async function onSubmit() {
   errors.value = []
-  const operationId = newOperationId() // 每次提交意图一个 ID,allowLossy 重发复用
 
   if (mode.value === 'create') {
-    const result = buildCreateBody(tableName.value, tableComment.value, rows.value, operationId)
+    const result = buildCreateBody(tableName.value, tableComment.value, rows.value, OPERATION_ID_PENDING)
     if (!result.body) {
       errors.value = result.errors
       return
     }
+    const prior = matchPriorSubmission(lastSent as TableCreateBody | null, [result.body])
+    const body = prior ?? withNewOperationId(result.body)
     submitting.value = true
     try {
-      await createTable(props.refId, result.body)
+      lastSent = body
+      await createTable(props.refId, body)
       ElMessage.success('建表成功')
       open.value = false
       emit('saved')
@@ -255,9 +275,30 @@ async function onSubmit() {
   // ===== 改表 =====
   const snap = snapshot.value!
   // 先以 allowLossy=false 组装;是否升级为 true 由删列预确认决定
-  const first = buildAlterBody(snap, tableName.value, tableComment.value, rows.value, operationId, false)
+  const first = buildAlterBody(
+    snap,
+    tableName.value,
+    tableComment.value,
+    rows.value,
+    OPERATION_ID_PENDING,
+    false,
+  )
   if (!first.body) {
     errors.value = first.errors
+    return
+  }
+  // allowLossy 的差异属于上一发当时已经确认过的放行,不算内容改动:重试沿用该确认不再二次弹窗
+  const resend = matchPriorSubmission(lastSent as TableAlterBody | null, [
+    first.body,
+    withAllowLossy(first.body),
+  ])
+  if (resend !== null) {
+    submitting.value = true
+    try {
+      await sendAlter(snap, resend)
+    } finally {
+      submitting.value = false
+    }
     return
   }
   let body: TableAlterBody = first.body
@@ -285,6 +326,15 @@ async function onSubmit() {
 
   submitting.value = true
   try {
+    await sendAlter(snap, withNewOperationId(body))
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function sendAlter(snap: TableSnapshot, body: TableAlterBody) {
+  try {
+    lastSent = body
     reportAlterResult((await alterTable(props.refId, snap.tableName, body)).data)
     open.value = false
     emit('saved')
@@ -295,7 +345,8 @@ async function onSubmit() {
       if (isDdlLockBusy(e)) ElMessage.warning('操作冲突或锁忙,请刷新后重试')
       return
     }
-    // 后端裁决存在有损 modify:确认后同 operationId 重发
+    // 后端裁决存在有损 modify:确认后同 operationId 重发。该裁决在 validateInLock 阶段抛出,
+    // 早于 DDL 日志落库,同 ID 换内容不会撞上 requireMatchingFingerprint。
     try {
       await ElMessageBox.confirm(`${msg}。确认执行该有损变更?`, '有损操作确认', {
         confirmButtonText: '确认执行',
@@ -305,11 +356,11 @@ async function onSubmit() {
     } catch {
       return
     }
-    reportAlterResult((await alterTable(props.refId, snap.tableName, withAllowLossy(body))).data)
+    const lossy = withAllowLossy(body)
+    lastSent = lossy
+    reportAlterResult((await alterTable(props.refId, snap.tableName, lossy)).data)
     open.value = false
     emit('saved')
-  } finally {
-    submitting.value = false
   }
 }
 </script>
