@@ -141,12 +141,21 @@ docker exec -i dev-mysql mysql -uroot -proot < db/ai_work_baas.sql
 拆分前 MySQL / Nacos 的数据目录由本仓库编排，默认落在仓库内 `./docker-data/infra`（或自定义的 `AI_WORK_INFRA_ROOT` 指向处）；公共栈改用 `~/docker-data/infra`。**两处路径不同**，直接按上面的步骤启动会让 MySQL 以空数据目录重新初始化，原有的业务库、Nacos 配置与 BaaS 数据都读不到（旧目录本身不受影响，仍在原处）。已有数据的安装先迁移数据目录，再启动公共栈：
 
 ```bash
-# 1. 停掉旧栈，确保 MySQL 完全退出，避免拷到不一致的数据文件
-docker compose down                                  # 单体形态：-f docker-compose-boot.yml
-# 2. 把旧数据目录复制到公共栈下（${AI_WORK_INFRA_ROOT:-./docker-data/infra} 即旧路径）
+# 1. 停掉旧栈。注意：拉取本次改动后，ai-work-mysql / ai-work-redis / ai-work-register
+#    已不在 compose 文件里，docker compose down 不会停这几个容器（它们成了 orphan），
+#    必须显式停止，否则第 3 步会热拷贝正在写入的 InnoDB 数据文件，拷出损坏的副本
+docker compose down                                   # 单体形态：-f docker-compose-boot.yml
+docker stop ai-work-mysql ai-work-redis ai-work-register 2>/dev/null
+
+# 2. 确认 MySQL 已完全退出，再往下走（下面这条应当无输出）
+docker ps --filter name=ai-work-mysql --format '{{.Names}} {{.Status}}'
+
+# 3. 把旧数据目录复制到公共栈下。OLD_INFRA 是旧数据根目录：默认在仓库内，
+#    若此前在 .env 里设过 AI_WORK_INFRA_ROOT，改成它的实际值
+OLD_INFRA=./docker-data/infra
 mkdir -p ~/docker-data/infra
-cp -a ./docker-data/infra/mysql ~/docker-data/infra/
-cp -a ./docker-data/infra/nacos ~/docker-data/infra/  # Nacos 的 raft 数据，配置数据本就在 MySQL 里
+cp -a "$OLD_INFRA/mysql" ~/docker-data/infra/
+cp -a "$OLD_INFRA/nacos" ~/docker-data/infra/         # Nacos 的 raft 数据，配置数据本就在 MySQL 里
 ```
 
 迁移后跳过上面的建库脚本导入；确认公共栈起来且数据正常后，旧目录可自行删除。
