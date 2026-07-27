@@ -117,7 +117,7 @@ import {
   rotateJwtKey,
 } from '@/api/baas/project'
 import type { ProjectStatus, ProjectVO, ReconcileReport } from '@/api/baas/types'
-import { newOperationId } from '@/api/baas/base'
+import { createSubmissionTracker } from '@/api/baas/base'
 import { allowAllFromVO, corsPayload } from '../cors'
 import { PROJECT_STATUS_MAP } from '../statusMaps'
 
@@ -196,6 +196,7 @@ async function confirmByRef(title: string, warning: string): Promise<boolean> {
 const reconciling = ref(false)
 const report = ref<ReconcileReport | null>(null)
 const reportOpen = ref(false)
+const reconcileSubmissions = createSubmissionTracker<{ operationId: string }>()
 
 const reportSections = computed(() => {
   const r = report.value
@@ -222,9 +223,17 @@ async function onReconcile() {
   } catch {
     return
   }
+  // 对账同样经 DdlExecutionEngine(ReconcileService:131),结果快照与 FAILED 续跑都按
+  // operationId 命中。响应丢失后换新 ID 重试,等于另起一次对账:上一次已把差异修正掉,新报告
+  // 就是空的,操作者据此以为从来没有差异,而真正修了什么再也看不到;上一次若是 FAILED,原
+  // operation 也没人续跑。对账无请求参数,两次点击天然是同一意图,复用 ID 即重试语义。
+  reconcileSubmissions.scopeTo(props.refId)
+  const { body } = reconcileSubmissions.resolve([{ operationId: '' }])
   reconciling.value = true
   try {
-    const res = await reconcileProject(props.refId, newOperationId())
+    reconcileSubmissions.markSent(body)
+    const res = await reconcileProject(props.refId, body.operationId)
+    reconcileSubmissions.markSucceeded()
     report.value = res.data
     reportOpen.value = true
   } finally {
