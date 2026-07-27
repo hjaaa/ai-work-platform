@@ -32,10 +32,13 @@ MySQL、Redis、Nacos 由跨项目共享的公共基础设施栈提供（`~/dock
 **第 1 步：创建公共网络（一次性）**
 
 ```bash
-docker network create --driver bridge --subnet 172.28.0.0/16 dev-infra-net
+docker network create --driver bridge \
+  --subnet 172.28.0.0/16 --ip-range 172.28.1.0/24 dev-infra-net
 ```
 
 > 网段必须是 `172.28.0.0/16`：网关钉死在 `172.28.0.10`，BaaS 的信任代理白名单依赖该地址。
+>
+> `--ip-range` 把动态分配池圈到 `172.28.1.0/24`，让 `172.28.0.10` 不进入动态池。只给 `--subnet` 时 Docker 从 `172.28.0.2` 起顺序分配，公共栈 3 个容器加业务栈 6 个动态容器正好顶到 `.10`；一旦被抢占，网关启动会直接失败（`Address already in use`），而改网关 IP 又会让 `BAAS_TRUSTED_PROXIES` 失效。
 
 **第 2 步：准备目录与 Nacos 配置**
 
@@ -143,12 +146,16 @@ docker exec -i dev-mysql mysql -uroot -proot < db/ai_work_baas.sql
 ```bash
 # 1. 停掉旧栈。注意：拉取本次改动后，ai-work-mysql / ai-work-redis / ai-work-register
 #    已不在 compose 文件里，docker compose down 不会停这几个容器（它们成了 orphan），
-#    必须显式停止，否则第 3 步会热拷贝正在写入的 InnoDB 数据文件，拷出损坏的副本
+#    必须显式停止，否则第 3 步会热拷贝正在写入的 InnoDB 数据文件，拷出损坏的副本。
+#    stop 之后还要 rm：这些容器带 restart: always，手动 stop 只压制到守护进程下次重启，
+#    之后会被自动拉起，与公共栈抢 3306 / 8848 / 9848 / 18080 端口。
+#    数据在宿主机 bind mount 目录里，删容器不会动到数据。
 docker compose down                                   # 单体形态：-f docker-compose-boot.yml
 docker stop ai-work-mysql ai-work-redis ai-work-register 2>/dev/null
+docker rm ai-work-mysql ai-work-redis ai-work-register 2>/dev/null
 
-# 2. 确认 MySQL 已完全退出，再往下走（下面这条应当无输出）
-docker ps --filter name=ai-work-mysql --format '{{.Names}} {{.Status}}'
+# 2. 确认旧 MySQL 容器已不存在，再往下走（下面这条应当无输出）
+docker ps -a --filter name=ai-work-mysql --format '{{.Names}} {{.Status}}'
 
 # 3. 把旧数据目录复制到公共栈下。OLD_INFRA 是旧数据根目录：默认在仓库内，
 #    若此前在 .env 里设过 AI_WORK_INFRA_ROOT，改成它的实际值
@@ -159,6 +166,8 @@ cp -a "$OLD_INFRA/nacos" ~/docker-data/infra/         # Nacos 的 raft 数据，
 ```
 
 迁移后跳过上面的建库脚本导入；确认公共栈起来且数据正常后，旧目录可自行删除。
+
+> 若 `dev-infra-net` 是早前用不带 `--ip-range` 的命令建的，建议重建一次：停掉所有接入该网络的容器 → `docker network rm dev-infra-net` → 按第 1 步的新命令重建。公共栈三个容器的 IP 会随之变化，但只有网关的 `172.28.0.10` 被 `BAAS_TRUSTED_PROXIES` 依赖，不受影响。
 
 > 旧数据里 Nacos 的 `application-dev.yml` 把 Redis 地址写死为 `ai-work-redis`，该容器已不存在。迁移后需在 Nacos 控制台把所有含 `ai-work-redis` 的配置改为 `${REDIS_HOST:dev-redis}` 并发布（用控制台而非直接改库，否则不会推送给客户端），可用下面的查询确认已改干净：
 >

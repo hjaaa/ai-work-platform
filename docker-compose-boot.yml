@@ -6,7 +6,10 @@
 # 前置依赖：MySQL / Redis 已拆分为跨项目共享的公共基础设施栈，不再由本文件编排。
 # 启动本栈前需先准备好：
 #   1) 公共网络（一次性创建）：
-#      docker network create --driver bridge --subnet 172.28.0.0/16 dev-infra-net
+#      docker network create --driver bridge \
+#        --subnet 172.28.0.0/16 --ip-range 172.28.1.0/24 dev-infra-net
+#      --ip-range 把动态分配池圈在 172.28.1.0/24，避免微服务形态下网关的
+#      172.28.0.10 被别的容器动态占走。
 #   2) 公共基础设施栈已启动（提供 dev-mysql / dev-redis）：
 #      docker compose -f ~/docker-data/infra/docker-compose.yml up -d
 #
