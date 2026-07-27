@@ -126,7 +126,7 @@ networks:
 docker compose -f ~/docker-data/infra/docker-compose.yml up -d
 ```
 
-**首次启动后导入建库脚本**（数据目录为空时 MySQL 才执行初始化，本仓库的脚本需手工导入）：
+**全新环境首次启动后导入建库脚本**（数据目录为空时 MySQL 才执行初始化，本仓库的脚本需手工导入）：
 
 ```bash
 docker exec -i dev-mysql mysql -uroot -proot < db/ai_work.sql
@@ -135,6 +135,28 @@ docker exec -i dev-mysql mysql -uroot -proot < db/ai_work_baas.sql
 ```
 
 > Nacos 控制台 `http://localhost:18080`，默认账号 `nacos / nacos`；其配置数据存在 MySQL 的 `ai_work_config` 库，不在容器内。
+
+#### 从旧版本升级（已有数据的安装）
+
+拆分前 MySQL / Nacos 的数据目录由本仓库编排，默认落在仓库内 `./docker-data/infra`（或自定义的 `AI_WORK_INFRA_ROOT` 指向处）；公共栈改用 `~/docker-data/infra`。**两处路径不同**，直接按上面的步骤启动会让 MySQL 以空数据目录重新初始化，原有的业务库、Nacos 配置与 BaaS 数据都读不到（旧目录本身不受影响，仍在原处）。已有数据的安装先迁移数据目录，再启动公共栈：
+
+```bash
+# 1. 停掉旧栈，确保 MySQL 完全退出，避免拷到不一致的数据文件
+docker compose down                                  # 单体形态：-f docker-compose-boot.yml
+# 2. 把旧数据目录复制到公共栈下（${AI_WORK_INFRA_ROOT:-./docker-data/infra} 即旧路径）
+mkdir -p ~/docker-data/infra
+cp -a ./docker-data/infra/mysql ~/docker-data/infra/
+cp -a ./docker-data/infra/nacos ~/docker-data/infra/  # Nacos 的 raft 数据，配置数据本就在 MySQL 里
+```
+
+迁移后跳过上面的建库脚本导入；确认公共栈起来且数据正常后，旧目录可自行删除。
+
+> 旧数据里 Nacos 的 `application-dev.yml` 把 Redis 地址写死为 `ai-work-redis`，该容器已不存在。迁移后需在 Nacos 控制台把所有含 `ai-work-redis` 的配置改为 `${REDIS_HOST:dev-redis}` 并发布（用控制台而非直接改库，否则不会推送给客户端），可用下面的查询确认已改干净：
+>
+> ```bash
+> docker exec dev-mysql mysql -uroot -proot -N -e \
+>   "SELECT data_id FROM ai_work_config.config_info WHERE content LIKE '%ai-work-redis%';"
+> ```
 
 ### 微服务模式
 
