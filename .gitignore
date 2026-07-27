@@ -73,5 +73,9 @@ docs/plans/
 aitest
 .vectorex
 
-### docker 数据持久化默认落点(AI_WORK_INFRA_ROOT / AI_WORK_LOG_ROOT 未配置时)
+### docker 数据持久化默认落点(AI_WORK_LOG_ROOT 未配置时)
 docker-data/
+
+### 本机环境变量(含 BaaS 主密钥等敏感值,禁止入库;模板见 .env.example)
+### 仅匹配根目录,不影响 ai-work-ui/.env.development 等已入库的前端环境文件
+/.env

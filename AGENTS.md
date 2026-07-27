@@ -8,6 +8,11 @@
 
 - 后端：JDK 17 + Maven；前端：Node `^22.22.2 || ^24.15.0 || >=26.0.0`（见 `ai-work-ui/package.json` engines）。
 - 本地运行依赖 MySQL、Redis 与 Nacos，三者由**跨项目共享的公共基础设施栈**提供（`~/docker-data/infra/docker-compose.yml`，容器名 `dev-mysql` / `dev-redis` / `dev-nacos`），不再随本仓库编排、也不纳入本仓库版本控制。首次使用需一次性创建公共网络：`docker network create --driver bridge --subnet 172.28.0.0/16 --ip-range 172.28.1.0/24 dev-infra-net`（网段固定，网关固定 IP 与 BaaS 信任代理白名单依赖该网段；`--ip-range` 把动态分配池与网关的 `172.28.0.10` 隔开）；公共栈的完整搭建步骤（compose 定义、Nacos 配置准备）见 [README.md](README.md) 的「公共基础设施栈（前置）」一节。数据库初始化脚本：`db/ai_work.sql`（业务库）、`db/ai_work_config.sql`（Nacos 配置中心库）。
+- 启动业务栈前须准备根目录 `.env`：`cp .env.example .env` 后填写。compose 会自动读取该文件，各变量用途与约束见文件内注释。`.env` 已被 gitignore，**严禁提交真实密钥**。
+  - `BAAS_MASTER_KEYS` 为必填项，缺失时 BaaS 模块 fail-fast 拒绝启动，`docker compose config` 亦会直接报错。
+  - **BaaS 主密钥只能来自环境变量或部署 Secret，不得入库、不得放入 Nacos 配置中心、不得提交 Git**（spec §12.1）。Nacos 配置数据与 BaaS 加密数据同存于一个 MySQL 实例，主密钥若置于其中则加密形同虚设。
+  - `AI_WORK_LOG_ROOT` 未配置时**不会报错**，各服务日志静默落到仓库内 `./docker-data/logs`，会被 `git clean -xfd` 一并清除。
+  - 变量取值一律使用纯字母数字：`#` 会被 dotenv 当作行内注释截断，曾导致 AES 密钥被截短、登录必然失败且难以定位。
 
 ## 构建、测试与开发命令
 
