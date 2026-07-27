@@ -88,6 +88,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { createKey, listKeys, revokeKey } from '@/api/baas/apiKey'
 import type { ApiKeyVO, CreatedKeyVO, KeyType, ProjectStatus } from '@/api/baas/types'
 import { copyText } from '../clipboard'
+import { useLoginNavigationHold } from '@/utils/plaintextGuard'
 
 const props = defineProps<{ refId: string; projectStatus: ProjectStatus }>()
 
@@ -102,6 +103,8 @@ const createType = ref<KeyType>('PUBLISHABLE')
 const creating = ref(false)
 const plaintextOpen = ref(false)
 const created = ref<CreatedKeyVO | null>(null)
+// 明文在屏期间挂起 401/424 的登录跳转:在途请求的迟到 401 同样会销毁这枚 key
+useLoginNavigationHold(plaintextOpen)
 
 async function loadKeys() {
   loading.value = true

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError } from 'axios'
 import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
-import request from '../request'
+import request, { holdLoginNavigation, loginNavigationHeld } from '../request'
 import type { R } from '../request'
 import { setTokens, getAccessToken } from '../auth'
 
@@ -101,6 +101,49 @@ describe('响应拦截器', () => {
     await expect(request.get('/demo', { adapter: httpErrorAdapter(424) })).rejects.toThrow()
     expect(getAccessToken()).toBeNull()
     expect(ElMessage.error).not.toHaveBeenCalled()
+  })
+
+  // 一次性明文(建项目/建 Key 的密钥)在屏时的 401：跳转必须挂起，否则页面被卸载，
+  // 后端不再回显的明文永久丢失。跳转本身同样无法在 jsdom 断言，改测挂起状态机。
+  it('明文在屏时 401 只清 token 并挂起跳转,提示操作者先保存', async () => {
+    setTokens('token-1', 'refresh-1')
+    const release = holdLoginNavigation()
+    try {
+      await expect(request.get('/demo', { adapter: httpErrorAdapter(401) })).rejects.toThrow()
+      expect(getAccessToken()).toBeNull()
+      expect(loginNavigationHeld()).toEqual({ holds: 1, pending: true })
+      expect(ElMessage.error).toHaveBeenCalledWith(
+        '登录态已失效，请先保存屏幕上的密钥，关闭后将返回登录页',
+      )
+    } finally {
+      release()
+    }
+    // 释放后挂起标记消费掉(跳转已执行)
+    expect(loginNavigationHeld()).toEqual({ holds: 0, pending: false })
+  })
+
+  it('挂起期间无 401 时,释放不留下待跳转标记', () => {
+    holdLoginNavigation()()
+    expect(loginNavigationHeld()).toEqual({ holds: 0, pending: false })
+  })
+
+  it('嵌套挂起需全部释放后才跳转', async () => {
+    setTokens('token-1', 'refresh-1')
+    const outer = holdLoginNavigation()
+    const inner = holdLoginNavigation()
+    await expect(request.get('/demo', { adapter: httpErrorAdapter(424) })).rejects.toThrow()
+    expect(loginNavigationHeld()).toEqual({ holds: 2, pending: true })
+    inner()
+    expect(loginNavigationHeld()).toEqual({ holds: 1, pending: true })
+    outer()
+    expect(loginNavigationHeld()).toEqual({ holds: 0, pending: false })
+  })
+
+  it('释放函数重复调用不重复减计数', () => {
+    const release = holdLoginNavigation()
+    release()
+    release()
+    expect(loginNavigationHeld().holds).toBe(0)
   })
 
   it('其他 HTTP 错误优先展示后端返回的 msg', async () => {

@@ -95,6 +95,7 @@ import { createProject, listProjects } from '@/api/baas/project'
 import type { CreatedProjectVO, ProjectStatus, ProjectVO } from '@/api/baas/types'
 import { PROJECT_STATUS_MAP } from './statusMaps'
 import { copyText } from './clipboard'
+import { useLoginNavigationHold } from '@/utils/plaintextGuard'
 
 const router = useRouter()
 const projects = ref<ProjectVO[]>([])
@@ -129,6 +130,8 @@ const createName = ref('')
 const creating = ref(false)
 const keysOpen = ref(false)
 const createdKeys = ref<CreatedProjectVO | null>(null)
+// 明文在屏期间挂起 401/424 的登录跳转:在途请求的迟到 401 同样会销毁这两枚密钥
+useLoginNavigationHold(keysOpen)
 
 function openCreate() {
   createName.value = ''
