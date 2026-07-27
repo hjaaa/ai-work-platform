@@ -76,7 +76,7 @@
         <el-button link type="primary" @click="copyText(created.plaintext)">复制</el-button>
       </div>
       <template #footer>
-        <el-button type="primary" @click="closePlaintext">我已保存</el-button>
+        <el-button type="primary" @click="plaintextOpen = false">我已保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -120,7 +120,8 @@ async function onCreate() {
     createOpen.value = false
     created.value = res.data
     plaintextOpen.value = true
-    await loadKeys()
+    // 与建项目同一约束:明文在屏期间不发后台请求,避免 401/424 被拦截器硬跳登录页时
+    // 连同这枚仅此一次的明文一起销毁。列表刷新推迟到弹窗关闭之后。
   } finally {
     creating.value = false
   }
@@ -129,6 +130,7 @@ async function onCreate() {
 function closePlaintext() {
   plaintextOpen.value = false
   created.value = null // 明文只存活于弹窗生命周期
+  loadKeys()
 }
 
 async function onRevoke(row: ApiKeyVO) {

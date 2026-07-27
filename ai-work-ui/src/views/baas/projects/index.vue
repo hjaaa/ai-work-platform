@@ -81,7 +81,7 @@
         </div>
       </div>
       <template #footer>
-        <el-button type="primary" @click="closeKeys">我已保存</el-button>
+        <el-button type="primary" @click="keysOpen = false">我已保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -147,7 +147,10 @@ async function onCreate() {
     createOpen.value = false
     createdKeys.value = res.data
     keysOpen.value = true
-    await loadProjects()
+    // 明文在屏期间不发任何后台请求:request.ts 拦截器遇 401/424 会 clearTokens 并
+    // window.location 硬跳登录页,把这两枚仅此一次的明文 key 连同页面一起销毁。
+    // 建项目耗时较长,返回时 access token 可能刚过期,紧随其后的列表刷新正处在该窗口内。
+    // 列表刷新推迟到操作者确认已保存、弹窗关闭之后。
   } finally {
     creating.value = false
   }
@@ -156,6 +159,7 @@ async function onCreate() {
 function closeKeys() {
   keysOpen.value = false
   createdKeys.value = null // 明文只存活于弹窗生命周期
+  loadProjects()
 }
 
 onMounted(loadProjects)
