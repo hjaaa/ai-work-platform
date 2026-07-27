@@ -68,7 +68,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { dropTable, listTables } from '@/api/baas/table'
 import type { TableSummary } from '@/api/baas/table'
 import type { ProjectStatus, TableStatus } from '@/api/baas/types'
-import { newOperationId } from '@/api/baas/base'
+import { createSubmissionTracker } from '@/api/baas/base'
 import { TABLE_STATUS_MAP } from '../statusMaps'
 import TableEditorDrawer from './TableEditorDrawer.vue'
 import AclConfigDialog from './AclConfigDialog.vue'
@@ -105,6 +105,7 @@ const aclRef = useTemplateRef<InstanceType<typeof AclConfigDialog>>('aclRef')
 
 const tables = ref<TableSummary[]>([])
 const loading = ref(false)
+const dropSubmissions = createSubmissionTracker<{ operationId: string; tableName: string }>()
 
 async function loadTables() {
   loading.value = true
@@ -131,7 +132,15 @@ async function onDrop(row: TableSummary) {
   } catch {
     return
   }
-  const res = await dropTable(props.refId, row.tableName, newOperationId())
+  // 删表响应丢失(超时/断链)时后端可能已提交 tombstone。DropTableWork.validateInLock 的
+  // droppable 把「NEW_OPERATION + DELETED」排除在外,换新 operationId 重试必撞「表当前状态
+  // 不允许删除: DELETED」;同 ID 才能走快速路径重放删除快照(perform 对已 DELETED 的表幂等
+  // 返回原 deleteAfter)。生命周期规则同建表/改表/ACL,见 createSubmissionTracker。
+  dropSubmissions.scopeTo(row.tableName)
+  const { body } = dropSubmissions.resolve([{ operationId: '', tableName: row.tableName }])
+  dropSubmissions.markSent(body)
+  const res = await dropTable(props.refId, row.tableName, body.operationId)
+  dropSubmissions.markSucceeded()
   ElMessage.success(`表已删除,物理清理时间:${res.data.deleteAfter}`)
   await loadTables()
 }
