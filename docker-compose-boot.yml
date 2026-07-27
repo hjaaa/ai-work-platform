@@ -3,35 +3,19 @@
 # 2. 启动服务: docker compose -f docker-compose-boot.yml up -d
 # 3. 静静等待服务启动
 #
-# 数据持久化：容器默认无卷，删除/重建即丢数据。以下两个环境变量控制宿主机落点，
-# 不配置时落到仓库内 ./docker-data（已在 .gitignore 忽略）：
-#   AI_WORK_INFRA_ROOT  基础设施数据（MySQL 数据目录）
-#   AI_WORK_LOG_ROOT    应用日志（logback 输出的 debug.log/error.log）
+# 前置依赖：MySQL / Redis 已拆分为跨项目共享的公共基础设施栈，不再由本文件编排。
+# 启动本栈前需先准备好：
+#   1) 公共网络（一次性创建）：
+#      docker network create --driver bridge --subnet 172.28.0.0/16 dev-infra-net
+#   2) 公共基础设施栈已启动（提供 dev-mysql / dev-redis）：
+#      docker compose -f ~/docker-data/infra/docker-compose.yml up -d
+#
+# 数据持久化：以下环境变量控制应用日志（logback 输出的 debug.log/error.log）
+# 在宿主机的落点，不配置时落到仓库内 ./docker-data（已在 .gitignore 忽略）：
+#   AI_WORK_LOG_ROOT    应用日志
 # 建议指向仓库外目录，避免 git clean -xfd 连同数据一并删除。
+# 基础设施数据（MySQL 数据目录）已移交公共栈管理。
 services:
-  ai-work-mysql:
-    build:
-      context: ./db
-    environment:
-      MYSQL_ROOT_HOST: "%"
-      MYSQL_ROOT_PASSWORD: root
-    restart: always
-    container_name: ai-work-mysql
-    image: ai-work-mysql
-    command: --lower_case_table_names=1
-    volumes:
-      # 数据目录为空时才会执行镜像内的种子 SQL，已有数据的目录直接复用
-      - ${AI_WORK_INFRA_ROOT:-./docker-data/infra}/mysql/data:/var/lib/mysql
-    networks:
-      - spring_cloud_default
-
-  ai-work-redis:
-    container_name: ai-work-redis
-    image: registry.cn-hangzhou.aliyuncs.com/dockerhub_mirror/redis
-    restart: always
-    networks:
-      - spring_cloud_default
-
   # 单体的时候注意，服务名称命名为 ai-work-gateway 对应前端nginx 配置
   ai-work-gateway:
     build:
@@ -44,12 +28,13 @@ services:
     environment:
       BAAS_MASTER_KEYS: ${BAAS_MASTER_KEYS:?BAAS_MASTER_KEYS 未配置}
       BAAS_ACTIVE_KEY_ID: ${BAAS_ACTIVE_KEY_ID:-k1}
+      MYSQL_HOST: dev-mysql
+      REDIS_HOST: dev-redis
     volumes:
       - ${AI_WORK_LOG_ROOT:-./docker-data/logs}/boot:/ai-work-boot/logs
     networks:
-      - spring_cloud_default
+      - dev-infra-net
 
 networks:
-  spring_cloud_default:
-    name: spring_cloud_default
-    driver: bridge
+  dev-infra-net:
+    external: true
