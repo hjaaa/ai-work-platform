@@ -64,7 +64,13 @@ application-preview.yml
 node_modules
 
 ### claude code ###
-.claude
+# 仅分发保护分支 hook 相关配置，其余 Claude Code 本地文件
+# （settings.local.json、scheduled_tasks.lock、worktrees/ 等）一律不入库
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/hooks/*
+!.claude/hooks/check-protected-branch.sh
 .superpowers/
 docs
 docs/plans/
