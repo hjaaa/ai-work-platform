@@ -52,7 +52,7 @@
 ## 本仓库协作约定
 
 - 设计文档与实施计划的入库位置是 `context/specs/` 与 `context/plans/`。**`docs/` 已被 gitignore**，写到 `docs/plans/`、`docs/superpowers/` 下的产物不会进版本库。
-- `.claude/` 已被 gitignore，其中的 Claude Code 本地配置不随仓库分发。若本机在 `.claude/settings.json` 注册了保护分支 PreToolUse hook（在 `develop` / `main` / `master` 上对 Edit / Write / NotebookEdit 一律 deny），遇到拒绝应切 feature 分支再改，**不要改用 shell 命令绕过**；未配置该 hook 的环境同样禁止直接在保护分支上改动（见下节分支模型）。
+- `.claude/settings.json` 与 `.claude/hooks/check-protected-branch.sh` 随仓库分发，注册了 PreToolUse hook：在 `develop` / `main` / `master` 分支上，对 Edit / Write / NotebookEdit 一律 deny。这是刻意的护栏，遇到拒绝应切 feature 分支再改，**不要改用 shell 命令绕过**。脚本依赖 `jq`，本机未安装时 hook 会静默放行（不阻塞开发，但护栏失效）。`.claude/` 下的其他文件（`settings.local.json`、`worktrees/` 等）属本机私有，仍被 gitignore。
 
 ## 提交与 Pull Request
 
