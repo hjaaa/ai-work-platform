@@ -9,7 +9,7 @@
 
 - AI Work Platform 是基于 Spring Cloud、Spring Boot、OAuth2 的 RBAC 企业级快速开发平台，同时支持微服务架构和单体架构。
 - 认证中心基于 Spring Authorization Server 落地生产级 OAuth2 实践，支持授权码、密码、刷新令牌等常见登录与授权场景。
-- 当前版本保留认证、网关、用户权限、监控、代码生成和定时任务等核心能力，移除了商业版中的多租户、数据权限、动态路由、流程、支付、公众号、报表和移动端服务等扩展模块。
+- 当前版本保留认证、网关、用户权限、BaaS、监控、代码生成和定时任务等核心能力，移除了商业版中的多租户、数据权限、动态路由、流程、支付、公众号、报表和移动端服务等扩展模块。
 - 提供 Docker Compose 本地编排，支持快速启动 MySQL、Redis、Nacos 和业务服务。
 
 ## 使用文档
@@ -227,6 +227,7 @@ ai-work-platform
 ├── ai-work-upms -- 通用用户权限管理模块
 │   ├── ai-work-upms-api -- 通用用户权限管理公共 API
 │   └── ai-work-upms-biz -- 通用用户权限业务服务 [4000]
+├── ai-work-baas -- BaaS 后端即服务 [4010]
 ├── ai-work-common -- 系统公共模块
 │   ├── ai-work-common-bom -- 全局依赖版本管理
 │   ├── ai-work-common-core -- 公共工具类核心包
