@@ -30,7 +30,8 @@ services:
       REDIS_HOST: dev-redis
       NACOS_HOST: dev-nacos
     ports:
-      - 9999:9999
+      # 宿主机侧映射为 19999，避开本机其他项目常占用的 9999（xxl-job 执行器默认端口）；容器内仍为 9999
+      - 19999:9999
     volumes:
       - ${AI_WORK_LOG_ROOT:-./docker-data/logs}/gateway:/ai-work-gateway/logs
     networks:
@@ -92,7 +93,8 @@ services:
       REDIS_HOST: dev-redis
       NACOS_HOST: dev-nacos
     ports:
-      - 5001:5001
+      # 宿主机侧映射为 15001，避开本机其他项目占用的 5001；容器内仍为 5001
+      - 15001:5001
     volumes:
       - ${AI_WORK_LOG_ROOT:-./docker-data/logs}/monitor:/ai-work-monitor/logs
     networks:

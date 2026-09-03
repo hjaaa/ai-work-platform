@@ -17,7 +17,7 @@ AI Work Platform 前端项目，基于 Vue 3 + TypeScript + Vite，参考 [pig-u
 
 ```bash
 npm install
-npm run dev      # 开发（http://localhost:5173，/api 代理到网关 :9999）
+npm run dev      # 开发（http://localhost:5173，/api 代理到网关 :19999，即 compose 宿主机映射端口）
 npm run build    # 生产构建
 npm run lint     # 代码检查
 ```

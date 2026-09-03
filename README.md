@@ -185,7 +185,7 @@ mvn clean install -T 4 -Pcloud
 docker compose build && docker compose up
 ```
 
-服务启动后，默认通过网关端口 `9999` 访问后端接口，Nacos 服务端端口为 `8848`、控制台为 `18080`。
+服务启动后，默认通过宿主机映射的网关端口 `19999` 访问后端接口（容器内为 `9999`），Nacos 服务端端口为 `8848`、控制台为 `18080`。
 
 ### 单体模式
 
@@ -196,7 +196,7 @@ mvn clean install -T 4 -Pboot
 docker compose -f docker-compose-boot.yml build && docker compose -f docker-compose-boot.yml up
 ```
 
-单体服务默认监听 `9999` 端口。
+单体服务容器内监听 `9999` 端口，宿主机映射为 `19999`。
 
 ## 核心依赖
 
@@ -222,7 +222,7 @@ ai-work-ui -- 前端项目（独立仓库）
 
 ai-work-platform
 ├── ai-work-register -- Nacos Server [8848/9848/18080]（已由公共基础设施栈的 dev-nacos 提供，本模块保留作回退用）
-├── ai-work-gateway -- Spring Cloud Gateway 网关 [9999]
+├── ai-work-gateway -- Spring Cloud Gateway 网关 [9999，宿主机映射 19999]
 ├── ai-work-auth -- 授权服务 [3000]
 ├── ai-work-upms -- 通用用户权限管理模块
 │   ├── ai-work-upms-api -- 通用用户权限管理公共 API
@@ -242,10 +242,10 @@ ai-work-platform
 │   ├── ai-work-common-excel -- Excel 导入导出封装
 │   └── ai-work-common-xss -- XSS 安全封装
 ├── ai-work-visual -- 可视化支撑服务
-│   ├── ai-work-monitor -- 服务监控 [5001]
+│   ├── ai-work-monitor -- 服务监控 [5001，宿主机映射 15001]
 │   ├── ai-work-codegen -- 图形化代码生成 [5002]
 │   └── ai-work-quartz -- 定时任务管理台 [5007]
-└── ai-work-boot -- 单体模式启动器 [9999]，通过 `-Pboot` 启用
+└── ai-work-boot -- 单体模式启动器 [9999，宿主机映射 19999]，通过 `-Pboot` 启用
 ```
 
 ## 配置说明

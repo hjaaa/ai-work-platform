@@ -19,9 +19,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // /api 前缀转发到后端网关，转发时去掉前缀：/api/admin/xx → :9999/admin/xx
+      // /api 前缀转发到后端网关，转发时去掉前缀：/api/admin/xx → :19999/admin/xx（compose 宿主机映射端口，容器内为 9999）
       '/api': {
-        target: 'http://localhost:9999',
+        target: 'http://localhost:19999',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },

@@ -27,7 +27,7 @@
 - `mvn spring-javaformat:apply` 按 Spring 规则格式化 Java 代码（pom 已内置 `spring-javaformat-maven-plugin`）。
 - 改动任意 `pom.xml` 后先在本地跑 CI 同款校验：`python3 scripts/check-pom-duplicate-properties.py` 与 `mvn -B -ntp validate`（Enforcer 规则 `banDuplicatePomDependencyVersions` 禁止同一 pom 内重复声明依赖版本），否则会被 [.github/workflows/pom-checks.yml](.github/workflows/pom-checks.yml) 拦下。
 - 启动前先起公共基础设施栈：`docker compose -f ~/docker-data/infra/docker-compose.yml up -d`（提供 MySQL 3306、Redis、Nacos 8848/9848 与控制台 18080）。
-- `docker compose build && docker compose up` 构建镜像并启动微服务栈（仅 7 个业务服务；`ai-work-gateway` 统一入口 9999，`ai-work-monitor` 5001）。单体形态使用 `docker compose -f docker-compose-boot.yml up`。
+- `docker compose build && docker compose up` 构建镜像并启动微服务栈（仅 7 个业务服务；`ai-work-gateway` 统一入口宿主机 19999，`ai-work-monitor` 宿主机 15001；容器内端口仍为 9999 / 5001，宿主机侧改映射是为避开本机其他项目占用的同名端口）。单体形态使用 `docker compose -f docker-compose-boot.yml up`。
 
 前端（`ai-work-ui` 目录内）：
 
