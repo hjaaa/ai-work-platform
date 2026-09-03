@@ -23,7 +23,6 @@ services:
   ai-work-gateway:
     build:
       context: ./ai-work-gateway
-    restart: always
     container_name: ai-work-gateway
     image: ai-work-gateway
     environment:
@@ -41,7 +40,6 @@ services:
   ai-work-auth:
     build:
       context: ./ai-work-auth
-    restart: always
     container_name: ai-work-auth
     image: ai-work-auth
     environment:
@@ -56,7 +54,6 @@ services:
   ai-work-upms:
     build:
       context: ./ai-work-upms/ai-work-upms-biz
-    restart: always
     container_name: ai-work-upms
     image: ai-work-upms
     environment:
@@ -71,7 +68,6 @@ services:
   ai-work-baas:
     build:
       context: ./ai-work-baas
-    restart: always
     container_name: ai-work-baas
     image: ai-work-baas
     environment:
@@ -89,7 +85,6 @@ services:
   ai-work-monitor:
     build:
       context: ./ai-work-visual/ai-work-monitor
-    restart: always
     image: ai-work-monitor
     container_name: ai-work-monitor
     environment:
@@ -106,7 +101,6 @@ services:
   ai-work-quartz:
     build:
       context: ./ai-work-visual/ai-work-quartz
-    restart: always
     image: ai-work-quartz
     container_name: ai-work-quartz
     environment:
@@ -121,7 +115,6 @@ services:
   ai-work-codegen:
     build:
       context: ./ai-work-visual/ai-work-codegen
-    restart: always
     image: ai-work-codegen
     container_name: ai-work-codegen
     environment:

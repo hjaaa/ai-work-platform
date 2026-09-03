@@ -23,7 +23,6 @@ services:
   ai-work-gateway:
     build:
       context: ./ai-work-boot
-    restart: always
     container_name: ai-work-boot
     image: ai-work-boot
     ports:
