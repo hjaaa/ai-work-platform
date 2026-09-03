@@ -22,6 +22,10 @@ npm run build    # 生产构建
 npm run lint     # 代码检查
 ```
 
+## Docker 部署
+
+仓库根目录的 `docker-compose.yml` / `docker-compose-boot.yml` 已包含 `ai-work-ui` 服务。与后端镜像一样，`Dockerfile` 只把宿主机构建好的 `dist/` 与 `nginx.conf` 打进 nginx 镜像，不在镜像内执行 npm 构建，因此 `docker compose build` 前先执行 `npm ci && npm run build`。`nginx.conf` 负责 history 路由回退并把 `/api` 反代到容器网络内的 `ai-work-gateway:9999`，宿主机访问 `http://localhost:18000`。单体形态构建产物时设置 `VITE_AUTH_PATH=/admin VITE_BAAS_PATH=/admin`。
+
 ## 目录约定
 
 ```

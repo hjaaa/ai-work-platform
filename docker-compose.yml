@@ -128,6 +128,19 @@ services:
     networks:
       - dev-infra-net
 
+  ai-work-ui:
+    build:
+      context: ./ai-work-ui
+    container_name: ai-work-ui
+    image: ai-work-ui
+    depends_on:
+      - ai-work-gateway
+    ports:
+      # 浏览器访问入口；/api 由容器内 nginx 反代到 ai-work-gateway:9999，见 ai-work-ui/nginx.conf
+      - 18000:80
+    networks:
+      - dev-infra-net
+
 networks:
   dev-infra-net:
     external: true

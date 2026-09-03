@@ -1,0 +1,4 @@
+# 只把 nginx.conf 与宿主机构建好的 dist/ 送进构建上下文
+*
+!dist
+!nginx.conf

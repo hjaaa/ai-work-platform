@@ -19,7 +19,7 @@
 # 建议指向仓库外目录，避免 git clean -xfd 连同数据一并删除。
 # 基础设施数据（MySQL 数据目录）已移交公共栈管理。
 services:
-  # 单体的时候注意，服务名称命名为 ai-work-gateway 对应前端nginx 配置
+  # 服务名必须保持 ai-work-gateway：ai-work-ui 镜像内的 nginx.conf 按该服务名把 /api 反代到 ai-work-gateway:9999
   ai-work-gateway:
     build:
       context: ./ai-work-boot
@@ -35,6 +35,20 @@ services:
       REDIS_HOST: dev-redis
     volumes:
       - ${AI_WORK_LOG_ROOT:-./docker-data/logs}/boot:/ai-work-boot/logs
+    networks:
+      - dev-infra-net
+
+  # 单体形态认证与 BaaS 接口都挂在 /admin 下：前端产物须以
+  # VITE_AUTH_PATH=/admin VITE_BAAS_PATH=/admin npm run build 构建（见 ai-work-ui/.env.production 注释）
+  ai-work-ui:
+    build:
+      context: ./ai-work-ui
+    container_name: ai-work-ui-boot
+    image: ai-work-ui-boot
+    depends_on:
+      - ai-work-gateway
+    ports:
+      - 18000:80
     networks:
       - dev-infra-net
 

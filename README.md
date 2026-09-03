@@ -182,10 +182,11 @@ cp -a "$OLD_INFRA/nacos" ~/docker-data/infra/         # Nacos 的 raft 数据，
 
 ```bash
 mvn clean install -T 4 -Pcloud
+(cd ai-work-ui && npm ci && npm run build)
 docker compose build && docker compose up
 ```
 
-服务启动后，默认通过宿主机映射的网关端口 `19999` 访问后端接口（容器内为 `9999`），Nacos 服务端端口为 `8848`、控制台为 `18080`。
+服务启动后，默认通过宿主机映射的网关端口 `19999` 访问后端接口（容器内为 `9999`），Nacos 服务端端口为 `8848`、控制台为 `18080`。前端由 `ai-work-ui` 容器以 nginx 静态站提供（镜像只打包宿主机构建好的 `dist/`），浏览器访问 `http://localhost:18000`，其 `/api` 由 nginx 反代到网关。
 
 ### 单体模式
 
@@ -193,10 +194,11 @@ docker compose build && docker compose up
 
 ```bash
 mvn clean install -T 4 -Pboot
+(cd ai-work-ui && npm ci && VITE_AUTH_PATH=/admin VITE_BAAS_PATH=/admin npm run build)
 docker compose -f docker-compose-boot.yml build && docker compose -f docker-compose-boot.yml up
 ```
 
-单体服务容器内监听 `9999` 端口，宿主机映射为 `19999`。
+单体服务容器内监听 `9999` 端口，宿主机映射为 `19999`。前端同样由 `ai-work-ui` 容器提供（宿主机 `18000`），产物须以 `VITE_AUTH_PATH=/admin VITE_BAAS_PATH=/admin` 构建。
 
 ## 核心依赖
 
@@ -218,7 +220,7 @@ docker compose -f docker-compose-boot.yml build && docker compose -f docker-comp
 ## 模块说明
 
 ```lua
-ai-work-ui -- 前端项目（独立仓库）
+ai-work-ui -- 前端项目（Vue 3 + Vite，随 compose 以 nginx 静态站部署 [80，宿主机映射 18000]）
 
 ai-work-platform
 ├── ai-work-register -- Nacos Server [8848/9848/18080]（已由公共基础设施栈的 dev-nacos 提供，本模块保留作回退用）
